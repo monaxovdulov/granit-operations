@@ -1,0 +1,36 @@
+# Boundaries
+
+Status: initial scaffold
+
+Canonical source: `/home/devuser/ai-projects/granit-plan-app/ai-agent-stack-wiki/wiki/19-system-boundaries.md`
+
+`granit-operations` owns operational truth:
+
+- public intake API for `site_form` and later `site_chat`;
+- leads and customer records;
+- channel identities;
+- conversations and messages;
+- manager workflow;
+- operational Postgres schema, migrations, and persistence services;
+- manager backend and manager panel;
+- Telegram adapter later;
+- Mastra/OpenAI AI workflows later;
+- observability/evals and review loop.
+
+This repo must not own:
+
+- Astro public-site rendering;
+- Payload CMS public content/admin;
+- public media and public SEO editorial workflow;
+- public-page copy as the normal editing path;
+- raw Payload content database ownership;
+- public SEO migration as a site implementation task;
+- unreviewed production deploys.
+
+Mastra, OpenAI traces, Telegram, future telephony, and observability tooling must not become the source of truth for lead status, manager assignment, handoff, reminders, or customer identity.
+
+Shared contract rule:
+
+- operations publishes a versioned public intake contract;
+- `granit-site-cms` consumes a pinned version;
+- `site-cms` must not import operations implementation code or receive operations Postgres credentials.
