@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://granit-operations.local/contracts/public-intake/site_form.v1.json",
+  "title": "Granit public intake contract for site_form.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "event_type",
+    "idempotency_key",
+    "submitted_at",
+    "source",
+    "contact"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "site_form.v1"
+    },
+    "event_type": {
+      "const": "site_form.submitted"
+    },
+    "idempotency_key": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._:-]+$"
+    },
+    "submitted_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["channel", "page_url", "form_kind"],
+      "properties": {
+        "channel": {
+          "const": "site_form"
+        },
+        "page_url": {
+          "type": "string",
+          "format": "uri",
+          "maxLength": 2048
+        },
+        "form_kind": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "referrer_url": {
+          "type": "string",
+          "format": "uri",
+          "maxLength": 2048
+        },
+        "utm": {
+          "$ref": "#/$defs/utm"
+        }
+      }
+    },
+    "contact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "phone": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 254
+        },
+        "preferred_contact": {
+          "enum": ["phone", "whatsapp", "telegram", "email"]
+        },
+        "city": {
+          "type": "string",
+          "maxLength": 120
+        }
+      },
+      "anyOf": [
+        {
+          "required": ["phone"]
+        },
+        {
+          "required": ["email"]
+        }
+      ]
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "message": {
+          "type": "string",
+          "maxLength": 4000
+        },
+        "product_interest": {
+          "type": "string",
+          "maxLength": 160
+        }
+      }
+    },
+    "consent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "privacy_policy": {
+          "type": "boolean"
+        },
+        "marketing": {
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "utm": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "medium": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "campaign": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "term": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "content": {
+          "type": "string",
+          "maxLength": 160
+        }
+      }
+    }
+  }
+}
