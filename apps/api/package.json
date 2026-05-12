@@ -1,0 +1,18 @@
+{
+  "name": "@granit/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/app.ts"
+  },
+  "dependencies": {
+    "@granit/contracts": "file:../../packages/contracts",
+    "@granit/db": "file:../../packages/db",
+    "@granit/shared": "file:../../packages/shared",
+    "drizzle-orm": "^0.45.2",
+    "fastify": "^5.1.0",
+    "postgres": "^3.4.5",
+    "zod": "^3.24.1"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "@granit/manager",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "echo \"S01 manager visibility is exposed by apps/api /manager/leads endpoints\""
+  }
+}
