@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "repo": "granit-operations",
+  "updated_at": "2026-05-12T19:54:45Z",
+  "git_head": "0f14659",
+  "mode": "status",
+  "state": "report_done",
+  "dirty_worktree": {
+    "status": "dirty",
+    "summary": "application repo was clean at HEAD 0f14659 before state restoration; only untracked .agents/state/granit-dev-workflow.json exists after restoration"
+  },
+  "context": {
+    "last_scan_at": "2026-05-12T19:54:45Z",
+    "fresh_until": "2026-05-19T19:54:45Z",
+    "source_hashes": {}
+  },
+  "rules": {
+    "status": "current",
+    "last_refresh_at": "2026-05-12T19:54:45Z"
+  },
+  "task": {
+    "type": "workflow-state-restore",
+    "summary": "restore Granit workflow state after S01 public intake provider, persistence, and manager visibility commits",
+    "source": "manual state restoration"
+  },
+  "checks": {
+    "target_test": {
+      "command": "npm run smoke:api",
+      "status": "passed",
+      "reason": "focused public intake Vitest suite passed"
+    },
+    "full_suite": {
+      "command": "npm run build && npm run smoke:api && npm test",
+      "status": "passed",
+      "reason": "typecheck, focused API smoke, and full Vitest suite passed"
+    },
+    "lint": {
+      "command": "not configured",
+      "status": "skipped",
+      "reason": "no dedicated lint script in root package.json"
+    }
+  },
+  "next_action": "Push or deploy staging for commit 0f14659 if needed; otherwise start S02 manager auth through docs/tasks/S02_MANAGER_AUTH_YANDEX_RU.md."
+}
