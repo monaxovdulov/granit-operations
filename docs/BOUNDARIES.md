@@ -34,3 +34,10 @@ Shared contract rule:
 - operations publishes a versioned public intake contract;
 - `granit-site-cms` consumes a pinned version;
 - `site-cms` must not import operations implementation code or receive operations Postgres credentials.
+
+Manager auth boundary:
+
+- `granit-operations` owns manager login, sessions, users, roles, and allowlist.
+- Yandex ID can authenticate a person, but operations decides authorization.
+- `granit-site-cms` must not own manager users, roles, sessions, or private manager routes.
+- Public intake remains separate from manager auth.

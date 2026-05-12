@@ -8,6 +8,7 @@ Potentially safe owner-led changes later:
 - labels/help text that do not affect operational behavior;
 - owner-readable evidence templates;
 - small manager-panel copy changes after review of affected workflow.
+- after S02 auth exists, requesting a specific manager email to be added/disabled through the reviewed admin path.
 
 Review-required changes:
 

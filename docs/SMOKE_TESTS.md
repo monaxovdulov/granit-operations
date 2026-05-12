@@ -1,6 +1,6 @@
 # Smoke Tests
 
-Status: future implementation work
+Status: focused provider tests added; paired site-cms smoke still required
 
 S01 smoke expectations:
 

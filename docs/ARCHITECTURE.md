@@ -28,6 +28,18 @@ Current S01 focus:
 website form -> operations intake API -> stored lead -> manager visibility
 ```
 
+Planned protected manager access after S01:
+
+```text
+manager.botops.ru
+  -> Yandex ID login
+  -> operations allowlist/role check
+  -> server-side session
+  -> manager UI/API
+```
+
+Yandex identity is authentication only. Authorization remains operations-owned through DB users, roles, and statuses.
+
 Initial layout:
 
 ```text

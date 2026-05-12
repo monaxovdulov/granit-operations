@@ -1,6 +1,6 @@
 # apps/api
 
-Placeholder for the Fastify operations API.
+Fastify operations API for S01.
 
 S01 responsibilities:
 
@@ -11,4 +11,11 @@ S01 responsibilities:
 - return typed validation, unsupported-version, retry, and fallback responses;
 - never expose internal lead ids, trace ids, manager ids, eval labels, or database details in public responses.
 
-No implementation or dependencies are installed in this scaffold.
+Implemented endpoints:
+
+- `GET /health`;
+- `POST /public/intake/site-form`;
+- `GET /manager/leads`;
+- `GET /manager/leads/:leadId`.
+
+`DATABASE_URL` is required only when starting the API against Postgres. Focused route tests use an in-memory repository.

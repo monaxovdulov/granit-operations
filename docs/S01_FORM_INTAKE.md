@@ -1,6 +1,6 @@
 # S01 Form Intake
 
-Status: initial scaffold
+Status: implementation scaffold started
 
 S01 objective:
 
@@ -20,6 +20,14 @@ Operations responsibilities:
 - expose the lead in the manager inbox/detail with source page/form metadata;
 - return typed validation, unsupported-version, retry, and degradation errors;
 - make failures visible enough for owner/manager follow-up.
+
+Implemented S01 provider surfaces:
+
+- public contract `site_form.v1`;
+- `POST /public/intake/site-form`;
+- Postgres migration for `leads`, `intake_submissions`, and `lead_timeline_events`;
+- manager read endpoints `GET /manager/leads` and `GET /manager/leads/:leadId`;
+- focused tests for no false success and idempotency.
 
 Forbidden S01 outcomes:
 

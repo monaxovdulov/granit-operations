@@ -1,9 +1,9 @@
 # Public Intake Contract
 
-Status: initial placeholder
+Status: S01 published scaffold
 Provider: `granit-operations`
 Consumer: `granit-site-cms`
-Initial version: `unpublished`
+Initial version: `site_form.v1`
 
 Operations publishes the versioned public intake contract. `granit-site-cms` pins the exact supported version and must not import operations implementation code.
 
@@ -36,6 +36,19 @@ Required request concepts:
 - contact fields;
 - request text/details when present;
 - referrer and UTM fields when available.
+
+## S01 Artifact Paths
+
+- TypeScript/Zod: `packages/contracts/src/public-intake/v1.ts`
+- JSON Schema: `packages/contracts/schemas/public-intake.v1.json`
+
+## S01 Endpoint
+
+```text
+POST /public/intake/site-form
+```
+
+The endpoint accepts only `schema_version: "site_form.v1"` and `event_type: "site_form.submitted"`.
 
 ## Idempotency
 

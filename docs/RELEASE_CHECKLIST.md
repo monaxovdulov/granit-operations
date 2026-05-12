@@ -21,8 +21,19 @@ Deferred from S01:
 - AI replies;
 - Telegram;
 - website widget AI;
+- protected public manager UI and auth;
 - urgent production notifications;
 - full SEO migration;
 - production deploy.
+
+Before opening `manager.botops.ru` in a later slice:
+
+- Yandex ID OAuth app exists;
+- operations DB allowlist/roles exist;
+- first `owner` is seeded through server/admin path;
+- non-allowlisted Yandex account cannot see manager data;
+- `owner`, `manager`, and logout behavior are smoke-tested;
+- `/public/intake/site-form` still works without login;
+- owner-readable auth evidence is captured.
 
 Production launch later requires the main wiki G01-G17 readiness contract, staging evidence, backup/restore evidence, rollback path, owner-readable evidence bundle, and explicit owner confirmation.

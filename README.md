@@ -48,12 +48,20 @@ S01 must prove no false success:
 ## Initial Layout
 
 ```text
-apps/api/          Fastify intake API placeholder
+apps/api/          Fastify intake API
 apps/manager/      manager panel placeholder
 packages/contracts public intake contract artifacts
-packages/db        Drizzle/Postgres schema placeholder
+packages/db        Drizzle/Postgres schema and migrations
 packages/shared    shared operations utilities placeholder
 docs/              implementation docs derived from the main wiki
 ```
 
-No app dependencies are installed in this scaffold.
+S01 currently publishes `site_form.v1` and exposes:
+
+- `POST /public/intake/site-form`;
+- `GET /manager/leads`;
+- `GET /manager/leads/:leadId`.
+
+Planned next manager-access slice: protected `manager.botops.ru` login through Yandex ID plus operations DB allowlist/roles. First manager onboarding is owner/Codex/admin-command driven; later owner-only UI can add `Настройки -> Команда`.
+
+This is not a production deploy.

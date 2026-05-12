@@ -4,7 +4,7 @@ Status: initial placeholder
 
 Provider: `granit-operations`
 Consumer: `granit-site-cms`
-Initial version: `unpublished`
+Initial version: `site_form.v1`
 
 Operations publishes the versioned public intake contract. `granit-site-cms` pins the exact supported version and must not import operations implementation code.
 
