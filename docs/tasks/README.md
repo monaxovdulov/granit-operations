@@ -12,7 +12,10 @@ Current task records:
 
 - `S01_PROVIDER_EVIDENCE_REVIEW_SIGNOFF_RU.md` - planned owner/release review for S01 operations provider evidence.
 - `S01_REVIEWABLE_CHUNKS_AND_CHECKS_RU.md` - planned split of dirty operations changes into reviewable chunks and checks.
-- `S02_MANAGER_AUTH_YANDEX_RU.md` - planned protected manager login through Yandex ID plus operations allowlist/roles.
+- `S02_MANAGER_AUTH_YANDEX_RU.md` - protected manager login through Yandex ID plus operations allowlist/roles.
+- `S03_MANAGER_UI_MANTINE_RU.md` - React/Vite/Mantine manager panel over the protected S02 API.
+- `S03_MIN_LIFECYCLE_RU.md` - minimal manager statuses and status-change history before widget persistence.
+- `S04_WIDGET_PERSISTENCE_RU.md` - website widget message persistence before AI replies.
 
 Required fields:
 

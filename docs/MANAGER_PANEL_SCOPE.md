@@ -1,17 +1,19 @@
 # Manager Panel Scope
 
-Status: initial scaffold
+Status: React + Vite + Mantine S01 surface implemented in `apps/manager`.
 
 S01 manager panel can be intentionally narrow, but it must prove visibility and no lost lead.
 
 Inbox minimum:
 
 - new website form leads;
-- source channel badge `site_form`;
+- source channel badge rendered as `Форма сайта` while the API keeps the
+  internal `site_form` code;
 - source page URL and form kind when known;
 - contact data summary;
 - created time;
-- current status, initially `new`;
+- current status rendered as `Новая` while the API keeps the internal `new`
+  code;
 - indicator for intake errors or fallback cases if any.
 
 Lead detail minimum:
@@ -26,7 +28,17 @@ Lead detail minimum:
 
 Later slices add lifecycle, assignment, reminders, overdue queue, takeover/resume, bad-case review, and simple analytics.
 
-Existing placeholder: `apps/manager/README.md`.
+Current implementation notes: `apps/manager/README.md`.
+
+## UI Stack Decision
+
+The permanent manager panel is built as a React + Vite app using Mantine:
+
+- Mantine docs: `https://mantine.dev/`;
+- Mantine UI blocks: `https://ui.mantine.dev/`;
+- quiet operations-dashboard layout, not a marketing page;
+- same-origin API calls to protected manager endpoints;
+- static build served by `apps/api` at `/manager` with assets under `/manager/assets/*`.
 
 ## Staging Domain Decision
 
@@ -36,7 +48,10 @@ Accepted staging domain for the future protected operations platform / manager U
 manager.botops.ru
 ```
 
-Current S01 staging does not expose manager UI publicly. Manager visibility checks still use the local-only API on the staging server. Opening `manager.botops.ru` requires a later explicitly scoped task with DNS, reverse proxy, auth/session protection, noindex behavior, and evidence.
+Current staging domain is `manager.botops.ru`; it must stay `noindex,nofollow`
+and `no-store` while staging. The `/manager` static login shell may be public,
+but manager lead data remains protected by the Yandex/session checks documented
+in `docs/MANAGER_AUTH_YANDEX_RU.md`.
 
 Decision record: `docs/adr/ADR-001-STAGING_MANAGER_DOMAIN_RU.md`.
 
@@ -54,4 +69,4 @@ Decision summary:
 - public intake remains unauthenticated;
 - manager leads must not be visible without a valid session.
 
-`manager.botops.ru` should not be opened until this auth/session behavior has staging smoke evidence.
+`manager.botops.ru` should not expose manager lead data without a valid server-side session.

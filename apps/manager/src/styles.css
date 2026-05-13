@@ -1,0 +1,188 @@
+:root {
+  color-scheme: light;
+  background: #f5f7f6;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background: #f5f7f6;
+  letter-spacing: 0;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.loginScreen,
+.loadingScreen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: #eef3f0;
+}
+
+.loginPanel {
+  width: min(100%, 430px);
+  padding: 28px;
+  border-radius: 8px;
+}
+
+.managerShell {
+  background: #f5f7f6;
+}
+
+.topbar {
+  height: 100%;
+  padding: 0 18px;
+  background: #ffffff;
+}
+
+.userBadge {
+  max-width: 280px;
+  padding: 4px 10px;
+  border: 1px solid #dfe7e2;
+  border-radius: 6px;
+  background: #f8faf9;
+}
+
+.navbarContent {
+  height: 100%;
+  background: #ffffff;
+}
+
+.paneHeader {
+  min-height: 72px;
+  padding: 14px 16px;
+}
+
+.inboxScroll {
+  height: calc(100dvh - 137px);
+}
+
+.leadTable {
+  table-layout: fixed;
+}
+
+.leadRow {
+  cursor: pointer;
+  outline: none;
+}
+
+.leadRow:hover {
+  background: #f3f8f5;
+}
+
+.leadRow[data-selected] {
+  background: #e9f6ef;
+}
+
+.leadRow:focus-visible {
+  box-shadow: inset 0 0 0 2px #2f9e63;
+}
+
+.mainArea {
+  min-height: calc(100dvh - 64px);
+  padding: 22px;
+}
+
+.detailPanel {
+  min-height: calc(100dvh - 108px);
+  padding: 24px;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.detailTitle {
+  min-width: 0;
+}
+
+.leadCode {
+  max-width: 100%;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.field {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #e2e8e4;
+  border-radius: 6px;
+  background: #fbfcfb;
+}
+
+.fieldValue {
+  overflow-wrap: anywhere;
+}
+
+.requestText {
+  max-width: 920px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.conversationBlock {
+  max-width: 920px;
+}
+
+.messageBubble {
+  padding: 12px 14px;
+  border-left: 3px solid #2f9e63;
+  border-radius: 6px;
+  background: #f6faf7;
+}
+
+.statusSelect {
+  width: min(100%, 260px);
+}
+
+.linkLine {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 6px;
+}
+
+.linkLine span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.emptyState {
+  min-height: 260px;
+  justify-content: center;
+  padding: 28px;
+  text-align: center;
+}
+
+@media (min-width: 62em) {
+  .mdSpan2 {
+    grid-column: span 2;
+  }
+}
+
+@media (max-width: 48em) {
+  .loginPanel {
+    padding: 22px;
+  }
+
+  .topbar {
+    padding: 0 12px;
+  }
+
+  .mainArea {
+    padding: 14px;
+  }
+
+  .detailPanel {
+    min-height: calc(100dvh - 92px);
+    padding: 18px;
+  }
+}

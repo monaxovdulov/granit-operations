@@ -6,7 +6,9 @@
   "exports": {
     ".": "./src/index.ts",
     "./public-intake/v1": "./src/public-intake/v1.ts",
-    "./schemas/public-intake.v1.json": "./schemas/public-intake.v1.json"
+    "./site-widget/v1": "./src/site-widget/v1.ts",
+    "./schemas/public-intake.v1.json": "./schemas/public-intake.v1.json",
+    "./schemas/site-widget.v1.json": "./schemas/site-widget.v1.json"
   },
   "dependencies": {
     "zod": "^3.24.1"

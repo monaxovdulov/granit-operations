@@ -27,3 +27,11 @@ docs/release/evidence-template.md
 ```
 
 Prefer the Russian template in this directory for new owner-facing evidence.
+
+Current evidence records:
+
+- `S01_PUBLIC_INTAKE_PROVIDER_RU.md` - public intake provider and manager visibility evidence.
+- `S02_MANAGER_AUTH_YANDEX_RU.md` - Yandex ID manager auth/session evidence.
+- `S03_MANAGER_UI_MANTINE_RU.md` - React/Vite/Mantine manager UI evidence.
+- `S03_MIN_LIFECYCLE_RU.md` - minimal statuses and status-change history evidence.
+- `S04_WIDGET_PERSISTENCE_RU.md` - widget message persistence and manager visibility evidence.

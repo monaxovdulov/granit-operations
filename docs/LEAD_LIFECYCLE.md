@@ -1,14 +1,20 @@
 # Lead Lifecycle
 
-Status: initial scaffold
+Status: S03-min implemented locally
 
-S01 starts with the minimum lifecycle needed to prove form persistence and manager visibility.
+S01 started with the minimum lifecycle needed to prove form persistence and manager visibility.
+S03-min adds the smallest owner-approved status set needed before website widget persistence.
 
-Initial status:
+Minimal statuses:
 
-```text
-new
-```
+| Internal code | UI label | Meaning |
+|---|---|---|
+| `new` | `Новая` | Новая заявка из формы сайта или будущего канала. |
+| `in_progress` | `В работе` | Менеджер или AI активно ведет заявку. |
+| `waiting_response` | `Ждет ответа` | Последний ожидаемый шаг сейчас на стороне клиента. |
+| `closed` | `Закрыта` | Заявка завершена без отдельной детализации причины в S03-min. |
+| `duplicate` | `Дубль` | Заявка признана дублем другой заявки. |
+| `spam` | `Спам` | Заявка признана спамом. |
 
 S01 records should preserve:
 
@@ -20,7 +26,17 @@ S01 records should preserve:
 - contact fields;
 - request text/details when present;
 - created time;
-- creation timeline/stage event.
+- creation timeline/stage event;
+- status-change timeline event.
+
+S03-min status changes:
+
+- are available through protected manager API only;
+- allow `owner` and `manager` roles to change status;
+- keep `viewer` role read-only;
+- update `leads.status`;
+- write `lead.status_changed` into `lead_timeline_events`;
+- store `from_status`, `to_status`, and manager actor metadata in timeline event metadata.
 
 Later lifecycle scope:
 
@@ -29,7 +45,7 @@ Later lifecycle scope:
 - reminders and overdue queue;
 - close reasons;
 - reopen;
-- duplicate/spam review;
+- duplicate/spam merge/review beyond the minimal status itself;
 - takeover/resume;
 - audit events;
 - bad-case review labels.

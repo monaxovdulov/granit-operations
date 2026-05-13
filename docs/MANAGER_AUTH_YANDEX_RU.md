@@ -1,6 +1,6 @@
 # Manager Auth Через Яндекс ID
 
-Status: planned
+Status: needs_review
 Date: 2026-05-12
 Repo: `granit-operations`
 Slice: S02 candidate
@@ -12,6 +12,21 @@ Slice: S02 candidate
 ## Решение
 
 Использовать Яндекс ID OAuth для login и собственную server-side session в `granit-operations`.
+
+Backend slice implemented locally:
+
+- OAuth authorization-code start/callback with signed `state` cookie and PKCE `S256`;
+- Yandex profile fetch uses `Authorization: OAuth <token>`;
+- operations DB allowlist/roles/status check through `manager_users`;
+- opaque `HttpOnly` server-side session cookie backed by `manager_sessions`;
+- `/manager/me`, `/manager/leads`, and `/manager/leads/:leadId` require session;
+- `/manager` is a public static login shell only; it is `noindex`, `no-store`,
+  and does not embed lead/session data;
+- `POST /public/intake/site-form` remains public.
+
+Live staging login smoke passed after runtime-only Yandex OAuth env values and
+owner-approved allowlist seed were configured. No secrets or raw runtime values
+should be committed.
 
 Минимальный flow:
 
@@ -27,14 +42,18 @@ https://manager.botops.ru/auth/yandex/callback
 5. Backend получает профиль Яндекс ID.
 6. Backend проверяет email или Yandex user id по allowlist в operations DB.
 7. Если доступ разрешен, backend создает `HttpOnly Secure` session cookie.
-8. Если доступа нет, пользователь видит отказ без доступа к `/manager/*`.
+8. Если доступа нет, пользователь видит отказ без доступа к заявкам и
+   защищенным `/manager/*` JSON endpoints.
 
 ## Required Routes
 
 - `GET /auth/yandex/start`
 - `GET /auth/yandex/callback`
 - `POST /auth/logout`
-- protected `GET /manager/*`
+- public data-free `GET /manager` static login shell
+- protected `GET /manager/me`
+- protected `GET /manager/leads`
+- protected `GET /manager/leads/:leadId`
 
 `POST /public/intake/site-form` остается публичным и не требует login.
 
@@ -138,6 +157,16 @@ manager_users
 - `SESSION_SECRET`
 - `MANAGER_AUTH_ALLOWED_ORIGINS`
 
+## Server/Admin Seed
+
+Первый `owner` или менеджер добавляется только server/admin путем:
+
+```text
+npm run seed:manager-user -- --email user@yandex.ru --role owner
+```
+
+Роли: `owner`, `manager`, `viewer`. Статус по умолчанию: `invited`. Реальные email не записывать в docs или git.
+
 ## Acceptance Checks
 
 - Непрошедший login не видит `/manager/*`.
@@ -163,3 +192,5 @@ manager_users
 - Yandex OAuth app registration: `https://yandex.com/dev/id/doc/en/register-client`
 - Yandex OAuth implementation: `https://yandex.ru/dev/id/doc/en/concepts/ya-oauth-intro`
 - Connecting to API Yandex ID: `https://yandex.ru/dev/id/doc/en/how-to`
+- Authorization code + PKCE parameters: `https://yandex.ru/dev/id/doc/en/codes/code-url`
+- Yandex ID user info endpoint: `https://yandex.ru/dev/id/doc/en/user-information`

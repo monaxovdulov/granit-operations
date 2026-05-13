@@ -23,10 +23,10 @@ Repo docs here are working implementation docs derived from that wiki. The full 
 
 ## Current Scope
 
-The current implementation focus is S01:
+The current implementation focus is the protected manager UI after accepted S02 auth evidence:
 
 ```text
-website form -> operations intake API -> stored lead -> manager visibility
+React/Vite/Mantine manager panel -> same-origin protected manager API -> server-side Yandex session
 ```
 
 S01 must prove no false success:
@@ -49,7 +49,7 @@ S01 must prove no false success:
 
 ```text
 apps/api/          Fastify intake API
-apps/manager/      manager panel placeholder
+apps/manager/      React/Vite/Mantine manager panel
 packages/contracts public intake contract artifacts
 packages/db        Drizzle/Postgres schema and migrations
 packages/shared    shared operations utilities placeholder
@@ -62,6 +62,16 @@ S01 currently publishes `site_form.v1` and exposes:
 - `GET /manager/leads`;
 - `GET /manager/leads/:leadId`.
 
-Planned next manager-access slice: protected `manager.botops.ru` login through Yandex ID plus operations DB allowlist/roles. First manager onboarding is owner/Codex/admin-command driven; later owner-only UI can add `Настройки -> Команда`.
+S02 backend auth now protects manager visibility:
+
+- `GET /auth/yandex/start`;
+- `GET /auth/yandex/callback`;
+- `POST /auth/logout`;
+- `GET /manager` React manager app shell;
+- `GET /manager/me`;
+- protected `GET /manager/leads`;
+- protected `GET /manager/leads/:leadId`.
+
+First manager onboarding is owner/Codex/admin-command driven with `npm run seed:manager-user -- --email user@yandex.ru --role owner`; later owner-only UI can add `Настройки -> Команда`.
 
 This is not a production deploy.
