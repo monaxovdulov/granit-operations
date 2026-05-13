@@ -1,6 +1,6 @@
 # Evidence: S04-WIDGET-PERSISTENCE - Widget Persistence
 
-Status: needs_review
+Status: staging_smoke_passed
 Date: 2026-05-13
 Repo: `granit-operations`
 Slice: S04
@@ -25,6 +25,9 @@ Contract/version: `site_widget.v1`
 | `npm test` | Passed | 17 tests across public intake and manager auth. |
 | `npm run build` | Passed | Root typecheck plus manager production build. |
 | Temporary Postgres smoke | Passed | Applied migrations `0001..0004`, sent widget message, manager detail showed `site_widget`, 1 dialog, 1 message. |
+| Staging DB migration | Passed | Applied `0004_s04_widget_persistence.sql` to staging Postgres on 2026-05-13T15:03Z. |
+| Staging deploy | Passed | Rebuilt/restarted `ops-api` through the site deploy kit; Caddy was restarted after route config sync. |
+| Live paired staging smoke | Passed | Public widget POST returned `202`; DB showed 1 widget session, 1 conversation, 1 message, 2 timeline events; manager API detail showed the widget dialog. |
 
 ## Доказательство Поведения
 
@@ -34,7 +37,7 @@ Contract/version: `site_widget.v1`
 - Validation/failure path: simulated persistence failure returns `503 retryable_backend_failure`.
 - Idempotency: repeated same widget payload returns `status: "replayed"` with the same safe public ids.
 - Public response privacy: tests assert no `lead_id`, `conversation_id`, or `trace_id`.
-- Paired smoke with site-cms: local site build/smoke passed in the neighboring repo; live staging browser smoke not run in this turn.
+- Paired smoke with site-cms: live staging `POST https://botops.ru/public/intake/site-widget/messages` returned `202` with safe public ids and `automation.status: "disabled"`; DB and manager API visibility were verified with fake staging smoke data.
 
 ## Что Не Записывать
 
@@ -47,11 +50,11 @@ Contract/version: `site_widget.v1`
 
 ## Blockers / Watch Items
 
-- Staging DB needs migration `0004_s04_widget_persistence.sql` before live widget traffic.
+- Owner browser check on staging is pending.
 - AI remains intentionally disabled until S05.
 
 ## Sign-Off
 
 - Owner: pending
-- Developer/release owner: pending
-- Date: pending
+- Developer/release owner: accepted for staging API/DB/manager smoke
+- Date: 2026-05-13

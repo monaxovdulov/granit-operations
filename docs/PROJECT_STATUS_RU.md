@@ -1,21 +1,21 @@
 # granit-operations - Статус Репозитория
 
-Обновлено: 2026-05-13T14:50:00Z
+Обновлено: 2026-05-13T15:10:00Z
 
 Этот репозиторий отвечает за рабочую систему бизнеса: intake API, Postgres operational state, manager backend/panel, Telegram later, AI workflows later, observability/evals.
 
 ## Текущий Статус
 
-Активный срез: `S04 widget persistence needs_review`.
+Активный срез: `S04 widget persistence staging_smoke_passed`.
 
-Стадия repo: `s02_s03_staging_accepted`. S01 staging/review evidence accepted. S02 manager auth через Яндекс ID, S02b React/Mantine manager UI и S03-min статусы/history прошли staging migration/rebuild/API smoke; owner browser check после Яндекс-входа принят в chat 2026-05-13. Следующий срез: S04 widget persistence без AI. Repo остается dirty и требует отдельных review/commit decisions перед любыми production decisions.
+Стадия repo: `s04_staging_smoke_passed`. S01 staging/review evidence accepted. S02 manager auth через Яндекс ID, S02b React/Mantine manager UI и S03-min статусы/history прошли staging migration/rebuild/API smoke; owner browser check после Яндекс-входа принят в chat 2026-05-13. S04 widget persistence deployed to staging with migration `0004`, public widget POST, Postgres persistence, and manager API visibility smoke passed. Production remains blocked by release gates.
 
 ## Карта Репозиториев
 
 | Репозиторий | За что отвечает | Текущая стадия | Что блокирует | Следующее действие |
 |---|---|---|---|---|
-| `granit-operations` | Public intake API, Postgres lead state, manager visibility, manager panel, AI/Telegram later, observability/evals | `s02_s03_staging_accepted` | Незакоммиченные auth/UI/API/db/package changes; production launch не одобрен | Draft and implement S04 widget persistence contract before any AI |
-| `granit-site-cms` | Astro public site, public forms, Payload CMS/admin later, SEO/content workflow | `review_ready` | Consumer/staging work тоже dirty; нужен paired review | Review separated chunks in the neighboring repo |
+| `granit-operations` | Public intake API, Postgres lead state, manager visibility, manager panel, AI/Telegram later, observability/evals | `s04_staging_smoke_passed` | Production launch не одобрен | Owner browser-checks S04 on staging; keep AI disabled |
+| `granit-site-cms` | Astro public site, public forms, Payload CMS/admin later, SEO/content workflow | `s04_staging_smoke_passed` | Production launch не одобрен | Owner browser-checks S04 on staging |
 | `granit-plan-app` | Source of truth: ADRs, boundaries, release gates, S01-S15 order | `accepted` для архитектуры | Нельзя менять source-of-truth решения из этого repo | Читать planning wiki перед изменениями |
 
 ## S01 Подзадачи
@@ -31,23 +31,23 @@
 | S02 manager auth через Яндекс ID | Защитить manager JSON APIs, пускать только allowlist/roles, keep `/manager` as data-free login shell | `accepted_staging_owner_checked` | `MANAGER_AUTH_YANDEX_RU.md`, `tasks/S02_MANAGER_AUTH_YANDEX_RU.md`, `release/evidence/S02_MANAGER_AUTH_YANDEX_RU.md` |
 | S02b manager UI Mantine | React/Vite/Mantine manager panel with Russian user-facing labels/errors | `accepted_staging_owner_checked` | `MANAGER_PANEL_SCOPE.md`, `tasks/S03_MANAGER_UI_MANTINE_RU.md`, `tasks/S02_S03_STAGING_SMOKE_PREP_RU.md`, `release/evidence/S03_MANAGER_UI_MANTINE_RU.md` |
 | S03-min lifecycle | Минимальные статусы и history mutation перед S04 | `accepted_staging_owner_checked` | `LEAD_LIFECYCLE.md`, `tasks/S03_MIN_LIFECYCLE_RU.md`, `release/evidence/S03_MIN_LIFECYCLE_RU.md` |
-| S04 widget persistence | Виджет сайта сохраняет сообщение/диалог в Postgres до любого AI | `implemented_needs_review` | `site_widget.v1`, `POST /public/intake/site-widget/messages`, manager visibility, AI disabled |
+| S04 widget persistence | Виджет сайта сохраняет сообщение/диалог в Postgres до любого AI | `staging_smoke_passed` | `site_widget.v1`, `POST /public/intake/site-widget/messages`, staging DB/API/manager smoke, AI disabled |
 | S04-S15 | Следующие slices после manager auth/UI evidence | `planned` | Planning wiki: `../../granit-plan-app/ai-agent-stack-wiki/wiki/25-first-implementation-slices.md` |
 
 ## Блокеры
 
 | Блокер | Статус | Что делать |
 |---|---|---|
-| Рабочее дерево dirty | `blocked` для release approval | Review S01/S02/S03 chunks before commit/release |
+| Рабочее дерево dirty | `clear` для operations/site-cms S04 repos | S02/S03/S04 changes committed and pushed in operations and site-cms |
 | S01 real DB smoke оформлен как operations evidence | `accepted` для staging/review | Evidence accepted in `docs/release/evidence/S01_PUBLIC_INTAKE_PROVIDER_RU.md` |
 | S02/S03 staging smoke | `accepted` | Auth/UI/status/history passed staging API smoke and owner browser check; keep evidence as staging-only |
-| S04 widget persistence | `needs_review` | Review local implementation and run staging migration/smoke before live traffic |
+| S04 widget persistence | `staging_smoke_passed` | Owner browser check remains; AI stays disabled until S05 |
 | Production deploy | `blocked` | Требует G01-G17, backup/restore/rollback proof и explicit owner/developer sign-off |
 | GitHub Issues | `deferred` | Можно добавить позже как внешнюю task board; repo-local docs остаются durable record |
 
 ## Следующее Безопасное Действие
 
-Review S04 local implementation, apply migration `0004_s04_widget_persistence.sql` only in an approved staging deploy, then run paired smoke: widget message -> persistence -> manager visibility. Production launch remains blocked until production gates receive explicit sign-off.
+Owner browser-checks the deployed staging widget and manager panel. Production launch remains blocked until production gates receive explicit sign-off.
 
 ## Links
 

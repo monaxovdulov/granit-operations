@@ -1,6 +1,6 @@
 # Task: S04-WIDGET-PERSISTENCE - Виджет сохраняет сообщение до AI
 
-Status: needs_review
+Status: staging_smoke_passed
 Created: 2026-05-13
 Repo: `granit-operations`
 Slice: S04
@@ -49,6 +49,8 @@ Owner/agent: Codex
 | `npm test` | Passed | 17 tests across public intake and manager auth. |
 | `npm run build` | Passed | Root typecheck plus manager production build. |
 | Temporary Postgres smoke | Passed | `postgres:16-alpine`, migrations `0001..0004`, widget POST, manager detail saw 1 dialog/1 message. |
+| Staging migration | Passed | Applied `0004_s04_widget_persistence.sql` before live widget traffic. |
+| Staging deploy/smoke | Passed | Public widget endpoint returned `202`; Postgres and manager API showed persisted widget lead/dialog/message. |
 
 ## Evidence Links
 
@@ -57,9 +59,9 @@ Owner/agent: Codex
 
 ## Blockers
 
-- Real Postgres/staging migration and browser smoke still require deploy/review decision.
+- Owner browser check on staging is pending.
 - Production remains blocked by release gates and explicit sign-off.
 
 ## Next Action
 
-Run paired staging smoke after site-cms widget consumer review and approved DB migration.
+Owner checks the deployed widget on staging; keep AI disabled until S05.
