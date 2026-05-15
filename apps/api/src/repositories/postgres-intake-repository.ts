@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 
 import {
   conversationMessages,
@@ -12,6 +12,7 @@ import {
 import type { SiteFormIntakeRequest, SiteWidgetMessageRequest } from "@granit/contracts";
 
 import {
+  AgentReplyBlockedError,
   IdempotencyConflictError,
   isLeadStatus,
   type ChangeManagerLeadStatusInput,
@@ -23,7 +24,11 @@ import {
   type SaveAcceptedSiteFormSubmissionInput,
   type SaveAcceptedSiteFormSubmissionResult,
   type SaveAcceptedSiteWidgetMessageInput,
-  type SaveAcceptedSiteWidgetMessageResult
+  type SaveAcceptedSiteWidgetMessageResult,
+  type SaveSiteWidgetAiMessageInput,
+  type SaveSiteWidgetAiMessageResult,
+  type SiteWidgetAiMessageLookupResult,
+  type TakeoverSiteWidgetConversationInput
 } from "./intake-repository.js";
 
 export class PostgresIntakeRepository implements IntakeRepository {
@@ -143,7 +148,8 @@ export class PostgresIntakeRepository implements IntakeRepository {
         let [conversation] = await tx
           .select({
             id: conversations.id,
-            leadId: conversations.leadId
+            leadId: conversations.leadId,
+            agentAllowedToReply: conversations.agentAllowedToReply
           })
           .from(conversations)
           .where(eq(conversations.widgetSessionId, session.id))
@@ -152,7 +158,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
         if (!conversation) {
           const [lead] = await tx
             .insert(leads)
-            .values(toWidgetLeadInsert(input.request, input.publicSessionId))
+            .values(toWidgetLeadInsert(input))
             .returning({ id: leads.id });
 
           if (!lead) {
@@ -166,19 +172,20 @@ export class PostgresIntakeRepository implements IntakeRepository {
               widgetSessionId: session.id,
               channel: "site_widget",
               status: "open",
-              agentAllowedToReply: false,
+              agentAllowedToReply: input.agentAllowedToReply,
               sourcePageUrl: input.request.source.page_url,
               widgetInstanceId: input.request.source.widget_instance_id,
               metadata: {
                 contract_version: input.request.schema_version,
-                automation_status: "disabled"
+                automation_status: input.agentAllowedToReply ? "enabled" : "disabled"
               },
               createdAt: now,
               updatedAt: now
             })
             .returning({
               id: conversations.id,
-              leadId: conversations.leadId
+              leadId: conversations.leadId,
+              agentAllowedToReply: conversations.agentAllowedToReply
             });
 
           if (!createdConversation) {
@@ -195,11 +202,14 @@ export class PostgresIntakeRepository implements IntakeRepository {
               public_session_id: input.publicSessionId,
               source_page_url: input.request.source.page_url,
               widget_instance_id: input.request.source.widget_instance_id,
-              automation_status: "disabled"
+              automation_status: input.agentAllowedToReply ? "enabled" : "disabled"
             },
             createdAt: now
           });
         } else {
+          const effectiveAgentAllowedToReply =
+            input.agentAllowedToReply && conversation.agentAllowedToReply;
+
           await tx
             .update(leads)
             .set({
@@ -212,9 +222,19 @@ export class PostgresIntakeRepository implements IntakeRepository {
             .set({
               sourcePageUrl: input.request.source.page_url,
               widgetInstanceId: input.request.source.widget_instance_id,
+              agentAllowedToReply: effectiveAgentAllowedToReply,
+              metadata: {
+                contract_version: input.request.schema_version,
+                automation_status: effectiveAgentAllowedToReply ? "enabled" : "disabled"
+              },
               updatedAt: now
             })
             .where(eq(conversations.id, conversation.id));
+
+          conversation = {
+            ...conversation,
+            agentAllowedToReply: effectiveAgentAllowedToReply
+          };
         }
 
         const [message] = await tx
@@ -234,7 +254,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
               event_type: input.request.event_type,
               public_session_id: input.publicSessionId,
               widget_instance_id: input.request.source.widget_instance_id,
-              automation_status: "disabled"
+              automation_status: conversation.agentAllowedToReply ? "enabled" : "disabled"
             },
             submittedAt: new Date(input.request.submitted_at),
             createdAt: now
@@ -256,15 +276,17 @@ export class PostgresIntakeRepository implements IntakeRepository {
             public_session_id: input.publicSessionId,
             source_page_url: input.request.source.page_url,
             widget_instance_id: input.request.source.widget_instance_id,
-            automation_status: "disabled"
+            automation_status: conversation.agentAllowedToReply ? "enabled" : "disabled"
           },
           createdAt: now
         });
 
         return {
           leadId: conversation.leadId,
+          conversationId: conversation.id,
           publicSessionId: session.publicSessionId,
           publicMessageId: message.publicMessageId,
+          agentAllowedToReply: conversation.agentAllowedToReply,
           replayed: false
         };
       });
@@ -276,6 +298,115 @@ export class PostgresIntakeRepository implements IntakeRepository {
 
         if (replay) {
           return this.replayExistingWidgetMessage(replay, input.requestFingerprint);
+        }
+      }
+
+      throw error;
+    }
+  }
+
+  async saveSiteWidgetAiMessage(
+    input: SaveSiteWidgetAiMessageInput
+  ): Promise<SaveSiteWidgetAiMessageResult> {
+    try {
+      return await this.db.transaction(async (tx) => {
+        const now = new Date();
+        const [sendGate] = await tx
+          .update(conversations)
+          .set({
+            agentAllowedToReply: input.agentAllowedToReplyAfterSend ?? true,
+            updatedAt: now
+          })
+          .where(
+            and(
+              eq(conversations.id, input.conversationId),
+              eq(conversations.leadId, input.leadId),
+              eq(conversations.agentAllowedToReply, true)
+            )
+          )
+          .returning({
+            id: conversations.id,
+            leadId: conversations.leadId
+          });
+
+        if (!sendGate) {
+          const [existingConversation] = await tx
+            .select({
+              id: conversations.id,
+              leadId: conversations.leadId
+            })
+            .from(conversations)
+            .where(eq(conversations.id, input.conversationId))
+            .limit(1);
+
+          if (!existingConversation || existingConversation.leadId !== input.leadId) {
+            throw new Error("widget conversation not found for AI reply");
+          }
+
+          throw new AgentReplyBlockedError();
+        }
+
+        const [message] = await tx
+          .insert(conversationMessages)
+          .values({
+            publicMessageId: input.publicMessageId,
+            conversationId: input.conversationId,
+            leadId: input.leadId,
+            direction: "outbound",
+            senderRole: "ai_assistant",
+            body: input.body,
+            idempotencyKey: input.idempotencyKey,
+            requestFingerprint: input.requestFingerprint,
+            sourcePageUrl: input.sourcePageUrl,
+            metadata: input.metadata,
+            submittedAt: now,
+            createdAt: now
+          })
+          .returning({
+            publicMessageId: conversationMessages.publicMessageId,
+            body: conversationMessages.body,
+            createdAt: conversationMessages.createdAt
+          });
+
+        if (!message) {
+          throw new Error("widget AI message insert returned no row");
+        }
+
+        await tx
+          .update(leads)
+          .set({
+            updatedAt: now
+          })
+          .where(eq(leads.id, input.leadId));
+
+        await tx.insert(leadTimelineEvents).values({
+          leadId: input.leadId,
+          eventType: "conversation.ai_message_sent",
+          summary: "Website widget AI reply persisted",
+          metadata: {
+            ...input.metadata,
+            public_message_id: message.publicMessageId,
+            inbound_public_message_id: input.inboundPublicMessageId
+          },
+          createdAt: now
+        });
+
+        return {
+          publicMessageId: message.publicMessageId,
+          body: message.body,
+          createdAt: message.createdAt.toISOString()
+        };
+      });
+    } catch (error) {
+      if (error instanceof AgentReplyBlockedError) {
+        throw error;
+      }
+
+      if (isUniqueViolation(error)) {
+        const replay = await this.findExistingAiMessageByIdempotencyKey(input.idempotencyKey);
+
+        if (replay) {
+          return this.replayExistingAiMessage(replay, input.requestFingerprint);
         }
       }
 
@@ -383,6 +514,72 @@ export class PostgresIntakeRepository implements IntakeRepository {
     return this.getManagerLead(input.leadId);
   }
 
+  async takeoverSiteWidgetConversation(
+    input: TakeoverSiteWidgetConversationInput
+  ): Promise<ManagerLeadDetail | null> {
+    let found = false;
+
+    await this.db.transaction(async (tx) => {
+      const [conversation] = await tx
+        .select({
+          id: conversations.id,
+          leadId: conversations.leadId,
+          agentAllowedToReply: conversations.agentAllowedToReply
+        })
+        .from(conversations)
+        .innerJoin(widgetSessions, eq(conversations.widgetSessionId, widgetSessions.id))
+        .where(
+          and(
+            eq(conversations.leadId, input.leadId),
+            eq(widgetSessions.publicSessionId, input.publicSessionId)
+          )
+        )
+        .limit(1);
+
+      if (!conversation) {
+        return;
+      }
+
+      found = true;
+      const changedAt = new Date();
+
+      await tx
+        .update(conversations)
+        .set({
+          agentAllowedToReply: false,
+          updatedAt: changedAt
+        })
+        .where(eq(conversations.id, conversation.id));
+
+      await tx
+        .update(leads)
+        .set({
+          updatedAt: changedAt
+        })
+        .where(eq(leads.id, input.leadId));
+
+      await tx.insert(leadTimelineEvents).values({
+        leadId: input.leadId,
+        eventType: "conversation.manager_takeover",
+        summary: "Manager takeover disabled AI replies",
+        metadata: {
+          public_session_id: input.publicSessionId,
+          previous_agent_allowed_to_reply: conversation.agentAllowedToReply,
+          changed_by_manager_id: input.changedByManagerId,
+          changed_by_manager_email: input.changedByManagerEmail,
+          changed_by_manager_role: input.changedByManagerRole
+        },
+        createdAt: changedAt
+      });
+    });
+
+    if (!found) {
+      return null;
+    }
+
+    return this.getManagerLead(input.leadId);
+  }
+
   private async findExistingByIdempotencyKey(idempotencyKey: string) {
     const [existing] = await this.db
       .select({
@@ -401,6 +598,8 @@ export class PostgresIntakeRepository implements IntakeRepository {
     const [existing] = await this.db
       .select({
         leadId: conversationMessages.leadId,
+        conversationId: conversationMessages.conversationId,
+        agentAllowedToReply: conversations.agentAllowedToReply,
         publicSessionId: widgetSessions.publicSessionId,
         publicMessageId: conversationMessages.publicMessageId,
         requestFingerprint: conversationMessages.requestFingerprint
@@ -408,10 +607,39 @@ export class PostgresIntakeRepository implements IntakeRepository {
       .from(conversationMessages)
       .innerJoin(conversations, eq(conversationMessages.conversationId, conversations.id))
       .innerJoin(widgetSessions, eq(conversations.widgetSessionId, widgetSessions.id))
-      .where(eq(conversationMessages.idempotencyKey, idempotencyKey))
+      .where(
+        and(
+          eq(conversationMessages.idempotencyKey, idempotencyKey),
+          eq(conversationMessages.direction, "inbound")
+        )
+      )
       .limit(1);
 
     return existing ?? null;
+  }
+
+  private async findExistingAiMessageByIdempotencyKey(
+    idempotencyKey: string
+  ): Promise<SiteWidgetAiMessageLookupResult | null> {
+    const [existing] = await this.db
+      .select({
+        publicMessageId: conversationMessages.publicMessageId,
+        body: conversationMessages.body,
+        createdAt: conversationMessages.createdAt,
+        requestFingerprint: conversationMessages.requestFingerprint
+      })
+      .from(conversationMessages)
+      .where(eq(conversationMessages.idempotencyKey, idempotencyKey))
+      .limit(1);
+
+    return existing
+      ? {
+          publicMessageId: existing.publicMessageId,
+          body: existing.body,
+          createdAt: existing.createdAt.toISOString(),
+          requestFingerprint: existing.requestFingerprint
+        }
+      : null;
   }
 
   private async findPublicWidgetReferenceForLead(leadId: string): Promise<string> {
@@ -420,7 +648,9 @@ export class PostgresIntakeRepository implements IntakeRepository {
         publicMessageId: conversationMessages.publicMessageId
       })
       .from(conversationMessages)
-      .where(eq(conversationMessages.leadId, leadId))
+      .where(
+        and(eq(conversationMessages.leadId, leadId), eq(conversationMessages.direction, "inbound"))
+      )
       .orderBy(conversationMessages.createdAt)
       .limit(1);
 
@@ -465,8 +695,8 @@ export class PostgresIntakeRepository implements IntakeRepository {
       if (row.message) {
         conversation.messages.push({
           publicMessageId: row.message.publicMessageId,
-          direction: "inbound",
-          senderRole: "visitor",
+          direction: toConversationMessageDirection(row.message.direction),
+          senderRole: toConversationSenderRole(row.message.senderRole),
           body: row.message.body,
           createdAt: row.message.createdAt.toISOString()
         });
@@ -495,24 +725,54 @@ export class PostgresIntakeRepository implements IntakeRepository {
     };
   }
 
-  private replayExistingWidgetMessage(
+  private async replayExistingWidgetMessage(
     existing: {
       leadId: string;
+      conversationId: string;
+      agentAllowedToReply: boolean;
       publicSessionId: string;
       publicMessageId: string;
       requestFingerprint: string;
     },
     requestFingerprint: string
-  ): SaveAcceptedSiteWidgetMessageResult {
+  ): Promise<SaveAcceptedSiteWidgetMessageResult> {
+    if (existing.requestFingerprint !== requestFingerprint) {
+      throw new IdempotencyConflictError();
+    }
+
+    const aiReply = await this.findExistingAiMessageByIdempotencyKey(
+      `ai:${existing.publicMessageId}`
+    );
+
+    return {
+      leadId: existing.leadId,
+      conversationId: existing.conversationId,
+      publicSessionId: existing.publicSessionId,
+      publicMessageId: existing.publicMessageId,
+      agentAllowedToReply: existing.agentAllowedToReply,
+      replayed: true,
+      aiReply: aiReply
+        ? {
+            publicMessageId: aiReply.publicMessageId,
+            body: aiReply.body,
+            createdAt: aiReply.createdAt
+          }
+        : undefined
+    };
+  }
+
+  private replayExistingAiMessage(
+    existing: SiteWidgetAiMessageLookupResult,
+    requestFingerprint: string
+  ): SaveSiteWidgetAiMessageResult {
     if (existing.requestFingerprint !== requestFingerprint) {
       throw new IdempotencyConflictError();
     }
 
     return {
-      leadId: existing.leadId,
-      publicSessionId: existing.publicSessionId,
       publicMessageId: existing.publicMessageId,
-      replayed: true
+      body: existing.body,
+      createdAt: existing.createdAt
     };
   }
 }
@@ -558,9 +818,10 @@ function toWidgetSessionInsert(
 }
 
 function toWidgetLeadInsert(
-  request: SiteWidgetMessageRequest,
-  publicSessionId: string
+  input: SaveAcceptedSiteWidgetMessageInput
 ): typeof leads.$inferInsert {
+  const { request } = input;
+
   return {
     status: "new",
     sourceChannel: request.source.channel,
@@ -579,9 +840,9 @@ function toWidgetLeadInsert(
     metadata: {
       contract_version: request.schema_version,
       event_type: request.event_type,
-      public_session_id: publicSessionId,
+      public_session_id: input.publicSessionId,
       widget_instance_id: request.source.widget_instance_id,
-      automation_status: "disabled"
+      automation_status: input.agentAllowedToReply ? "enabled" : "disabled"
     }
   };
 }
@@ -645,6 +906,26 @@ function normalizePreferredContact(value: string | null) {
   }
 
   return undefined;
+}
+
+function toConversationMessageDirection(
+  value: string
+): ManagerConversation["messages"][number]["direction"] {
+  if (value === "inbound" || value === "outbound") {
+    return value;
+  }
+
+  throw new Error(`invalid conversation message direction ${value}`);
+}
+
+function toConversationSenderRole(
+  value: string
+): ManagerConversation["messages"][number]["senderRole"] {
+  if (value === "visitor" || value === "ai_assistant") {
+    return value;
+  }
+
+  throw new Error(`invalid conversation sender role ${value}`);
 }
 
 function isUniqueViolation(error: unknown): boolean {

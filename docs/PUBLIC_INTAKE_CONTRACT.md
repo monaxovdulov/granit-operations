@@ -58,3 +58,11 @@ event_type: site_widget.message_submitted
 The endpoint must create or update a lead, widget session, conversation, and inbound message before returning public success. It returns only safe public references: `public_session_id` and `public_message_id`. AI is not enabled in S04; successful responses include `automation.status: "disabled"`.
 
 Existing detail: `docs/contracts/widget-intake-contract.md`.
+
+S05 keeps `site_widget.v1` and adds response-only automation states:
+
+- `automation.status: "disabled"` remains the safe default while AI is off;
+- `automation.status: "fallback"` means the visitor message was persisted but AI did not return a confirmed persisted reply;
+- `automation.status: "replied"` includes only safe public AI reply text and the AI reply public message id after the outbound message is persisted.
+
+The public response still must not include internal `lead_id`, `conversation_id`, or `trace_id`.

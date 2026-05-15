@@ -51,8 +51,8 @@ export type ManagerTimelineEvent = {
 
 export type ManagerConversationMessage = {
   publicMessageId: string;
-  direction: "inbound";
-  senderRole: "visitor";
+  direction: "inbound" | "outbound";
+  senderRole: "visitor" | "ai_assistant";
   body: string;
   createdAt: string;
 };

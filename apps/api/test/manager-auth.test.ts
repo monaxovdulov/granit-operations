@@ -23,7 +23,10 @@ import {
   type SaveAcceptedSiteFormSubmissionInput,
   type SaveAcceptedSiteFormSubmissionResult,
   type SaveAcceptedSiteWidgetMessageInput,
-  type SaveAcceptedSiteWidgetMessageResult
+  type SaveAcceptedSiteWidgetMessageResult,
+  type SaveSiteWidgetAiMessageInput,
+  type SaveSiteWidgetAiMessageResult,
+  type TakeoverSiteWidgetConversationInput
 } from "../src/repositories/intake-repository.js";
 import {
   normalizeManagerEmail,
@@ -586,6 +589,7 @@ class MemoryIntakeRepository implements IntakeRepository {
     input: SaveAcceptedSiteWidgetMessageInput
   ): Promise<SaveAcceptedSiteWidgetMessageResult> {
     const leadId = randomUUID();
+    const conversationId = randomUUID();
     const now = new Date().toISOString();
     this.leads.set(leadId, {
       leadId,
@@ -622,7 +626,7 @@ class MemoryIntakeRepository implements IntakeRepository {
           channel: "site_widget",
           publicSessionId: input.publicSessionId,
           status: "open",
-          agentAllowedToReply: false,
+          agentAllowedToReply: input.agentAllowedToReply,
           sourcePageUrl: input.request.source.page_url,
           widgetInstanceId: input.request.source.widget_instance_id,
           createdAt: now,
@@ -643,10 +647,18 @@ class MemoryIntakeRepository implements IntakeRepository {
 
     return {
       leadId,
+      conversationId,
       publicSessionId: input.publicSessionId,
       publicMessageId: input.publicMessageId,
+      agentAllowedToReply: input.agentAllowedToReply,
       replayed: false
     };
+  }
+
+  async saveSiteWidgetAiMessage(
+    _input: SaveSiteWidgetAiMessageInput
+  ): Promise<SaveSiteWidgetAiMessageResult> {
+    throw new Error("not implemented in manager auth tests");
   }
 
   async listManagerLeads(): Promise<ManagerLeadListItem[]> {
@@ -694,6 +706,12 @@ class MemoryIntakeRepository implements IntakeRepository {
     this.leads.set(input.leadId, updatedLead);
 
     return updatedLead;
+  }
+
+  async takeoverSiteWidgetConversation(
+    _input: TakeoverSiteWidgetConversationInput
+  ): Promise<ManagerLeadDetail | null> {
+    return null;
   }
 }
 

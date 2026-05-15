@@ -23,6 +23,7 @@ import type {
   YandexManagerProfile
 } from "../src/repositories/manager-auth-repository.js";
 import {
+  AgentReplyBlockedError,
   IdempotencyConflictError,
   type ChangeManagerLeadStatusInput,
   type IntakeRepository,
@@ -31,8 +32,16 @@ import {
   type SaveAcceptedSiteFormSubmissionInput,
   type SaveAcceptedSiteFormSubmissionResult,
   type SaveAcceptedSiteWidgetMessageInput,
-  type SaveAcceptedSiteWidgetMessageResult
+  type SaveAcceptedSiteWidgetMessageResult,
+  type SaveSiteWidgetAiMessageInput,
+  type SaveSiteWidgetAiMessageResult,
+  type TakeoverSiteWidgetConversationInput
 } from "../src/repositories/intake-repository.js";
+import type {
+  WidgetAiProvider,
+  WidgetAiProviderInput,
+  WidgetAiProviderResult
+} from "../src/services/widget-ai-service.js";
 
 const openApps: Array<ReturnType<typeof buildApi>> = [];
 
@@ -489,6 +498,436 @@ describe("public site_widget intake", () => {
     });
     expect(repository.leadCount).toBe(1);
   });
+
+  it("persists inbound before generating and returning a persisted AI reply", async () => {
+    const repository = new MemoryIntakeRepository();
+    let providerSawPersistedInbound = false;
+    const provider = new FakeWidgetAiProvider({
+      text: "Могу помочь с общими вариантами памятника. Какой формат вы рассматриваете?",
+      onGenerate: () => {
+        providerSawPersistedInbound = repository.leadCount === 1;
+      }
+    });
+    const app = track(
+      buildApi({
+        repository,
+        widgetAi: {
+          enabled: true,
+          provider,
+          modelName: "gpt-5.5"
+        }
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/public/intake/site-widget/messages",
+      payload: validWidgetRequest()
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(providerSawPersistedInbound).toBe(true);
+    expect(response.json()).toMatchObject({
+      ok: true,
+      schema_version: SITE_WIDGET_CONTRACT_VERSION,
+      status: "accepted",
+      automation: {
+        status: "replied",
+        next_step: "ai_reply_shown",
+        reply: {
+          sender_role: "ai_assistant",
+          text: "Могу помочь с общими вариантами памятника. Какой формат вы рассматриваете?"
+        }
+      }
+    });
+    expect(response.json().automation.reply.public_message_id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+    );
+    expectNoInternalPublicFields(response.json());
+
+    const lead = repository.onlyLead();
+    expect(lead.conversations[0]?.agentAllowedToReply).toBe(true);
+    expect(lead.conversations[0]?.messages).toMatchObject([
+      {
+        publicMessageId: response.json().public_message_id,
+        direction: "inbound",
+        senderRole: "visitor",
+        body: "Can you help me choose a monument?"
+      },
+      {
+        publicMessageId: response.json().automation.reply.public_message_id,
+        direction: "outbound",
+        senderRole: "ai_assistant",
+        body: "Могу помочь с общими вариантами памятника. Какой формат вы рассматриваете?"
+      }
+    ]);
+  });
+
+  it("does not expose an AI reply when AI persistence fails", async () => {
+    const repository = new MemoryIntakeRepository({ failAiPersistence: true });
+    const provider = new FakeWidgetAiProvider({
+      text: "Расскажу об общих вариантах и передам детали менеджеру."
+    });
+    const app = track(
+      buildApi({
+        repository,
+        widgetAi: {
+          enabled: true,
+          provider,
+          modelName: "gpt-5.5"
+        }
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/public/intake/site-widget/messages",
+      payload: validWidgetRequest()
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toMatchObject({
+      ok: true,
+      automation: {
+        status: "fallback",
+        next_step: "manager_review",
+        reason: "ai_persistence_unconfirmed"
+      }
+    });
+    expect(response.json().automation.reply).toBeUndefined();
+    expect(repository.onlyLead().conversations[0]?.messages).toHaveLength(1);
+  });
+
+  it("falls back without false AI success when the model provider fails", async () => {
+    const repository = new MemoryIntakeRepository();
+    const provider = new FakeWidgetAiProvider({ fail: true });
+    const app = track(
+      buildApi({
+        repository,
+        widgetAi: {
+          enabled: true,
+          provider,
+          modelName: "gpt-5.5"
+        }
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/public/intake/site-widget/messages",
+      payload: validWidgetRequest()
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toMatchObject({
+      ok: true,
+      automation: {
+        status: "fallback",
+        next_step: "manager_review",
+        reason: "model_error"
+      }
+    });
+    expect(response.json().automation.reply).toBeUndefined();
+    expect(repository.onlyLead().conversations[0]?.messages).toHaveLength(1);
+  });
+
+  it("falls back without saving an AI reply when the model output is unsafe", async () => {
+    const repository = new MemoryIntakeRepository();
+    const provider = new FakeWidgetAiProvider({
+      text: "Цена 10000 рублей, сделаем за 2 дня, гарантия есть."
+    });
+    const app = track(
+      buildApi({
+        repository,
+        widgetAi: {
+          enabled: true,
+          provider,
+          modelName: "gpt-5.5"
+        }
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/public/intake/site-widget/messages",
+      payload: validWidgetRequest({
+        idempotencyKey: "widget-unsafe-model-0001",
+        messageText: "Расскажите про варианты гранита"
+      })
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toMatchObject({
+      ok: true,
+      automation: {
+        status: "fallback",
+        next_step: "manager_review",
+        reason: "unsafe_model_response"
+      }
+    });
+    expect(response.json().automation.reply).toBeUndefined();
+    expect(repository.onlyLead().conversations[0]?.messages).toHaveLength(1);
+  });
+
+  it("keeps safe wording for price, deadline, warranty, contract, discount, availability, payment and legal prompts", async () => {
+    const unsafePrompts = [
+      "Сколько точно будет стоить памятник?",
+      "Сделаете завтра и в какой точный срок?",
+      "Какая гарантия?",
+      "Какие условия договора?",
+      "Дадите скидку?",
+      "Есть ли модель в наличии?",
+      "Можно оплатить в рассрочку?",
+      "Как оформить наследство и документы на захоронение?"
+    ];
+
+    for (const [index, text] of unsafePrompts.entries()) {
+      const repository = new MemoryIntakeRepository();
+      const provider = new FakeWidgetAiProvider({
+        text: "Цена 10000 рублей, сделаем за 2 дня, гарантия есть."
+      });
+      const app = track(
+        buildApi({
+          repository,
+          widgetAi: {
+            enabled: true,
+            provider,
+            modelName: "gpt-5.5"
+          }
+        })
+      );
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/public/intake/site-widget/messages",
+        payload: validWidgetRequest({
+          idempotencyKey: `widget-safe-ai-${String(index).padStart(4, "0")}`,
+          messageText: text
+        })
+      });
+
+      expect(response.statusCode).toBe(202);
+      expect(response.json().automation.status).toBe("replied");
+      const replyText = response.json().automation.reply.text as string;
+      expect(replyText).not.toMatch(/\d[\d\s]*(?:₽|руб|р\.)/i);
+      expect(replyText).not.toMatch(/(?:за|через)\s+\d+\s*(?:дн|час|нед|месяц)/i);
+      expect(replyText).not.toMatch(/гарантируем|скидк[ауи]\s*\d|в наличии|рассрочк[ау]/i);
+      expect(replyText).toMatch(/менеджер|подтвердит|сохранено|передам/i);
+    }
+  });
+
+  it("lets a manager takeover disable later AI replies for the widget session", async () => {
+    const repository = new MemoryIntakeRepository();
+    const managerAuthRepository = new MemoryManagerAuthRepository();
+    let providerCalls = 0;
+    const provider = new FakeWidgetAiProvider({
+      text: "Могу помочь с общими вариантами памятника. Какие детали важны?",
+      onGenerate: () => {
+        providerCalls += 1;
+      }
+    });
+    const app = track(
+      buildApi({
+        repository,
+        widgetAi: {
+          enabled: true,
+          provider,
+          modelName: "gpt-5.5"
+        },
+        managerAuth: {
+          repository: managerAuthRepository,
+          config: testManagerAuthConfig()
+        }
+      })
+    );
+
+    const first = await app.inject({
+      method: "POST",
+      url: "/public/intake/site-widget/messages",
+      payload: validWidgetRequest({
+        idempotencyKey: "widget-takeover-0001",
+        messageText: "Расскажите про варианты памятника"
+      })
+    });
+    const publicSessionId = first.json().public_session_id as string;
+    const leadId = repository.onlyLead().leadId;
+
+    const takeover = await app.inject({
+      method: "PATCH",
+      url: `/manager/leads/${leadId}/conversations/${publicSessionId}/takeover`,
+      headers: { cookie: managerAuthRepository.createSessionCookie() }
+    });
+
+    const second = await app.inject({
+      method: "POST",
+      url: "/public/intake/site-widget/messages",
+      payload: validWidgetRequest({
+        idempotencyKey: "widget-takeover-0002",
+        publicSessionId,
+        messageText: "Еще вопрос после takeover"
+      })
+    });
+
+    expect(first.statusCode).toBe(202);
+    expect(first.json().automation.status).toBe("replied");
+    expect(takeover.statusCode).toBe(200);
+    expect(takeover.json().lead.conversations[0]).toMatchObject({
+      publicSessionId,
+      agentAllowedToReply: false
+    });
+    expect(takeover.json().lead.timeline).toContainEqual(
+      expect.objectContaining({
+        eventType: "conversation.manager_takeover",
+        metadata: expect.objectContaining({
+          public_session_id: publicSessionId,
+          previous_agent_allowed_to_reply: true,
+          changed_by_manager_email: "owner@yandex.ru"
+        })
+      })
+    );
+    expect(second.statusCode).toBe(202);
+    expect(second.json()).toMatchObject({
+      automation: {
+        status: "fallback",
+        next_step: "manager_review",
+        reason: "agent_reply_blocked"
+      }
+    });
+    expect(second.json().automation.reply).toBeUndefined();
+    expect(providerCalls).toBe(1);
+    expect(repository.onlyLead().conversations[0]?.agentAllowedToReply).toBe(false);
+    expect(repository.onlyLead().conversations[0]?.messages).toHaveLength(3);
+    expect(repository.onlyLead().conversations[0]?.messages.at(-1)).toMatchObject({
+      direction: "inbound",
+      senderRole: "visitor",
+      body: "Еще вопрос после takeover"
+    });
+  });
+
+  it("blocks a stale AI draft when manager takeover happens before AI persistence", async () => {
+    const repository = new MemoryIntakeRepository();
+    const provider = new FakeWidgetAiProvider({
+      text: "Могу помочь с общими вариантами памятника. Какие детали важны?",
+      onGenerate: async () => {
+        const lead = repository.onlyLead();
+        const conversation = lead.conversations[0];
+
+        if (!conversation) {
+          throw new Error("expected conversation before model reply");
+        }
+
+        await repository.takeoverSiteWidgetConversation({
+          leadId: lead.leadId,
+          publicSessionId: conversation.publicSessionId,
+          changedByManagerId: "manager-stale-test",
+          changedByManagerEmail: "owner@yandex.ru",
+          changedByManagerRole: "owner"
+        });
+      }
+    });
+    const app = track(
+      buildApi({
+        repository,
+        widgetAi: {
+          enabled: true,
+          provider,
+          modelName: "gpt-5.5"
+        }
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/public/intake/site-widget/messages",
+      payload: validWidgetRequest({
+        idempotencyKey: "widget-stale-draft-0001",
+        messageText: "Расскажите про варианты памятника"
+      })
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toMatchObject({
+      automation: {
+        status: "fallback",
+        next_step: "manager_review",
+        reason: "agent_reply_blocked"
+      }
+    });
+    expect(response.json().automation.reply).toBeUndefined();
+    expect(repository.onlyLead().conversations[0]?.agentAllowedToReply).toBe(false);
+    expect(repository.onlyLead().conversations[0]?.messages).toHaveLength(1);
+    expect(repository.onlyLead().timeline).toContainEqual(
+      expect.objectContaining({
+        eventType: "conversation.manager_takeover"
+      })
+    );
+    expect(repository.onlyLead().timeline).not.toContainEqual(
+      expect.objectContaining({
+        eventType: "conversation.ai_message_sent"
+      })
+    );
+  });
+
+  it("stops later AI replies after the visitor asks for a manager", async () => {
+    const repository = new MemoryIntakeRepository();
+    const provider = new FakeWidgetAiProvider({
+      text: "This fake provider should not handle manager handoff."
+    });
+    const app = track(
+      buildApi({
+        repository,
+        widgetAi: {
+          enabled: true,
+          provider,
+          modelName: "gpt-5.5"
+        }
+      })
+    );
+
+    const first = await app.inject({
+      method: "POST",
+      url: "/public/intake/site-widget/messages",
+      payload: validWidgetRequest({
+        idempotencyKey: "widget-manager-0001",
+        messageText: "я хочу менеджера"
+      })
+    });
+    const publicSessionId = first.json().public_session_id as string;
+
+    const second = await app.inject({
+      method: "POST",
+      url: "/public/intake/site-widget/messages",
+      payload: validWidgetRequest({
+        idempotencyKey: "widget-manager-0002",
+        publicSessionId,
+        messageText: "+7 (900) 000-00-01"
+      })
+    });
+
+    expect(first.statusCode).toBe(202);
+    expect(first.json()).toMatchObject({
+      automation: {
+        status: "replied",
+        reply: {
+          sender_role: "ai_assistant"
+        }
+      }
+    });
+    expect(first.json().automation.reply.text).toMatch(/менеджер/i);
+    expect(second.statusCode).toBe(202);
+    expect(second.json()).toMatchObject({
+      automation: {
+        status: "fallback",
+        reason: "agent_reply_blocked"
+      }
+    });
+    expect(repository.onlyLead().conversations[0]?.agentAllowedToReply).toBe(false);
+    expect(repository.onlyLead().conversations[0]?.messages).toHaveLength(3);
+    expect(repository.onlyLead().conversations[0]?.messages.at(-1)).toMatchObject({
+      direction: "inbound",
+      senderRole: "visitor"
+    });
+  });
 });
 
 function validRequest(): SiteFormIntakeRequest {
@@ -524,12 +963,15 @@ function validRequest(): SiteFormIntakeRequest {
   };
 }
 
-function validWidgetRequest(): SiteWidgetMessageRequest {
+function validWidgetRequest(
+  overrides: { idempotencyKey?: string; messageText?: string; publicSessionId?: string } = {}
+): SiteWidgetMessageRequest {
   return {
     schema_version: SITE_WIDGET_CONTRACT_VERSION,
     event_type: SITE_WIDGET_MESSAGE_EVENT_TYPE,
-    idempotency_key: "widget-key-0000001",
+    idempotency_key: overrides.idempotencyKey ?? "widget-key-0000001",
     submitted_at: "2026-05-13T10:00:00.000Z",
+    public_session_id: overrides.publicSessionId,
     source: {
       channel: "site_widget",
       page_url: "https://granit.example/catalog/widget",
@@ -549,7 +991,7 @@ function validWidgetRequest(): SiteWidgetMessageRequest {
     },
     message: {
       role: "visitor",
-      text: "Can you help me choose a monument?"
+      text: overrides.messageText ?? "Can you help me choose a monument?"
     },
     visitor_context: {
       locale: "en-US",
@@ -578,6 +1020,7 @@ function testManagerAuthConfig() {
 
 class MemoryIntakeRepository implements IntakeRepository {
   saveCalls = 0;
+  aiSaveCalls = 0;
   private readonly leads = new Map<string, ManagerLeadDetail>();
   private readonly idempotency = new Map<
     string,
@@ -596,12 +1039,36 @@ class MemoryIntakeRepository implements IntakeRepository {
       requestFingerprint: string;
     }
   >();
+  private readonly widgetAiIdempotency = new Map<
+    string,
+    {
+      publicMessageId: string;
+      body: string;
+      createdAt: string;
+      requestFingerprint: string;
+    }
+  >();
   private readonly sessionLeads = new Map<string, string>();
+  private readonly sessionConversations = new Map<string, string>();
+  private readonly conversationLeads = new Map<string, string>();
+  private readonly conversationSessions = new Map<string, string>();
 
-  constructor(private readonly options: { failPersistence?: boolean } = {}) {}
+  constructor(
+    private readonly options: { failPersistence?: boolean; failAiPersistence?: boolean } = {}
+  ) {}
 
   get leadCount() {
     return this.leads.size;
+  }
+
+  onlyLead() {
+    const [lead] = Array.from(this.leads.values());
+
+    if (!lead) {
+      throw new Error("expected one memory lead");
+    }
+
+    return lead;
   }
 
   async saveAcceptedSiteFormSubmission(
@@ -660,25 +1127,53 @@ class MemoryIntakeRepository implements IntakeRepository {
         throw new IdempotencyConflictError();
       }
 
+      const aiReply = this.widgetAiIdempotency.get(`ai:${existing.publicMessageId}`);
+
       return {
         leadId: existing.leadId,
+        conversationId: this.sessionConversations.get(existing.publicSessionId) ?? randomUUID(),
         publicSessionId: existing.publicSessionId,
         publicMessageId: existing.publicMessageId,
-        replayed: true
+        agentAllowedToReply:
+          this.leads
+            .get(existing.leadId)
+            ?.conversations.find(
+              (conversation) => conversation.publicSessionId === existing.publicSessionId
+            )?.agentAllowedToReply ?? false,
+        replayed: true,
+        aiReply: aiReply
+          ? {
+              publicMessageId: aiReply.publicMessageId,
+              body: aiReply.body,
+              createdAt: aiReply.createdAt
+            }
+          : undefined
       };
     }
 
     const now = new Date().toISOString();
     const publicSessionId = input.publicSessionId;
     let leadId = this.sessionLeads.get(publicSessionId);
+    let conversationId = this.sessionConversations.get(publicSessionId);
     let lead = leadId ? this.leads.get(leadId) : undefined;
 
     if (!leadId || !lead) {
       leadId = randomUUID();
-      lead = toManagerWidgetLead(input, leadId, now);
+      conversationId = randomUUID();
+      lead = toManagerWidgetLead(input, leadId, conversationId, now);
       this.leads.set(leadId, lead);
       this.sessionLeads.set(publicSessionId, leadId);
+      this.sessionConversations.set(publicSessionId, conversationId);
+      this.conversationLeads.set(conversationId, leadId);
+      this.conversationSessions.set(conversationId, publicSessionId);
     } else {
+      if (!conversationId) {
+        conversationId = randomUUID();
+        this.sessionConversations.set(publicSessionId, conversationId);
+        this.conversationLeads.set(conversationId, leadId);
+        this.conversationSessions.set(conversationId, publicSessionId);
+      }
+
       lead = {
         ...lead,
         timeline: [
@@ -698,6 +1193,7 @@ class MemoryIntakeRepository implements IntakeRepository {
           conversation.publicSessionId === publicSessionId
             ? {
                 ...conversation,
+                agentAllowedToReply: input.agentAllowedToReply && conversation.agentAllowedToReply,
                 updatedAt: now,
                 messages: [
                   ...conversation.messages,
@@ -725,9 +1221,107 @@ class MemoryIntakeRepository implements IntakeRepository {
 
     return {
       leadId,
+      conversationId,
       publicSessionId,
       publicMessageId: input.publicMessageId,
+      agentAllowedToReply:
+        this.leads
+          .get(leadId)
+          ?.conversations.find((conversation) => conversation.publicSessionId === publicSessionId)
+          ?.agentAllowedToReply ?? false,
       replayed: false
+    };
+  }
+
+  async saveSiteWidgetAiMessage(
+    input: SaveSiteWidgetAiMessageInput
+  ): Promise<SaveSiteWidgetAiMessageResult> {
+    this.aiSaveCalls += 1;
+
+    if (this.options.failAiPersistence) {
+      throw new Error("ai persistence unavailable");
+    }
+
+    const existing = this.widgetAiIdempotency.get(input.idempotencyKey);
+
+    if (existing) {
+      if (existing.requestFingerprint !== input.requestFingerprint) {
+        throw new IdempotencyConflictError();
+      }
+
+      return {
+        publicMessageId: existing.publicMessageId,
+        body: existing.body,
+        createdAt: existing.createdAt
+      };
+    }
+
+    const leadId = this.conversationLeads.get(input.conversationId);
+    const publicSessionId = this.conversationSessions.get(input.conversationId);
+    const lead = leadId ? this.leads.get(leadId) : undefined;
+
+    if (!lead || !publicSessionId || leadId !== input.leadId) {
+      throw new Error("memory conversation not found");
+    }
+
+    const conversation = lead.conversations.find(
+      (candidate) => candidate.publicSessionId === publicSessionId
+    );
+
+    if (!conversation?.agentAllowedToReply) {
+      throw new AgentReplyBlockedError();
+    }
+
+    const createdAt = new Date().toISOString();
+    const updatedLead: ManagerLeadDetail = {
+      ...lead,
+      timeline: [
+        ...lead.timeline,
+        {
+          eventType: "conversation.ai_message_sent",
+          summary: "Website widget AI reply persisted",
+          metadata: {
+            ...input.metadata,
+            public_message_id: input.publicMessageId,
+            inbound_public_message_id: input.inboundPublicMessageId
+          },
+          createdAt
+        }
+      ],
+      conversations: lead.conversations.map((candidate) =>
+        candidate.publicSessionId === publicSessionId
+          ? {
+              ...candidate,
+              agentAllowedToReply:
+                input.agentAllowedToReplyAfterSend ?? candidate.agentAllowedToReply,
+              updatedAt: createdAt,
+              messages: [
+                ...candidate.messages,
+                {
+                  publicMessageId: input.publicMessageId,
+                  direction: "outbound",
+                  senderRole: "ai_assistant",
+                  body: input.body,
+                  createdAt
+                }
+              ]
+            }
+          : candidate
+      )
+    };
+
+    this.leads.set(lead.leadId, updatedLead);
+    this.widgetAiIdempotency.set(input.idempotencyKey, {
+      publicMessageId: input.publicMessageId,
+      body: input.body,
+      createdAt,
+      requestFingerprint: input.requestFingerprint
+    });
+
+    return {
+      publicMessageId: input.publicMessageId,
+      body: input.body,
+      createdAt
     };
   }
 
@@ -773,6 +1367,57 @@ class MemoryIntakeRepository implements IntakeRepository {
         }
       ]
     };
+    this.leads.set(input.leadId, updatedLead);
+
+    return updatedLead;
+  }
+
+  async takeoverSiteWidgetConversation(
+    input: TakeoverSiteWidgetConversationInput
+  ): Promise<ManagerLeadDetail | null> {
+    const lead = this.leads.get(input.leadId);
+
+    if (!lead) {
+      return null;
+    }
+
+    const conversation = lead.conversations.find(
+      (candidate) => candidate.publicSessionId === input.publicSessionId
+    );
+
+    if (!conversation) {
+      return null;
+    }
+
+    const changedAt = new Date().toISOString();
+    const updatedLead: ManagerLeadDetail = {
+      ...lead,
+      timeline: [
+        ...lead.timeline,
+        {
+          eventType: "conversation.manager_takeover",
+          summary: "Manager takeover disabled AI replies",
+          metadata: {
+            public_session_id: input.publicSessionId,
+            previous_agent_allowed_to_reply: conversation.agentAllowedToReply,
+            changed_by_manager_id: input.changedByManagerId,
+            changed_by_manager_email: input.changedByManagerEmail,
+            changed_by_manager_role: input.changedByManagerRole
+          },
+          createdAt: changedAt
+        }
+      ],
+      conversations: lead.conversations.map((candidate) =>
+        candidate.publicSessionId === input.publicSessionId
+          ? {
+              ...candidate,
+              agentAllowedToReply: false,
+              updatedAt: changedAt
+            }
+          : candidate
+      )
+    };
+
     this.leads.set(input.leadId, updatedLead);
 
     return updatedLead;
@@ -824,6 +1469,7 @@ function toManagerLead(
 function toManagerWidgetLead(
   input: SaveAcceptedSiteWidgetMessageInput,
   leadId: string,
+  _conversationId: string,
   createdAt: string
 ): ManagerLeadDetail {
   return {
@@ -856,7 +1502,7 @@ function toManagerWidgetLead(
         summary: "Lead created from public website widget",
         metadata: {
           public_session_id: input.publicSessionId,
-          automation_status: "disabled"
+          automation_status: input.agentAllowedToReply ? "enabled" : "disabled"
         },
         createdAt
       },
@@ -866,7 +1512,7 @@ function toManagerWidgetLead(
         metadata: {
           public_message_id: input.publicMessageId,
           public_session_id: input.publicSessionId,
-          automation_status: "disabled"
+          automation_status: input.agentAllowedToReply ? "enabled" : "disabled"
         },
         createdAt
       }
@@ -876,7 +1522,7 @@ function toManagerWidgetLead(
         channel: "site_widget",
         publicSessionId: input.publicSessionId,
         status: "open",
-        agentAllowedToReply: false,
+        agentAllowedToReply: input.agentAllowedToReply,
         sourcePageUrl: input.request.source.page_url,
         widgetInstanceId: input.request.source.widget_instance_id,
         createdAt,
@@ -894,6 +1540,57 @@ function toManagerWidgetLead(
     ],
     internalNotePlaceholder: ""
   };
+}
+
+function expectNoInternalPublicFields(value: unknown) {
+  const forbidden = new Set(["lead_id", "conversation_id", "trace_id"]);
+
+  if (!value || typeof value !== "object") {
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      expectNoInternalPublicFields(item);
+    }
+
+    return;
+  }
+
+  for (const [key, entryValue] of Object.entries(value)) {
+    expect(forbidden.has(key)).toBe(false);
+    expectNoInternalPublicFields(entryValue);
+  }
+}
+
+class FakeWidgetAiProvider implements WidgetAiProvider {
+  constructor(
+    private readonly options: {
+      text?: string;
+      fail?: boolean;
+      onGenerate?: (input: WidgetAiProviderInput) => void | Promise<void>;
+    }
+  ) {}
+
+  async generateReply(input: WidgetAiProviderInput): Promise<WidgetAiProviderResult> {
+    await this.options.onGenerate?.(input);
+
+    if (this.options.fail) {
+      throw new Error("fake model failure");
+    }
+
+    return {
+      text: this.options.text ?? "Могу помочь собрать детали заявки.",
+      modelProvider: "fake",
+      modelName: "fake-widget-ai",
+      responseId: "resp_fake",
+      usage: {
+        inputTokens: 10,
+        outputTokens: 8,
+        totalTokens: 18
+      }
+    };
+  }
 }
 
 class MemoryManagerAuthRepository implements ManagerAuthRepository {

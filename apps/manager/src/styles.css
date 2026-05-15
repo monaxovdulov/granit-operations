@@ -131,11 +131,55 @@ body {
   max-width: 920px;
 }
 
+.conversationMessages {
+  max-height: 560px;
+  overflow-y: auto;
+  padding-right: 6px;
+  scrollbar-width: thin;
+  scrollbar-color: #9ab8a7 #eef3f0;
+}
+
+.conversationMessages[data-collapsed] {
+  max-height: none;
+  overflow: visible;
+  padding-right: 0;
+}
+
+.conversationMessages::-webkit-scrollbar {
+  width: 10px;
+}
+
+.conversationMessages::-webkit-scrollbar-track {
+  background: #eef3f0;
+  border-radius: 999px;
+}
+
+.conversationMessages::-webkit-scrollbar-thumb {
+  background: #9ab8a7;
+  border: 2px solid #eef3f0;
+  border-radius: 999px;
+}
+
+.hiddenMessagesNote {
+  padding: 8px 10px;
+  border: 1px dashed #d7e2db;
+  border-radius: 6px;
+  background: #fbfcfb;
+}
+
 .messageBubble {
   padding: 12px 14px;
-  border-left: 3px solid #2f9e63;
   border-radius: 6px;
+}
+
+.messageBubble--inbound {
+  border-left: 3px solid #2f9e63;
   background: #f6faf7;
+}
+
+.messageBubble--outbound {
+  border-left: 3px solid #228be6;
+  background: #f5f9ff;
 }
 
 .statusSelect {

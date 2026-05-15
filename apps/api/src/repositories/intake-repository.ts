@@ -31,15 +31,44 @@ export type SaveAcceptedSiteFormSubmissionResult = {
 export type SaveAcceptedSiteWidgetMessageInput = {
   publicMessageId: string;
   publicSessionId: string;
+  agentAllowedToReply: boolean;
   request: SiteWidgetMessageRequest;
   requestFingerprint: string;
 };
 
+export type SiteWidgetStoredAiReply = {
+  publicMessageId: string;
+  body: string;
+  createdAt: string;
+};
+
 export type SaveAcceptedSiteWidgetMessageResult = {
   leadId: string;
+  conversationId: string;
   publicSessionId: string;
   publicMessageId: string;
+  agentAllowedToReply: boolean;
   replayed: boolean;
+  aiReply?: SiteWidgetStoredAiReply;
+};
+
+export type SaveSiteWidgetAiMessageInput = {
+  leadId: string;
+  conversationId: string;
+  publicMessageId: string;
+  inboundPublicMessageId: string;
+  idempotencyKey: string;
+  requestFingerprint: string;
+  body: string;
+  sourcePageUrl: string;
+  metadata: Record<string, unknown>;
+  agentAllowedToReplyAfterSend?: boolean;
+};
+
+export type SaveSiteWidgetAiMessageResult = SiteWidgetStoredAiReply;
+
+export type SiteWidgetAiMessageLookupResult = SiteWidgetStoredAiReply & {
+  requestFingerprint: string;
 };
 
 export type ManagerLeadSource = {
@@ -73,8 +102,8 @@ export type ManagerTimelineEvent = {
 
 export type ManagerConversationMessage = {
   publicMessageId: string;
-  direction: "inbound";
-  senderRole: "visitor";
+  direction: "inbound" | "outbound";
+  senderRole: "visitor" | "ai_assistant";
   body: string;
   createdAt: string;
 };
@@ -116,6 +145,14 @@ export type ChangeManagerLeadStatusInput = {
   changedByManagerRole: string;
 };
 
+export type TakeoverSiteWidgetConversationInput = {
+  leadId: string;
+  publicSessionId: string;
+  changedByManagerId: string;
+  changedByManagerEmail: string;
+  changedByManagerRole: string;
+};
+
 export interface IntakeRepository {
   saveAcceptedSiteFormSubmission(
     input: SaveAcceptedSiteFormSubmissionInput
@@ -123,15 +160,28 @@ export interface IntakeRepository {
   saveAcceptedSiteWidgetMessage(
     input: SaveAcceptedSiteWidgetMessageInput
   ): Promise<SaveAcceptedSiteWidgetMessageResult>;
+  saveSiteWidgetAiMessage(
+    input: SaveSiteWidgetAiMessageInput
+  ): Promise<SaveSiteWidgetAiMessageResult>;
   listManagerLeads(): Promise<ManagerLeadListItem[]>;
   getManagerLead(leadId: string): Promise<ManagerLeadDetail | null>;
   changeManagerLeadStatus(input: ChangeManagerLeadStatusInput): Promise<ManagerLeadDetail | null>;
+  takeoverSiteWidgetConversation(
+    input: TakeoverSiteWidgetConversationInput
+  ): Promise<ManagerLeadDetail | null>;
 }
 
 export class IdempotencyConflictError extends Error {
   constructor() {
     super("idempotency key was already used for a different submission");
     this.name = "IdempotencyConflictError";
+  }
+}
+
+export class AgentReplyBlockedError extends Error {
+  constructor() {
+    super("agent is not allowed to reply to this conversation");
+    this.name = "AgentReplyBlockedError";
   }
 }
 

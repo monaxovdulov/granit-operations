@@ -4,6 +4,11 @@ export type ApiConfig = {
   host: string;
   port: number;
   databaseUrl: string;
+  widgetAi: {
+    enabled: boolean;
+    openAiApiKey?: string;
+    openAiModel: string;
+  };
   managerAuth: ManagerAuthConfig | null;
 };
 
@@ -18,6 +23,11 @@ export function loadConfig(env: NodeJS.ProcessEnv): ApiConfig {
     host: env.HOST ?? "0.0.0.0",
     port: Number.parseInt(env.PORT ?? "3001", 10),
     databaseUrl,
+    widgetAi: {
+      enabled: env.AI_WIDGET_ENABLED === "true",
+      openAiApiKey: env.OPENAI_API_KEY,
+      openAiModel: env.OPENAI_MODEL ?? "gpt-5.5"
+    },
     managerAuth: loadManagerAuthConfig(env)
   };
 }

@@ -36,6 +36,16 @@ export const managerApi = {
       }
     );
   },
+  async takeoverConversation(leadId: string, publicSessionId: string) {
+    return requestJson<{ lead: ManagerLeadDetail }>(
+      `/manager/leads/${encodeURIComponent(leadId)}/conversations/${encodeURIComponent(
+        publicSessionId
+      )}/takeover`,
+      {
+        method: "PATCH"
+      }
+    );
+  },
   async logout() {
     const response = await fetch("/auth/logout", {
       method: "POST",
