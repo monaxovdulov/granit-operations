@@ -68,4 +68,34 @@ export function registerManagerRoutes(
       return { lead };
     }
   );
+
+  app.patch<{ Params: { leadId: string; publicConversationId: string } }>(
+    "/manager/leads/:leadId/conversations/:publicConversationId/takeover",
+    { preHandler: auth.requireManagerSession },
+    async (request, reply) => {
+      const managerUser = (request as RequestWithManager).managerUser;
+
+      if (!managerUser) {
+        return reply.code(401).send({ error: "manager_auth_required" });
+      }
+
+      if (managerUser.role === "viewer") {
+        return reply.code(403).send({ error: "manager_forbidden" });
+      }
+
+      const lead = await repository.takeoverConversation({
+        leadId: request.params.leadId,
+        publicConversationId: request.params.publicConversationId,
+        changedByManagerId: managerUser.id,
+        changedByManagerEmail: managerUser.email,
+        changedByManagerRole: managerUser.role
+      });
+
+      if (!lead) {
+        return reply.code(404).send({ error: "not_found" });
+      }
+
+      return { lead };
+    }
+  );
 }

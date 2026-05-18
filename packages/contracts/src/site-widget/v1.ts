@@ -85,11 +85,48 @@ export const SiteWidgetMessageRequestSchema = z
   .strict();
 
 export const SiteWidgetAutomationSchema = z
-  .object({
-    status: z.literal("disabled"),
-    next_step: z.literal("manager_review")
-  })
-  .strict();
+  .discriminatedUnion("status", [
+    z
+      .object({
+        status: z.literal("disabled"),
+        next_step: z.literal("manager_review")
+      })
+      .strict(),
+    z
+      .object({
+        status: z.literal("fallback"),
+        next_step: z.literal("manager_review"),
+        reason: z.enum([
+          "missing_openai_config",
+          "model_error",
+          "empty_model_response",
+          "unsafe_model_response",
+          "agent_reply_blocked",
+          "ai_persistence_unconfirmed"
+        ])
+      })
+      .strict(),
+    z
+      .object({
+        status: z.literal("replied"),
+        next_step: z.literal("ai_reply_shown"),
+        disclosure: z
+          .object({
+            shown: z.literal(true),
+            version: z.string().min(1).max(120),
+            text: z.string().min(1).max(1000)
+          })
+          .strict(),
+        reply: z
+          .object({
+            public_message_id: z.string().uuid(),
+            sender_role: z.literal("ai_assistant"),
+            text: z.string().min(1).max(1000)
+          })
+          .strict()
+      })
+      .strict()
+  ]);
 
 export const SiteWidgetSuccessResponseSchema = z
   .object({
