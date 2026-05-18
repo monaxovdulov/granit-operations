@@ -1,11 +1,13 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, or, type SQLWrapper } from "drizzle-orm";
 
 import {
+  channelIdentities,
   conversationMessages,
   conversations,
   intakeSubmissions,
   leadTimelineEvents,
   leads,
+  managerNotificationOutbox,
   widgetSessions,
   type OperationsDb
 } from "@granit/db";
@@ -14,13 +16,25 @@ import type { SiteFormIntakeRequest, SiteWidgetMessageRequest } from "@granit/co
 import {
   AgentReplyBlockedError,
   IdempotencyConflictError,
+  TelegramIdentityRequiredError,
+  TelegramOutboundBlockedError,
+  isAiState,
   isLeadStatus,
+  type AcceptInboundMessageInput,
+  type AcceptInboundMessageResult,
+  type AiState,
   type ChangeManagerLeadStatusInput,
+  type ConversationContentType,
+  type CustomerChannel,
   type IntakeRepository,
   type LeadStatus,
+  type ManagerChannelIdentity,
   type ManagerConversation,
   type ManagerLeadDetail,
   type ManagerLeadListItem,
+  type NextStepChannel,
+  type PersistAiReplyWithSendGateInput,
+  type RecordManualContactInput,
   type SaveAcceptedSiteFormSubmissionInput,
   type SaveAcceptedSiteFormSubmissionResult,
   type SaveAcceptedSiteWidgetMessageInput,
@@ -28,6 +42,8 @@ import {
   type SaveSiteWidgetAiMessageInput,
   type SaveSiteWidgetAiMessageResult,
   type SiteWidgetAiMessageLookupResult,
+  type SetNextStepInput,
+  type TakeoverConversationInput,
   type TakeoverSiteWidgetConversationInput
 } from "./intake-repository.js";
 
@@ -107,112 +123,133 @@ export class PostgresIntakeRepository implements IntakeRepository {
     }
   }
 
-  async saveAcceptedSiteWidgetMessage(
-    input: SaveAcceptedSiteWidgetMessageInput
-  ): Promise<SaveAcceptedSiteWidgetMessageResult> {
-    const existing = await this.findExistingWidgetMessageByIdempotencyKey(
-      input.request.idempotency_key
-    );
+  async acceptInboundMessage(input: AcceptInboundMessageInput): Promise<AcceptInboundMessageResult> {
+    const existing = await this.findExistingInboundMessageByIdempotencyKey(input.idempotencyKey);
 
     if (existing) {
-      return this.replayExistingWidgetMessage(existing, input.requestFingerprint);
+      return this.replayExistingInboundMessage(existing, input.requestFingerprint);
+    }
+
+    if (input.channel === "telegram" && (!input.providerAccountId || !input.externalChatId)) {
+      throw new TelegramIdentityRequiredError();
     }
 
     try {
       return await this.db.transaction(async (tx) => {
         const now = new Date();
-        const [session] = await tx
-          .insert(widgetSessions)
-          .values(toWidgetSessionInsert(input, now))
-          .onConflictDoUpdate({
-            target: widgetSessions.publicSessionId,
-            set: {
-              sourcePageUrl: input.request.source.page_url,
-              widgetInstanceId: input.request.source.widget_instance_id,
-              referrerUrl: input.request.source.referrer_url ?? null,
-              pageTitle: input.request.source.page_title ?? null,
-              utm: input.request.source.utm ?? null,
-              visitorContext: input.request.visitor_context ?? {},
-              lastSeenAt: now
-            }
-          })
-          .returning({
-            id: widgetSessions.id,
-            publicSessionId: widgetSessions.publicSessionId
-          });
-
-        if (!session) {
-          throw new Error("widget session insert returned no row");
-        }
+        const contentType = normalizeContentType(input.message.contentType);
+        const isMedia = contentType !== "text";
+        const widgetSession = await ensureWidgetSession(tx, input, now);
+        let identity = await findOrCreateChannelIdentity(tx, input, widgetSession?.id ?? null, now);
 
         let [conversation] = await tx
           .select({
             id: conversations.id,
+            publicConversationId: conversations.publicConversationId,
             leadId: conversations.leadId,
-            agentAllowedToReply: conversations.agentAllowedToReply
+            agentAllowedToReply: conversations.agentAllowedToReply,
+            aiState: conversations.aiState
           })
           .from(conversations)
-          .where(eq(conversations.widgetSessionId, session.id))
+          .where(eq(conversations.channelIdentityId, identity.id))
           .limit(1);
 
         if (!conversation) {
           const [lead] = await tx
             .insert(leads)
-            .values(toWidgetLeadInsert(input))
+            .values(toInboundLeadInsert(input, now))
             .returning({ id: leads.id });
 
           if (!lead) {
-            throw new Error("widget lead insert returned no row");
+            throw new Error("inbound lead insert returned no row");
           }
+
+          const [updatedIdentity] = await tx
+            .update(channelIdentities)
+            .set({
+              leadId: lead.id,
+              updatedAt: now,
+              lastSeenAt: now
+            })
+            .where(eq(channelIdentities.id, identity.id))
+            .returning({ id: channelIdentities.id });
+
+          if (!updatedIdentity) {
+            throw new Error("channel identity update returned no row");
+          }
+
+          identity = { ...identity, leadId: lead.id };
 
           const [createdConversation] = await tx
             .insert(conversations)
             .values({
               leadId: lead.id,
-              widgetSessionId: session.id,
-              channel: "site_widget",
+              widgetSessionId: widgetSession?.id ?? null,
+              channelIdentityId: identity.id,
+              channel: input.channel,
               status: "open",
-              agentAllowedToReply: input.agentAllowedToReply,
-              sourcePageUrl: input.request.source.page_url,
-              widgetInstanceId: input.request.source.widget_instance_id,
+              aiState: isMedia ? "needs_manager" : "ai_collecting_info",
+              agentAllowedToReply: input.automationRequested && !isMedia,
+              sourcePageUrl: input.sourcePageUrl ?? null,
+              widgetInstanceId: input.widgetInstanceId ?? null,
               metadata: {
-                contract_version: input.request.schema_version,
-                automation_status: input.agentAllowedToReply ? "enabled" : "disabled"
+                ...input.metadata,
+                automation_status: input.automationRequested && !isMedia ? "enabled" : "disabled"
               },
               createdAt: now,
               updatedAt: now
             })
             .returning({
               id: conversations.id,
+              publicConversationId: conversations.publicConversationId,
               leadId: conversations.leadId,
-              agentAllowedToReply: conversations.agentAllowedToReply
+              agentAllowedToReply: conversations.agentAllowedToReply,
+              aiState: conversations.aiState
             });
 
           if (!createdConversation) {
-            throw new Error("widget conversation insert returned no row");
+            throw new Error("conversation insert returned no row");
           }
 
           conversation = createdConversation;
 
           await tx.insert(leadTimelineEvents).values({
             leadId: lead.id,
-            eventType: "lead.created_from_site_widget",
-            summary: "Lead created from public website widget",
-            metadata: {
-              public_session_id: input.publicSessionId,
-              source_page_url: input.request.source.page_url,
-              widget_instance_id: input.request.source.widget_instance_id,
-              automation_status: input.agentAllowedToReply ? "enabled" : "disabled"
-            },
+            eventType:
+              input.channel === "site_widget"
+                ? "lead.created_from_site_widget"
+                : "lead.created_from_telegram",
+            summary:
+              input.channel === "site_widget"
+                ? "Lead created from public website widget"
+                : "Lead created from Telegram inbound",
+            metadata: leadCreatedMetadata(input, identity.id),
             createdAt: now
           });
         } else {
           const effectiveAgentAllowedToReply =
-            input.agentAllowedToReply && conversation.agentAllowedToReply;
+            input.automationRequested && !isMedia && conversation.agentAllowedToReply;
+          const nextAiState = isMedia ? "needs_manager" : toAiState(conversation.aiState);
+
+          await tx
+            .update(channelIdentities)
+            .set({
+              leadId: identity.leadId ?? conversation.leadId,
+              displayName: input.displayName ?? input.contact?.name ?? identity.displayName,
+              username: input.username ?? input.contact?.username ?? identity.username,
+              metadata: {
+                ...identity.metadata,
+                ...channelIdentityMetadata(input)
+              },
+              updatedAt: now,
+              lastSeenAt: now
+            })
+            .where(eq(channelIdentities.id, identity.id));
 
           await tx
             .update(leads)
             .set({
+              requestText: input.message.text || input.message.caption || undefined,
               updatedAt: now
             })
             .where(eq(leads.id, conversation.leadId));
@@ -220,11 +257,12 @@ export class PostgresIntakeRepository implements IntakeRepository {
           await tx
             .update(conversations)
             .set({
-              sourcePageUrl: input.request.source.page_url,
-              widgetInstanceId: input.request.source.widget_instance_id,
+              sourcePageUrl: input.sourcePageUrl ?? null,
+              widgetInstanceId: input.widgetInstanceId ?? null,
               agentAllowedToReply: effectiveAgentAllowedToReply,
+              aiState: nextAiState,
               metadata: {
-                contract_version: input.request.schema_version,
+                ...input.metadata,
                 automation_status: effectiveAgentAllowedToReply ? "enabled" : "disabled"
               },
               updatedAt: now
@@ -233,8 +271,15 @@ export class PostgresIntakeRepository implements IntakeRepository {
 
           conversation = {
             ...conversation,
-            agentAllowedToReply: effectiveAgentAllowedToReply
+            agentAllowedToReply: effectiveAgentAllowedToReply,
+            aiState: nextAiState
           };
+        }
+
+        const providerReplay = await findExistingProviderInbound(tx, identity.id, input);
+
+        if (providerReplay) {
+          return this.replayExistingInboundMessage(providerReplay, input.requestFingerprint);
         }
 
         const [message] = await tx
@@ -243,61 +288,122 @@ export class PostgresIntakeRepository implements IntakeRepository {
             publicMessageId: input.publicMessageId,
             conversationId: conversation.id,
             leadId: conversation.leadId,
+            channelIdentityId: identity.id,
+            providerMessageId: input.providerMessageId ?? null,
+            providerUpdateId: input.providerUpdateId ?? null,
+            providerSentAt: input.providerSentAt ? new Date(input.providerSentAt) : null,
             direction: "inbound",
             senderRole: "visitor",
-            body: input.request.message.text,
-            idempotencyKey: input.request.idempotency_key,
+            body: messageBody(input, contentType),
+            idempotencyKey: input.idempotencyKey,
             requestFingerprint: input.requestFingerprint,
-            sourcePageUrl: input.request.source.page_url,
+            sourcePageUrl: input.sourcePageUrl ?? null,
+            contentType,
+            providerFileId: input.message.providerFileId ?? null,
+            providerFileUniqueId: input.message.providerFileUniqueId ?? null,
+            mimeType: input.message.mimeType ?? null,
+            fileSize: input.message.fileSize ?? null,
+            durationSeconds: input.message.durationSeconds ?? null,
+            caption: input.message.caption ?? null,
             metadata: {
-              schema_version: input.request.schema_version,
-              event_type: input.request.event_type,
-              public_session_id: input.publicSessionId,
-              widget_instance_id: input.request.source.widget_instance_id,
+              ...input.metadata,
+              ...(input.message.metadata ?? {}),
+              public_conversation_id: conversation.publicConversationId,
+              channel_identity_id: identity.id,
               automation_status: conversation.agentAllowedToReply ? "enabled" : "disabled"
             },
-            submittedAt: new Date(input.request.submitted_at),
+            submittedAt: new Date(input.message.submittedAt),
             createdAt: now
           })
           .returning({
+            id: conversationMessages.id,
             publicMessageId: conversationMessages.publicMessageId
           });
 
         if (!message) {
-          throw new Error("widget message insert returned no row");
+          throw new Error("inbound message insert returned no row");
         }
 
         await tx.insert(leadTimelineEvents).values({
           leadId: conversation.leadId,
           eventType: "conversation.message_received",
-          summary: "Website widget message received",
+          summary:
+            input.channel === "site_widget"
+              ? "Website widget message received"
+              : "Telegram message received",
           metadata: {
             public_message_id: message.publicMessageId,
-            public_session_id: input.publicSessionId,
-            source_page_url: input.request.source.page_url,
-            widget_instance_id: input.request.source.widget_instance_id,
-            automation_status: conversation.agentAllowedToReply ? "enabled" : "disabled"
+            public_conversation_id: conversation.publicConversationId,
+            channel: input.channel,
+            channel_identity_id: identity.id,
+            content_type: contentType,
+            automation_status: conversation.agentAllowedToReply ? "enabled" : "disabled",
+            ...(input.widgetPublicSessionId
+              ? { public_session_id: input.widgetPublicSessionId }
+              : {}),
+            ...(input.sourcePageUrl ? { source_page_url: input.sourcePageUrl } : {}),
+            ...(input.widgetInstanceId ? { widget_instance_id: input.widgetInstanceId } : {}),
+            ...(input.providerMessageId ? { provider_message_id: input.providerMessageId } : {}),
+            ...(input.providerUpdateId ? { provider_update_id: input.providerUpdateId } : {})
           },
           createdAt: now
         });
 
+        if (input.channel === "telegram" && isMedia) {
+          const [notification] = await tx
+            .insert(managerNotificationOutbox)
+            .values({
+              leadId: conversation.leadId,
+              conversationId: conversation.id,
+              conversationMessageId: message.id,
+              notificationType: "telegram_media_needs_manager",
+              destinationKind: "manager_telegram_private",
+              destinationIdentityId: null,
+              status: "blocked_no_destination",
+              provider: "telegram_bot",
+              metadata: {
+                public_conversation_id: conversation.publicConversationId,
+                public_message_id: message.publicMessageId,
+                reason: "manager_telegram_destination_not_bound"
+              },
+              createdAt: now,
+              updatedAt: now
+            })
+            .returning({ id: managerNotificationOutbox.id });
+
+          await tx.insert(leadTimelineEvents).values({
+            leadId: conversation.leadId,
+            eventType: "manager.notification_enqueued",
+            summary: "Telegram manager notification blocked because no destination is bound",
+            metadata: {
+              notification_id: notification?.id ?? null,
+              public_conversation_id: conversation.publicConversationId,
+              public_message_id: message.publicMessageId,
+              status: "blocked_no_destination",
+              channel: "telegram"
+            },
+            createdAt: now
+          });
+        }
+
         return {
           leadId: conversation.leadId,
           conversationId: conversation.id,
-          publicSessionId: session.publicSessionId,
+          publicConversationId: conversation.publicConversationId,
+          channelIdentityId: identity.id,
           publicMessageId: message.publicMessageId,
+          widgetPublicSessionId: widgetSession?.publicSessionId ?? undefined,
           agentAllowedToReply: conversation.agentAllowedToReply,
+          aiState: toAiState(conversation.aiState),
           replayed: false
         };
       });
     } catch (error) {
       if (isUniqueViolation(error)) {
-        const replay = await this.findExistingWidgetMessageByIdempotencyKey(
-          input.request.idempotency_key
-        );
+        const replay = await this.findExistingInboundMessageByIdempotencyKey(input.idempotencyKey);
 
         if (replay) {
-          return this.replayExistingWidgetMessage(replay, input.requestFingerprint);
+          return this.replayExistingInboundMessage(replay, input.requestFingerprint);
         }
       }
 
@@ -305,16 +411,80 @@ export class PostgresIntakeRepository implements IntakeRepository {
     }
   }
 
-  async saveSiteWidgetAiMessage(
-    input: SaveSiteWidgetAiMessageInput
+  async saveAcceptedSiteWidgetMessage(
+    input: SaveAcceptedSiteWidgetMessageInput
+  ): Promise<SaveAcceptedSiteWidgetMessageResult> {
+    const result = await this.acceptInboundMessage({
+      publicMessageId: input.publicMessageId,
+      channel: "site_widget",
+      provider: "site_widget",
+      widgetPublicSessionId: input.publicSessionId,
+      widgetInstanceId: input.request.source.widget_instance_id,
+      sourcePageUrl: input.request.source.page_url,
+      referrerUrl: input.request.source.referrer_url,
+      pageTitle: input.request.source.page_title,
+      utm: input.request.source.utm ?? null,
+      visitorContext: input.request.visitor_context ?? {},
+      displayName: input.request.contact?.name,
+      contact: {
+        name: input.request.contact?.name,
+        phone: input.request.contact?.phone,
+        email: input.request.contact?.email,
+        preferredContact: input.request.contact?.preferred_contact,
+        city: input.request.contact?.city
+      },
+      message: {
+        role: "visitor",
+        text: input.request.message.text,
+        submittedAt: input.request.submitted_at,
+        contentType: "text"
+      },
+      idempotencyKey: input.request.idempotency_key,
+      requestFingerprint: input.requestFingerprint,
+      automationRequested: input.agentAllowedToReply,
+      metadata: {
+        schema_version: input.request.schema_version,
+        event_type: input.request.event_type
+      }
+    });
+
+    return {
+      leadId: result.leadId,
+      conversationId: result.conversationId,
+      publicConversationId: result.publicConversationId,
+      channelIdentityId: result.channelIdentityId,
+      publicSessionId: result.widgetPublicSessionId ?? input.publicSessionId,
+      publicMessageId: result.publicMessageId,
+      agentAllowedToReply: result.agentAllowedToReply,
+      aiState: result.aiState,
+      replayed: result.replayed,
+      aiReply: result.existingAiReply
+    };
+  }
+
+  async persistAiReplyWithSendGate(
+    input: PersistAiReplyWithSendGateInput
   ): Promise<SaveSiteWidgetAiMessageResult> {
+    if (input.channel === "telegram") {
+      throw new TelegramOutboundBlockedError();
+    }
+
     try {
+      const existing = await this.findExistingAiMessageByIdempotencyKey(input.idempotencyKey);
+
+      if (existing) {
+        return this.replayExistingAiMessage(existing, input.requestFingerprint);
+      }
+
       return await this.db.transaction(async (tx) => {
         const now = new Date();
+        const nextAiState =
+          input.agentAllowedToReplyAfterSend === false ? "needs_manager" : "ai_collecting_info";
         const [sendGate] = await tx
           .update(conversations)
           .set({
             agentAllowedToReply: input.agentAllowedToReplyAfterSend ?? true,
+            aiState: nextAiState,
             updatedAt: now
           })
           .where(
@@ -326,10 +496,18 @@ export class PostgresIntakeRepository implements IntakeRepository {
           )
           .returning({
             id: conversations.id,
-            leadId: conversations.leadId
+            leadId: conversations.leadId,
+            publicConversationId: conversations.publicConversationId,
+            channelIdentityId: conversations.channelIdentityId
           });
 
         if (!sendGate) {
+          const replay = await this.findExistingAiMessageByIdempotencyKey(input.idempotencyKey);
+
+          if (replay) {
+            return this.replayExistingAiMessage(replay, input.requestFingerprint);
+          }
+
           const [existingConversation] = await tx
             .select({
               id: conversations.id,
@@ -340,7 +518,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
             .limit(1);
 
           if (!existingConversation || existingConversation.leadId !== input.leadId) {
-            throw new Error("widget conversation not found for AI reply");
+            throw new Error("conversation not found for AI reply");
           }
 
           throw new AgentReplyBlockedError();
@@ -352,13 +530,18 @@ export class PostgresIntakeRepository implements IntakeRepository {
             publicMessageId: input.publicMessageId,
             conversationId: input.conversationId,
             leadId: input.leadId,
+            channelIdentityId: sendGate.channelIdentityId ?? null,
             direction: "outbound",
             senderRole: "ai_assistant",
             body: input.body,
             idempotencyKey: input.idempotencyKey,
             requestFingerprint: input.requestFingerprint,
-            sourcePageUrl: input.sourcePageUrl,
-            metadata: input.metadata,
+            sourcePageUrl: input.sourcePageUrl ?? null,
+            contentType: "text",
+            metadata: {
+              ...input.metadata,
+              public_conversation_id: sendGate.publicConversationId
+            },
             submittedAt: now,
             createdAt: now
           })
@@ -369,7 +552,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
           });
 
         if (!message) {
-          throw new Error("widget AI message insert returned no row");
+          throw new Error("AI message insert returned no row");
         }
 
         await tx
@@ -382,11 +565,16 @@ export class PostgresIntakeRepository implements IntakeRepository {
         await tx.insert(leadTimelineEvents).values({
           leadId: input.leadId,
           eventType: "conversation.ai_message_sent",
-          summary: "Website widget AI reply persisted",
+          summary:
+            input.channel === "site_widget"
+              ? "Website widget AI reply persisted"
+              : "AI reply persisted",
           metadata: {
             ...input.metadata,
             public_message_id: message.publicMessageId,
-            inbound_public_message_id: input.inboundPublicMessageId
+            inbound_public_message_id: input.inboundPublicMessageId,
+            public_conversation_id: sendGate.publicConversationId,
+            channel: input.channel
           },
           createdAt: now
         });
@@ -414,12 +602,22 @@ export class PostgresIntakeRepository implements IntakeRepository {
     }
   }
 
+  async saveSiteWidgetAiMessage(
+    input: SaveSiteWidgetAiMessageInput
+  ): Promise<SaveSiteWidgetAiMessageResult> {
+    return this.persistAiReplyWithSendGate({
+      ...input,
+      channel: "site_widget",
+      provider: "site_widget"
+    });
+  }
+
   async listManagerLeads(): Promise<ManagerLeadListItem[]> {
     const rows = await this.db
       .select()
       .from(leads)
       .leftJoin(intakeSubmissions, eq(intakeSubmissions.leadId, leads.id))
-      .orderBy(desc(leads.createdAt));
+      .orderBy(desc(leads.updatedAt), desc(leads.createdAt));
 
     return Promise.all(
       rows.map(async ({ leads: lead, intake_submissions: submission }) =>
@@ -492,6 +690,13 @@ export class PostgresIntakeRepository implements IntakeRepository {
         .update(leads)
         .set({
           status: input.status,
+          ...(statusRequiresNextStep(input.status)
+            ? {
+                nextStepAt: changedAt,
+                nextStepSummary: "Связаться с клиентом",
+                nextStepChannel: "manager_call"
+              }
+            : {}),
           updatedAt: changedAt
         })
         .where(eq(leads.id, input.leadId));
@@ -514,9 +719,101 @@ export class PostgresIntakeRepository implements IntakeRepository {
     return this.getManagerLead(input.leadId);
   }
 
-  async takeoverSiteWidgetConversation(
-    input: TakeoverSiteWidgetConversationInput
-  ): Promise<ManagerLeadDetail | null> {
+  async setNextStep(input: SetNextStepInput): Promise<ManagerLeadDetail | null> {
+    let found = false;
+
+    await this.db.transaction(async (tx) => {
+      const [existing] = await tx
+        .select({ id: leads.id })
+        .from(leads)
+        .where(eq(leads.id, input.leadId))
+        .limit(1);
+
+      if (!existing) {
+        return;
+      }
+
+      found = true;
+      const changedAt = new Date();
+
+      await tx
+        .update(leads)
+        .set({
+          nextStepAt: new Date(input.nextStepAt),
+          nextStepSummary: input.nextStepSummary ?? null,
+          nextStepChannel: input.nextStepChannel ?? null,
+          updatedAt: changedAt
+        })
+        .where(eq(leads.id, input.leadId));
+
+      await tx.insert(leadTimelineEvents).values({
+        leadId: input.leadId,
+        eventType: "lead.next_step_updated",
+        summary: "Lead next step updated",
+        metadata: {
+          next_step_at: input.nextStepAt,
+          next_step_summary: input.nextStepSummary ?? null,
+          next_step_channel: input.nextStepChannel ?? null,
+          changed_by_manager_id: input.changedByManagerId,
+          changed_by_manager_email: input.changedByManagerEmail,
+          changed_by_manager_role: input.changedByManagerRole
+        },
+        createdAt: changedAt
+      });
+    });
+
+    return found ? this.getManagerLead(input.leadId) : null;
+  }
+
+  async recordManualContact(input: RecordManualContactInput): Promise<ManagerLeadDetail | null> {
+    let found = false;
+
+    await this.db.transaction(async (tx) => {
+      const [existing] = await tx
+        .select({ id: leads.id })
+        .from(leads)
+        .where(eq(leads.id, input.leadId))
+        .limit(1);
+
+      if (!existing) {
+        return;
+      }
+
+      found = true;
+      const changedAt = new Date();
+
+      await tx
+        .update(leads)
+        .set({
+          nextStepAt: input.nextStepAt ? new Date(input.nextStepAt) : null,
+          nextStepSummary: input.nextStepSummary ?? input.summary,
+          nextStepChannel: input.contactChannel,
+          updatedAt: changedAt
+        })
+        .where(eq(leads.id, input.leadId));
+
+      await tx.insert(leadTimelineEvents).values({
+        leadId: input.leadId,
+        eventType: "lead.manual_contact_recorded",
+        summary: "Manual contact recorded",
+        metadata: {
+          contact_channel: input.contactChannel,
+          contacted_at: input.contactedAt,
+          summary: input.summary,
+          next_step_at: input.nextStepAt ?? null,
+          next_step_summary: input.nextStepSummary ?? null,
+          changed_by_manager_id: input.changedByManagerId,
+          changed_by_manager_email: input.changedByManagerEmail,
+          changed_by_manager_role: input.changedByManagerRole
+        },
+        createdAt: changedAt
+      });
+    });
+
+    return found ? this.getManagerLead(input.leadId) : null;
+  }
+
+  async takeoverConversation(input: TakeoverConversationInput): Promise<ManagerLeadDetail | null> {
     let found = false;
 
     await this.db.transaction(async (tx) => {
@@ -524,14 +821,16 @@ export class PostgresIntakeRepository implements IntakeRepository {
         .select({
           id: conversations.id,
           leadId: conversations.leadId,
-          agentAllowedToReply: conversations.agentAllowedToReply
+          channel: conversations.channel,
+          publicConversationId: conversations.publicConversationId,
+          agentAllowedToReply: conversations.agentAllowedToReply,
+          aiState: conversations.aiState
         })
         .from(conversations)
-        .innerJoin(widgetSessions, eq(conversations.widgetSessionId, widgetSessions.id))
         .where(
           and(
             eq(conversations.leadId, input.leadId),
-            eq(widgetSessions.publicSessionId, input.publicSessionId)
+            eq(conversations.publicConversationId, input.publicConversationId)
           )
         )
         .limit(1);
@@ -541,12 +840,18 @@ export class PostgresIntakeRepository implements IntakeRepository {
       }
 
       found = true;
+
+      if (!conversation.agentAllowedToReply && conversation.aiState === "manager_active") {
+        return;
+      }
+
       const changedAt = new Date();
 
       await tx
         .update(conversations)
         .set({
           agentAllowedToReply: false,
+          aiState: "manager_active",
           updatedAt: changedAt
         })
         .where(eq(conversations.id, conversation.id));
@@ -554,6 +859,9 @@ export class PostgresIntakeRepository implements IntakeRepository {
       await tx
         .update(leads)
         .set({
+          nextStepAt: changedAt,
+          nextStepSummary: "Связаться с клиентом",
+          nextStepChannel: conversation.channel === "telegram" ? "telegram" : "site_widget",
           updatedAt: changedAt
         })
         .where(eq(leads.id, input.leadId));
@@ -563,8 +871,10 @@ export class PostgresIntakeRepository implements IntakeRepository {
         eventType: "conversation.manager_takeover",
         summary: "Manager takeover disabled AI replies",
         metadata: {
-          public_session_id: input.publicSessionId,
+          public_conversation_id: input.publicConversationId,
+          channel: conversation.channel,
           previous_agent_allowed_to_reply: conversation.agentAllowedToReply,
+          previous_ai_state: conversation.aiState,
           changed_by_manager_id: input.changedByManagerId,
           changed_by_manager_email: input.changedByManagerEmail,
           changed_by_manager_role: input.changedByManagerRole
@@ -578,6 +888,27 @@ export class PostgresIntakeRepository implements IntakeRepository {
     }
 
     return this.getManagerLead(input.leadId);
+  }
+
+  async takeoverSiteWidgetConversation(
+    input: TakeoverSiteWidgetConversationInput
+  ): Promise<ManagerLeadDetail | null> {
+    const publicConversationId = await this.findPublicConversationIdForWidgetSession(
+      input.leadId,
+      input.publicSessionId
+    );
+
+    if (!publicConversationId) {
+      return null;
+    }
+
+    return this.takeoverConversation({
+      leadId: input.leadId,
+      publicConversationId,
+      changedByManagerId: input.changedByManagerId,
+      changedByManagerEmail: input.changedByManagerEmail,
+      changedByManagerRole: input.changedByManagerRole
+    });
   }
 
   private async findExistingByIdempotencyKey(idempotencyKey: string) {
@@ -594,19 +925,24 @@ export class PostgresIntakeRepository implements IntakeRepository {
     return existing ?? null;
   }
 
-  private async findExistingWidgetMessageByIdempotencyKey(idempotencyKey: string) {
+  private async findExistingInboundMessageByIdempotencyKey(idempotencyKey: string) {
     const [existing] = await this.db
       .select({
         leadId: conversationMessages.leadId,
         conversationId: conversationMessages.conversationId,
+        publicConversationId: conversations.publicConversationId,
         agentAllowedToReply: conversations.agentAllowedToReply,
+        aiState: conversations.aiState,
+        messageChannelIdentityId: conversationMessages.channelIdentityId,
+        conversationChannelIdentityId: conversations.channelIdentityId,
         publicSessionId: widgetSessions.publicSessionId,
         publicMessageId: conversationMessages.publicMessageId,
         requestFingerprint: conversationMessages.requestFingerprint
       })
       .from(conversationMessages)
       .innerJoin(conversations, eq(conversationMessages.conversationId, conversations.id))
-      .innerJoin(widgetSessions, eq(conversations.widgetSessionId, widgetSessions.id))
+      .leftJoin(channelIdentities, eq(conversationMessages.channelIdentityId, channelIdentities.id))
+      .leftJoin(widgetSessions, eq(channelIdentities.widgetSessionId, widgetSessions.id))
       .where(
         and(
           eq(conversationMessages.idempotencyKey, idempotencyKey),
@@ -657,15 +993,38 @@ export class PostgresIntakeRepository implements IntakeRepository {
     return message?.publicMessageId ?? leadId;
   }
 
+  private async findPublicConversationIdForWidgetSession(
+    leadId: string,
+    publicSessionId: string
+  ): Promise<string | null> {
+    const [row] = await this.db
+      .select({
+        publicConversationId: conversations.publicConversationId
+      })
+      .from(conversations)
+      .innerJoin(widgetSessions, eq(conversations.widgetSessionId, widgetSessions.id))
+      .where(
+        and(
+          eq(conversations.leadId, leadId),
+          eq(widgetSessions.publicSessionId, publicSessionId)
+        )
+      )
+      .limit(1);
+
+    return row?.publicConversationId ?? null;
+  }
+
   private async listManagerConversations(leadId: string): Promise<ManagerConversation[]> {
     const rows = await this.db
       .select({
         conversation: conversations,
+        identity: channelIdentities,
         session: widgetSessions,
         message: conversationMessages
       })
       .from(conversations)
-      .innerJoin(widgetSessions, eq(conversations.widgetSessionId, widgetSessions.id))
+      .leftJoin(channelIdentities, eq(conversations.channelIdentityId, channelIdentities.id))
+      .leftJoin(widgetSessions, eq(channelIdentities.widgetSessionId, widgetSessions.id))
       .leftJoin(conversationMessages, eq(conversationMessages.conversationId, conversations.id))
       .where(eq(conversations.leadId, leadId))
       .orderBy(conversations.createdAt, conversationMessages.createdAt);
@@ -677,12 +1036,13 @@ export class PostgresIntakeRepository implements IntakeRepository {
       const conversation =
         existing ??
         ({
-          channel: "site_widget",
-          publicSessionId: row.session.publicSessionId,
+          publicConversationId: row.conversation.publicConversationId,
+          channel: toCustomerChannel(row.conversation.channel),
+          channelIdentity: toManagerChannelIdentity(row.identity, row.session, row.conversation),
           status: "open",
+          aiState: toAiState(row.conversation.aiState),
           agentAllowedToReply: row.conversation.agentAllowedToReply,
-          sourcePageUrl: row.conversation.sourcePageUrl,
-          widgetInstanceId: row.conversation.widgetInstanceId,
+          sourcePageUrl: row.conversation.sourcePageUrl ?? undefined,
           createdAt: row.conversation.createdAt.toISOString(),
           updatedAt: row.conversation.updatedAt.toISOString(),
           messages: []
@@ -698,6 +1058,9 @@ export class PostgresIntakeRepository implements IntakeRepository {
           direction: toConversationMessageDirection(row.message.direction),
           senderRole: toConversationSenderRole(row.message.senderRole),
           body: row.message.body,
+          contentType: normalizeContentType(row.message.contentType),
+          caption: row.message.caption ?? undefined,
+          providerFileId: row.message.providerFileId ?? undefined,
           createdAt: row.message.createdAt.toISOString()
         });
       }
@@ -725,37 +1088,45 @@ export class PostgresIntakeRepository implements IntakeRepository {
     };
   }
 
-  private async replayExistingWidgetMessage(
+  private async replayExistingInboundMessage(
     existing: {
       leadId: string;
       conversationId: string;
+      publicConversationId: string;
       agentAllowedToReply: boolean;
-      publicSessionId: string;
+      aiState: string;
+      messageChannelIdentityId: string | null;
+      conversationChannelIdentityId: string | null;
+      publicSessionId: string | null;
       publicMessageId: string;
       requestFingerprint: string;
     },
     requestFingerprint: string
-  ): Promise<SaveAcceptedSiteWidgetMessageResult> {
+  ): Promise<AcceptInboundMessageResult> {
     if (existing.requestFingerprint !== requestFingerprint) {
       throw new IdempotencyConflictError();
     }
 
-    const aiReply = await this.findExistingAiMessageByIdempotencyKey(
+    const existingAiReply = await this.findExistingAiMessageByIdempotencyKey(
       `ai:${existing.publicMessageId}`
     );
 
     return {
       leadId: existing.leadId,
       conversationId: existing.conversationId,
-      publicSessionId: existing.publicSessionId,
+      publicConversationId: existing.publicConversationId,
+      channelIdentityId:
+        existing.messageChannelIdentityId ?? existing.conversationChannelIdentityId ?? "",
       publicMessageId: existing.publicMessageId,
+      widgetPublicSessionId: existing.publicSessionId ?? undefined,
       agentAllowedToReply: existing.agentAllowedToReply,
+      aiState: toAiState(existing.aiState),
       replayed: true,
-      aiReply: aiReply
+      existingAiReply: existingAiReply
         ? {
-            publicMessageId: aiReply.publicMessageId,
-            body: aiReply.body,
-            createdAt: aiReply.createdAt
+            publicMessageId: existingAiReply.publicMessageId,
+            body: existingAiReply.body,
+            createdAt: existingAiReply.createdAt
           }
         : undefined
     };
@@ -775,6 +1146,230 @@ export class PostgresIntakeRepository implements IntakeRepository {
       createdAt: existing.createdAt
     };
   }
+}
+
+type Transaction = Parameters<Parameters<OperationsDb["transaction"]>[0]>[0];
+
+async function ensureWidgetSession(tx: Transaction, input: AcceptInboundMessageInput, now: Date) {
+  if (input.channel !== "site_widget") {
+    return null;
+  }
+
+  if (!input.widgetPublicSessionId || !input.sourcePageUrl || !input.widgetInstanceId) {
+    throw new Error("site widget inbound requires session, source page and widget instance");
+  }
+
+  const [session] = await tx
+    .insert(widgetSessions)
+    .values({
+      publicSessionId: input.widgetPublicSessionId,
+      sourcePageUrl: input.sourcePageUrl,
+      widgetInstanceId: input.widgetInstanceId,
+      referrerUrl: input.referrerUrl ?? null,
+      pageTitle: input.pageTitle ?? null,
+      utm: input.utm ?? null,
+      visitorContext: input.visitorContext ?? {},
+      createdAt: now,
+      lastSeenAt: now
+    })
+    .onConflictDoUpdate({
+      target: widgetSessions.publicSessionId,
+      set: {
+        sourcePageUrl: input.sourcePageUrl,
+        widgetInstanceId: input.widgetInstanceId,
+        referrerUrl: input.referrerUrl ?? null,
+        pageTitle: input.pageTitle ?? null,
+        utm: input.utm ?? null,
+        visitorContext: input.visitorContext ?? {},
+        lastSeenAt: now
+      }
+    })
+    .returning({
+      id: widgetSessions.id,
+      publicSessionId: widgetSessions.publicSessionId
+    });
+
+  if (!session) {
+    throw new Error("widget session insert returned no row");
+  }
+
+  return session;
+}
+
+async function findOrCreateChannelIdentity(
+  tx: Transaction,
+  input: AcceptInboundMessageInput,
+  widgetSessionId: string | null,
+  now: Date
+) {
+  const existing = await findChannelIdentity(tx, input, widgetSessionId);
+
+  if (existing) {
+    const [updated] = await tx
+      .update(channelIdentities)
+      .set({
+        displayName: input.displayName ?? input.contact?.name ?? existing.displayName,
+        username: input.username ?? input.contact?.username ?? existing.username,
+        externalUserId: input.externalUserId ?? existing.externalUserId,
+        metadata: {
+          ...existing.metadata,
+          ...channelIdentityMetadata(input)
+        },
+        updatedAt: now,
+        lastSeenAt: now
+      })
+      .where(eq(channelIdentities.id, existing.id))
+      .returning({
+        id: channelIdentities.id,
+        leadId: channelIdentities.leadId,
+        displayName: channelIdentities.displayName,
+        username: channelIdentities.username,
+        externalUserId: channelIdentities.externalUserId,
+        metadata: channelIdentities.metadata
+      });
+
+    if (!updated) {
+      throw new Error("channel identity update returned no row");
+    }
+
+    return updated;
+  }
+
+  const [created] = await tx
+    .insert(channelIdentities)
+    .values({
+      channel: input.channel,
+      provider: input.provider,
+      providerAccountId: input.providerAccountId ?? null,
+      externalChatId: input.externalChatId ?? null,
+      externalUserId: input.externalUserId ?? null,
+      widgetSessionId,
+      displayName: input.displayName ?? input.contact?.name ?? null,
+      username: input.username ?? input.contact?.username ?? null,
+      normalizedPhone: input.contact?.phone ?? null,
+      metadata: channelIdentityMetadata(input),
+      createdAt: now,
+      updatedAt: now,
+      lastSeenAt: now
+    })
+    .returning({
+      id: channelIdentities.id,
+      leadId: channelIdentities.leadId,
+      displayName: channelIdentities.displayName,
+      username: channelIdentities.username,
+      externalUserId: channelIdentities.externalUserId,
+      metadata: channelIdentities.metadata
+    });
+
+  if (!created) {
+    throw new Error("channel identity insert returned no row");
+  }
+
+  return created;
+}
+
+async function findChannelIdentity(
+  tx: Transaction,
+  input: AcceptInboundMessageInput,
+  widgetSessionId: string | null
+) {
+  if (input.channel === "site_widget") {
+    if (!widgetSessionId) {
+      throw new Error("site widget identity requires widget session");
+    }
+
+    const [existing] = await tx
+      .select({
+        id: channelIdentities.id,
+        leadId: channelIdentities.leadId,
+        displayName: channelIdentities.displayName,
+        username: channelIdentities.username,
+        externalUserId: channelIdentities.externalUserId,
+        metadata: channelIdentities.metadata
+      })
+      .from(channelIdentities)
+      .where(eq(channelIdentities.widgetSessionId, widgetSessionId))
+      .limit(1);
+
+    return existing ?? null;
+  }
+
+  const [existing] = await tx
+    .select({
+      id: channelIdentities.id,
+      leadId: channelIdentities.leadId,
+      displayName: channelIdentities.displayName,
+      username: channelIdentities.username,
+      externalUserId: channelIdentities.externalUserId,
+      metadata: channelIdentities.metadata
+    })
+    .from(channelIdentities)
+    .where(
+      and(
+        eq(channelIdentities.channel, "telegram"),
+        eq(channelIdentities.provider, input.provider),
+        eq(channelIdentities.providerAccountId, input.providerAccountId ?? ""),
+        eq(channelIdentities.externalChatId, input.externalChatId ?? "")
+      )
+    )
+    .limit(1);
+
+  return existing ?? null;
+}
+
+async function findExistingProviderInbound(
+  tx: Transaction,
+  channelIdentityId: string,
+  input: AcceptInboundMessageInput
+) {
+  const providerConditions: SQLWrapper[] = [];
+
+  if (input.providerMessageId) {
+    providerConditions.push(eq(conversationMessages.providerMessageId, input.providerMessageId));
+  }
+
+  if (input.providerUpdateId) {
+    providerConditions.push(eq(conversationMessages.providerUpdateId, input.providerUpdateId));
+  }
+
+  if (!providerConditions.length) {
+    return null;
+  }
+
+  const providerWhere =
+    providerConditions.length === 1 ? providerConditions[0] : or(...providerConditions);
+
+  if (!providerWhere) {
+    return null;
+  }
+
+  const [existing] = await tx
+    .select({
+      leadId: conversationMessages.leadId,
+      conversationId: conversationMessages.conversationId,
+      publicConversationId: conversations.publicConversationId,
+      agentAllowedToReply: conversations.agentAllowedToReply,
+      aiState: conversations.aiState,
+      messageChannelIdentityId: conversationMessages.channelIdentityId,
+      conversationChannelIdentityId: conversations.channelIdentityId,
+      publicSessionId: widgetSessions.publicSessionId,
+      publicMessageId: conversationMessages.publicMessageId,
+      requestFingerprint: conversationMessages.requestFingerprint
+    })
+    .from(conversationMessages)
+    .innerJoin(conversations, eq(conversationMessages.conversationId, conversations.id))
+    .leftJoin(channelIdentities, eq(conversationMessages.channelIdentityId, channelIdentities.id))
+    .leftJoin(widgetSessions, eq(channelIdentities.widgetSessionId, widgetSessions.id))
+    .where(
+      and(
+        eq(conversationMessages.channelIdentityId, channelIdentityId),
+        eq(conversationMessages.direction, "inbound"),
+        providerWhere
+      )
+    )
+    .limit(1);
+
+  return existing ?? null;
 }
 
 function toLeadInsert(request: SiteFormIntakeRequest): typeof leads.$inferInsert {
@@ -800,50 +1395,37 @@ function toLeadInsert(request: SiteFormIntakeRequest): typeof leads.$inferInsert
   };
 }
 
-function toWidgetSessionInsert(
-  input: SaveAcceptedSiteWidgetMessageInput,
+function toInboundLeadInsert(
+  input: AcceptInboundMessageInput,
   now: Date
-): typeof widgetSessions.$inferInsert {
-  return {
-    publicSessionId: input.publicSessionId,
-    sourcePageUrl: input.request.source.page_url,
-    widgetInstanceId: input.request.source.widget_instance_id,
-    referrerUrl: input.request.source.referrer_url ?? null,
-    pageTitle: input.request.source.page_title ?? null,
-    utm: input.request.source.utm ?? null,
-    visitorContext: input.request.visitor_context ?? {},
-    createdAt: now,
-    lastSeenAt: now
-  };
-}
-
-function toWidgetLeadInsert(
-  input: SaveAcceptedSiteWidgetMessageInput
 ): typeof leads.$inferInsert {
-  const { request } = input;
-
   return {
     status: "new",
-    sourceChannel: request.source.channel,
-    sourcePageUrl: request.source.page_url,
-    sourceFormKind: "site_widget",
-    contactName: request.contact?.name ?? "Site visitor",
-    contactPhone: request.contact?.phone ?? null,
-    contactEmail: request.contact?.email ?? null,
-    contactPreferred: request.contact?.preferred_contact ?? null,
-    contactCity: request.contact?.city ?? null,
-    requestText: request.message.text,
+    sourceChannel: input.channel,
+    sourcePageUrl: input.sourcePageUrl ?? null,
+    sourceFormKind: input.channel === "site_widget" ? "site_widget" : null,
+    contactName:
+      input.contact?.name ?? input.displayName ?? (input.channel === "telegram" ? "Telegram" : "Site visitor"),
+    contactPhone: input.contact?.phone ?? null,
+    contactEmail: input.contact?.email ?? null,
+    contactPreferred: input.contact?.preferredContact ?? (input.channel === "telegram" ? "telegram" : null),
+    contactCity: input.contact?.city ?? null,
+    requestText: input.message.text || input.message.caption || null,
     requestProductInterest: null,
-    submittedAt: new Date(request.submitted_at),
-    referrerUrl: request.source.referrer_url ?? null,
-    utm: request.source.utm ?? null,
+    submittedAt: new Date(input.message.submittedAt),
+    referrerUrl: input.referrerUrl ?? null,
+    utm: input.utm ?? null,
     metadata: {
-      contract_version: request.schema_version,
-      event_type: request.event_type,
-      public_session_id: input.publicSessionId,
-      widget_instance_id: request.source.widget_instance_id,
-      automation_status: input.agentAllowedToReply ? "enabled" : "disabled"
-    }
+      ...input.metadata,
+      provider: input.provider,
+      provider_account_id: input.providerAccountId ?? null,
+      external_chat_id: input.externalChatId ?? null,
+      external_user_id: input.externalUserId ?? null,
+      widget_instance_id: input.widgetInstanceId ?? null,
+      created_via: "acceptInboundMessage"
+    },
+    createdAt: now,
+    updatedAt: now
   };
 }
 
@@ -857,8 +1439,8 @@ function toManagerLeadListItem(
     status: toLeadStatus(lead.status),
     source: {
       channel: toSourceChannel(lead.sourceChannel),
-      pageUrl: lead.sourcePageUrl,
-      formKind: lead.sourceFormKind,
+      pageUrl: lead.sourcePageUrl ?? undefined,
+      formKind: lead.sourceFormKind ?? undefined,
       referrerUrl: lead.referrerUrl ?? undefined,
       utm: lead.utm ?? undefined,
       widgetInstanceId: readStringMetadata(lead.metadata, "widget_instance_id")
@@ -875,21 +1457,99 @@ function toManagerLeadListItem(
       productInterest: lead.requestProductInterest ?? undefined
     },
     submittedAt: lead.submittedAt.toISOString(),
-    createdAt: lead.createdAt.toISOString()
+    nextStep: lead.nextStepAt
+      ? {
+          at: lead.nextStepAt.toISOString(),
+          summary: lead.nextStepSummary ?? undefined,
+          channel: normalizeNextStepChannel(lead.nextStepChannel)
+        }
+      : undefined,
+    createdAt: lead.createdAt.toISOString(),
+    updatedAt: lead.updatedAt.toISOString()
   };
 }
 
+function toManagerChannelIdentity(
+  identity: typeof channelIdentities.$inferSelect | null,
+  session: typeof widgetSessions.$inferSelect | null,
+  conversation: typeof conversations.$inferSelect
+): ManagerChannelIdentity {
+  return {
+    provider: identity?.provider ?? conversation.channel,
+    displayName: identity?.displayName ?? undefined,
+    username: identity?.username ?? undefined,
+    externalChatId: identity?.externalChatId ?? undefined,
+    externalUserId: identity?.externalUserId ?? undefined,
+    widgetPublicSessionId: session?.publicSessionId ?? undefined,
+    widgetInstanceId: conversation.widgetInstanceId ?? session?.widgetInstanceId ?? undefined
+  };
+}
+
+function leadCreatedMetadata(input: AcceptInboundMessageInput, channelIdentityId: string) {
+  return {
+    channel: input.channel,
+    provider: input.provider,
+    provider_account_id: input.providerAccountId ?? null,
+    external_chat_id: input.externalChatId ?? null,
+    external_user_id: input.externalUserId ?? null,
+    public_session_id: input.widgetPublicSessionId ?? null,
+    source_page_url: input.sourcePageUrl ?? null,
+    widget_instance_id: input.widgetInstanceId ?? null,
+    channel_identity_id: channelIdentityId,
+    automation_status: input.automationRequested ? "enabled" : "disabled"
+  };
+}
+
+function channelIdentityMetadata(input: AcceptInboundMessageInput) {
+  return {
+    provider_account_id: input.providerAccountId ?? null,
+    external_chat_id: input.externalChatId ?? null,
+    external_user_id: input.externalUserId ?? null,
+    public_session_id: input.widgetPublicSessionId ?? null,
+    widget_instance_id: input.widgetInstanceId ?? null,
+    source_page_url: input.sourcePageUrl ?? null
+  };
+}
+
+function messageBody(input: AcceptInboundMessageInput, contentType: ConversationContentType) {
+  if (input.message.text.trim()) {
+    return input.message.text;
+  }
+
+  if (input.message.caption?.trim()) {
+    return input.message.caption;
+  }
+
+  return `[${contentType}]`;
+}
+
 function toSourceChannel(value: string): ManagerLeadListItem["source"]["channel"] {
-  if (value === "site_form" || value === "site_widget") {
+  if (value === "site_form" || value === "site_widget" || value === "telegram") {
     return value;
   }
 
   throw new Error(`invalid lead source channel ${value}`);
 }
 
+function toCustomerChannel(value: string): CustomerChannel {
+  if (value === "site_widget" || value === "telegram") {
+    return value;
+  }
+
+  throw new Error(`invalid customer channel ${value}`);
+}
+
 function toLeadStatus(value: string): LeadStatus {
   if (!isLeadStatus(value)) {
     throw new Error(`invalid lead status ${value}`);
+  }
+
+  return value;
+}
+
+function toAiState(value: string): AiState {
+  if (!isAiState(value)) {
+    throw new Error(`invalid AI state ${value}`);
   }
 
   return value;
@@ -906,6 +1566,39 @@ function normalizePreferredContact(value: string | null) {
   }
 
   return undefined;
+}
+
+function normalizeNextStepChannel(value: string | null): NextStepChannel | undefined {
+  if (
+    value === "manager_call" ||
+    value === "phone" ||
+    value === "whatsapp" ||
+    value === "telegram" ||
+    value === "site_widget" ||
+    value === "email"
+  ) {
+    return value;
+  }
+
+  return undefined;
+}
+
+function statusRequiresNextStep(status: LeadStatus) {
+  return status === "in_progress" || status === "waiting_response";
+}
+
+function normalizeContentType(value: unknown): ConversationContentType {
+  if (
+    value === "voice" ||
+    value === "sticker" ||
+    value === "video_note" ||
+    value === "photo" ||
+    value === "document"
+  ) {
+    return value;
+  }
+
+  return "text";
 }
 
 function toConversationMessageDirection(

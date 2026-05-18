@@ -37,3 +37,4 @@ Current evidence records:
 - `S04_WIDGET_PERSISTENCE_RU.md` - widget message persistence and manager visibility evidence.
 - `S05_WEBSITE_SAFE_AI_RU.md` - local safe AI backend, persistence, manager visibility, and fallback evidence.
 - `S06_MANAGER_TAKEOVER_RU.md` - manager takeover, blocked follow-up AI, and stale draft send-time gate evidence.
+- `P0_CHANNEL_NEUTRAL_CONVERSATION_FOUNDATION_RU.md` - channel-neutral widget/Telegram-ready conversation foundation evidence.

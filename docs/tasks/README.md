@@ -17,6 +17,7 @@ Current task records:
 - `S03_MIN_LIFECYCLE_RU.md` - minimal manager statuses and status-change history before widget persistence.
 - `S04_WIDGET_PERSISTENCE_RU.md` - website widget message persistence before AI replies.
 - `SERIOUS_AI_LAYER_RU.md` - preparation plan for the serious backend AI layer after S05 website safe AI.
+- `P0_CHANNEL_NEUTRAL_CONVERSATION_FOUNDATION_RU.md` - implementation handoff for channel-neutral widget/Telegram conversation foundation before Telegram adapter and production.
 
 Required fields:
 

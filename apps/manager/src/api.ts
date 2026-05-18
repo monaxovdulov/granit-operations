@@ -36,10 +36,10 @@ export const managerApi = {
       }
     );
   },
-  async takeoverConversation(leadId: string, publicSessionId: string) {
+  async takeoverConversation(leadId: string, publicConversationId: string) {
     return requestJson<{ lead: ManagerLeadDetail }>(
       `/manager/leads/${encodeURIComponent(leadId)}/conversations/${encodeURIComponent(
-        publicSessionId
+        publicConversationId
       )}/takeover`,
       {
         method: "PATCH"

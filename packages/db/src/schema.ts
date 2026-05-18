@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   boolean,
   index,
+  integer,
   jsonb,
   pgTable,
   text,
@@ -16,8 +17,8 @@ export const leads = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     status: text("status").notNull().default("new"),
     sourceChannel: text("source_channel").notNull().default("site_form"),
-    sourcePageUrl: text("source_page_url").notNull(),
-    sourceFormKind: text("source_form_kind").notNull(),
+    sourcePageUrl: text("source_page_url"),
+    sourceFormKind: text("source_form_kind"),
     contactName: text("contact_name").notNull(),
     contactPhone: text("contact_phone"),
     contactEmail: text("contact_email"),
@@ -29,6 +30,9 @@ export const leads = pgTable(
     referrerUrl: text("referrer_url"),
     utm: jsonb("utm").$type<Record<string, string | undefined> | null>(),
     metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
+    nextStepAt: timestamp("next_step_at", { withTimezone: true }),
+    nextStepSummary: text("next_step_summary"),
+    nextStepChannel: text("next_step_channel"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
   },
@@ -104,28 +108,77 @@ export const widgetSessions = pgTable(
   })
 );
 
+export const channelIdentities = pgTable(
+  "channel_identities",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    leadId: uuid("lead_id").references(() => leads.id, { onDelete: "set null" }),
+    channel: text("channel").notNull(),
+    provider: text("provider").notNull(),
+    providerAccountId: text("provider_account_id"),
+    externalChatId: text("external_chat_id"),
+    externalUserId: text("external_user_id"),
+    widgetSessionId: uuid("widget_session_id").references(() => widgetSessions.id, {
+      onDelete: "set null"
+    }),
+    displayName: text("display_name"),
+    username: text("username"),
+    normalizedPhone: text("normalized_phone"),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => ({
+    leadIdx: index("channel_identities_lead_id_idx").on(table.leadId, table.updatedAt),
+    channelLastSeenIdx: index("channel_identities_channel_last_seen_idx").on(
+      table.channel,
+      table.lastSeenAt
+    ),
+    widgetSessionIdx: uniqueIndex("channel_identities_widget_session_id_idx").on(
+      table.widgetSessionId
+    ),
+    telegramChatIdx: uniqueIndex("channel_identities_telegram_chat_idx").on(
+      table.provider,
+      table.providerAccountId,
+      table.externalChatId
+    )
+  })
+);
+
 export const conversations = pgTable(
   "conversations",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    publicConversationId: uuid("public_conversation_id").notNull().defaultRandom(),
     leadId: uuid("lead_id")
       .notNull()
       .references(() => leads.id, { onDelete: "cascade" }),
-    widgetSessionId: uuid("widget_session_id")
-      .notNull()
-      .references(() => widgetSessions.id, { onDelete: "cascade" }),
+    widgetSessionId: uuid("widget_session_id").references(() => widgetSessions.id, {
+      onDelete: "set null"
+    }),
+    channelIdentityId: uuid("channel_identity_id").references(() => channelIdentities.id, {
+      onDelete: "set null"
+    }),
     channel: text("channel").notNull(),
     status: text("status").notNull().default("open"),
+    aiState: text("ai_state").notNull().default("ai_collecting_info"),
     agentAllowedToReply: boolean("agent_allowed_to_reply").notNull().default(false),
-    sourcePageUrl: text("source_page_url").notNull(),
-    widgetInstanceId: text("widget_instance_id").notNull(),
+    sourcePageUrl: text("source_page_url"),
+    widgetInstanceId: text("widget_instance_id"),
     metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
   },
   (table) => ({
+    publicConversationIdx: uniqueIndex("conversations_public_conversation_id_idx").on(
+      table.publicConversationId
+    ),
     leadIdx: index("conversations_lead_id_idx").on(table.leadId),
     widgetSessionIdx: index("conversations_widget_session_id_idx").on(table.widgetSessionId),
+    channelIdentityIdx: index("conversations_channel_identity_id_idx").on(
+      table.channelIdentityId
+    ),
     channelUpdatedIdx: index("conversations_channel_updated_idx").on(table.channel, table.updatedAt)
   })
 );
@@ -146,7 +199,20 @@ export const conversationMessages = pgTable(
     body: text("body").notNull(),
     idempotencyKey: text("idempotency_key").notNull(),
     requestFingerprint: text("request_fingerprint").notNull(),
-    sourcePageUrl: text("source_page_url").notNull(),
+    channelIdentityId: uuid("channel_identity_id").references(() => channelIdentities.id, {
+      onDelete: "set null"
+    }),
+    providerMessageId: text("provider_message_id"),
+    providerUpdateId: text("provider_update_id"),
+    providerSentAt: timestamp("provider_sent_at", { withTimezone: true }),
+    sourcePageUrl: text("source_page_url"),
+    contentType: text("content_type").notNull().default("text"),
+    providerFileId: text("provider_file_id"),
+    providerFileUniqueId: text("provider_file_unique_id"),
+    mimeType: text("mime_type"),
+    fileSize: integer("file_size"),
+    durationSeconds: integer("duration_seconds"),
+    caption: text("caption"),
     metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
     submittedAt: timestamp("submitted_at", { withTimezone: true }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
@@ -158,11 +224,77 @@ export const conversationMessages = pgTable(
     idempotencyIdx: uniqueIndex("conversation_messages_idempotency_key_idx").on(
       table.idempotencyKey
     ),
+    providerMessageIdx: uniqueIndex("conversation_messages_provider_message_idx").on(
+      table.channelIdentityId,
+      table.providerMessageId
+    ),
+    providerUpdateIdx: uniqueIndex("conversation_messages_provider_update_idx").on(
+      table.channelIdentityId,
+      table.providerUpdateId
+    ),
     conversationCreatedIdx: index("conversation_messages_conversation_created_idx").on(
       table.conversationId,
       table.createdAt
     ),
     leadCreatedIdx: index("conversation_messages_lead_created_idx").on(table.leadId, table.createdAt)
+  })
+);
+
+export const messageDeliveries = pgTable(
+  "message_deliveries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    conversationMessageId: uuid("conversation_message_id")
+      .notNull()
+      .references(() => conversationMessages.id, { onDelete: "cascade" }),
+    channel: text("channel").notNull(),
+    provider: text("provider").notNull(),
+    status: text("status").notNull().default("pending"),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    lastError: text("last_error"),
+    providerMessageId: text("provider_message_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => ({
+    messageIdx: index("message_deliveries_message_id_idx").on(table.conversationMessageId),
+    statusIdx: index("message_deliveries_status_idx").on(table.status, table.updatedAt)
+  })
+);
+
+export const managerNotificationOutbox = pgTable(
+  "manager_notification_outbox",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    leadId: uuid("lead_id")
+      .notNull()
+      .references(() => leads.id, { onDelete: "cascade" }),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    conversationMessageId: uuid("conversation_message_id")
+      .notNull()
+      .references(() => conversationMessages.id, { onDelete: "cascade" }),
+    notificationType: text("notification_type").notNull(),
+    destinationKind: text("destination_kind").notNull(),
+    destinationIdentityId: uuid("destination_identity_id").references(() => channelIdentities.id, {
+      onDelete: "set null"
+    }),
+    status: text("status").notNull().default("pending"),
+    provider: text("provider").notNull(),
+    providerMessageId: text("provider_message_id"),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    lastError: text("last_error"),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => ({
+    leadIdx: index("manager_notification_outbox_lead_id_idx").on(table.leadId, table.createdAt),
+    statusIdx: index("manager_notification_outbox_status_idx").on(table.status, table.updatedAt),
+    messageIdx: index("manager_notification_outbox_message_id_idx").on(
+      table.conversationMessageId
+    )
   })
 );
 

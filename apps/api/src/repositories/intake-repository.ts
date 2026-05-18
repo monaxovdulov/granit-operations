@@ -16,6 +16,36 @@ export const LEAD_STATUSES = [
 
 export type LeadStatus = (typeof LEAD_STATUSES)[number];
 
+export const AI_STATES = [
+  "ai_collecting_info",
+  "needs_manager",
+  "manager_active",
+  "watching",
+  "closed"
+] as const;
+
+export type AiState = (typeof AI_STATES)[number];
+
+export type CustomerChannel = "site_widget" | "telegram";
+
+export type ChannelProvider = "site_widget" | "telegram_bot";
+
+export type ConversationContentType =
+  | "text"
+  | "voice"
+  | "sticker"
+  | "video_note"
+  | "photo"
+  | "document";
+
+export type NextStepChannel =
+  | "manager_call"
+  | "phone"
+  | "whatsapp"
+  | "telegram"
+  | "site_widget"
+  | "email";
+
 export type SaveAcceptedSiteFormSubmissionInput = {
   publicSubmissionId: string;
   request: SiteFormIntakeRequest;
@@ -42,28 +72,98 @@ export type SiteWidgetStoredAiReply = {
   createdAt: string;
 };
 
+export type AcceptInboundMessageInput = {
+  publicMessageId: string;
+  channel: CustomerChannel;
+  provider: ChannelProvider;
+  providerAccountId?: string;
+  externalChatId?: string;
+  externalUserId?: string;
+  providerMessageId?: string;
+  providerUpdateId?: string;
+  providerSentAt?: string;
+  widgetPublicSessionId?: string;
+  widgetInstanceId?: string;
+  sourcePageUrl?: string;
+  referrerUrl?: string;
+  pageTitle?: string;
+  utm?: SiteWidgetUtm | null;
+  visitorContext?: Record<string, unknown>;
+  displayName?: string;
+  username?: string;
+  contact?: {
+    name?: string;
+    phone?: string;
+    email?: string;
+    preferredContact?: "phone" | "whatsapp" | "telegram" | "email";
+    city?: string;
+    username?: string;
+  };
+  message: {
+    role: "visitor";
+    text: string;
+    submittedAt: string;
+    contentType?: ConversationContentType;
+    providerFileId?: string;
+    providerFileUniqueId?: string;
+    mimeType?: string;
+    fileSize?: number;
+    durationSeconds?: number;
+    caption?: string;
+    metadata?: Record<string, unknown>;
+  };
+  idempotencyKey: string;
+  requestFingerprint: string;
+  automationRequested: boolean;
+  metadata: Record<string, unknown>;
+};
+
+export type AcceptInboundMessageResult = {
+  leadId: string;
+  conversationId: string;
+  publicConversationId: string;
+  channelIdentityId: string;
+  publicMessageId: string;
+  widgetPublicSessionId?: string;
+  agentAllowedToReply: boolean;
+  aiState: AiState;
+  replayed: boolean;
+  existingAiReply?: SiteWidgetStoredAiReply;
+};
+
 export type SaveAcceptedSiteWidgetMessageResult = {
   leadId: string;
   conversationId: string;
+  publicConversationId: string;
+  channelIdentityId: string;
   publicSessionId: string;
   publicMessageId: string;
   agentAllowedToReply: boolean;
+  aiState: AiState;
   replayed: boolean;
   aiReply?: SiteWidgetStoredAiReply;
 };
 
-export type SaveSiteWidgetAiMessageInput = {
+export type PersistAiReplyWithSendGateInput = {
   leadId: string;
   conversationId: string;
+  publicConversationId?: string;
+  channel: CustomerChannel;
+  provider?: ChannelProvider;
   publicMessageId: string;
   inboundPublicMessageId: string;
   idempotencyKey: string;
   requestFingerprint: string;
   body: string;
-  sourcePageUrl: string;
+  sourcePageUrl?: string;
   metadata: Record<string, unknown>;
   agentAllowedToReplyAfterSend?: boolean;
 };
+
+export type SaveSiteWidgetAiMessageInput = Omit<
+  PersistAiReplyWithSendGateInput,
+  "channel" | "provider"
+>;
 
 export type SaveSiteWidgetAiMessageResult = SiteWidgetStoredAiReply;
 
@@ -72,9 +172,9 @@ export type SiteWidgetAiMessageLookupResult = SiteWidgetStoredAiReply & {
 };
 
 export type ManagerLeadSource = {
-  channel: "site_form" | "site_widget";
-  pageUrl: string;
-  formKind: string;
+  channel: "site_form" | CustomerChannel;
+  pageUrl?: string;
+  formKind?: string;
   referrerUrl?: string;
   utm?: SiteFormUtm | SiteWidgetUtm;
   widgetInstanceId?: string;
@@ -93,6 +193,12 @@ export type ManagerLeadRequest = {
   productInterest?: string;
 };
 
+export type ManagerNextStep = {
+  at: string;
+  summary?: string;
+  channel?: NextStepChannel;
+};
+
 export type ManagerTimelineEvent = {
   eventType: string;
   summary: string;
@@ -105,16 +211,30 @@ export type ManagerConversationMessage = {
   direction: "inbound" | "outbound";
   senderRole: "visitor" | "ai_assistant";
   body: string;
+  contentType: ConversationContentType;
+  caption?: string;
+  providerFileId?: string;
   createdAt: string;
 };
 
+export type ManagerChannelIdentity = {
+  provider: string;
+  displayName?: string;
+  username?: string;
+  externalChatId?: string;
+  externalUserId?: string;
+  widgetPublicSessionId?: string;
+  widgetInstanceId?: string;
+};
+
 export type ManagerConversation = {
-  channel: "site_widget";
-  publicSessionId: string;
+  publicConversationId: string;
+  channel: CustomerChannel;
+  channelIdentity: ManagerChannelIdentity;
   status: "open";
+  aiState: AiState;
   agentAllowedToReply: boolean;
-  sourcePageUrl: string;
-  widgetInstanceId: string;
+  sourcePageUrl?: string;
   createdAt: string;
   updatedAt: string;
   messages: ManagerConversationMessage[];
@@ -128,7 +248,9 @@ export type ManagerLeadListItem = {
   contact: ManagerLeadContact;
   request: ManagerLeadRequest;
   submittedAt: string;
+  nextStep?: ManagerNextStep;
   createdAt: string;
+  updatedAt: string;
 };
 
 export type ManagerLeadDetail = ManagerLeadListItem & {
@@ -145,9 +267,39 @@ export type ChangeManagerLeadStatusInput = {
   changedByManagerRole: string;
 };
 
+export type SetNextStepInput = {
+  leadId: string;
+  nextStepAt: string;
+  nextStepSummary?: string;
+  nextStepChannel?: NextStepChannel;
+  changedByManagerId: string;
+  changedByManagerEmail: string;
+  changedByManagerRole: string;
+};
+
+export type RecordManualContactInput = {
+  leadId: string;
+  contactChannel: "phone" | "whatsapp";
+  summary: string;
+  contactedAt: string;
+  nextStepAt?: string;
+  nextStepSummary?: string;
+  changedByManagerId: string;
+  changedByManagerEmail: string;
+  changedByManagerRole: string;
+};
+
 export type TakeoverSiteWidgetConversationInput = {
   leadId: string;
   publicSessionId: string;
+  changedByManagerId: string;
+  changedByManagerEmail: string;
+  changedByManagerRole: string;
+};
+
+export type TakeoverConversationInput = {
+  leadId: string;
+  publicConversationId: string;
   changedByManagerId: string;
   changedByManagerEmail: string;
   changedByManagerRole: string;
@@ -157,15 +309,22 @@ export interface IntakeRepository {
   saveAcceptedSiteFormSubmission(
     input: SaveAcceptedSiteFormSubmissionInput
   ): Promise<SaveAcceptedSiteFormSubmissionResult>;
+  acceptInboundMessage(input: AcceptInboundMessageInput): Promise<AcceptInboundMessageResult>;
   saveAcceptedSiteWidgetMessage(
     input: SaveAcceptedSiteWidgetMessageInput
   ): Promise<SaveAcceptedSiteWidgetMessageResult>;
+  persistAiReplyWithSendGate(
+    input: PersistAiReplyWithSendGateInput
+  ): Promise<SaveSiteWidgetAiMessageResult>;
   saveSiteWidgetAiMessage(
     input: SaveSiteWidgetAiMessageInput
   ): Promise<SaveSiteWidgetAiMessageResult>;
   listManagerLeads(): Promise<ManagerLeadListItem[]>;
   getManagerLead(leadId: string): Promise<ManagerLeadDetail | null>;
   changeManagerLeadStatus(input: ChangeManagerLeadStatusInput): Promise<ManagerLeadDetail | null>;
+  setNextStep(input: SetNextStepInput): Promise<ManagerLeadDetail | null>;
+  recordManualContact(input: RecordManualContactInput): Promise<ManagerLeadDetail | null>;
+  takeoverConversation(input: TakeoverConversationInput): Promise<ManagerLeadDetail | null>;
   takeoverSiteWidgetConversation(
     input: TakeoverSiteWidgetConversationInput
   ): Promise<ManagerLeadDetail | null>;
@@ -185,6 +344,24 @@ export class AgentReplyBlockedError extends Error {
   }
 }
 
+export class TelegramIdentityRequiredError extends Error {
+  constructor() {
+    super("telegram inbound requires provider account id and external chat id");
+    this.name = "TelegramIdentityRequiredError";
+  }
+}
+
+export class TelegramOutboundBlockedError extends Error {
+  constructor() {
+    super("telegram outbound is blocked until app-owned delivery worker is implemented");
+    this.name = "TelegramOutboundBlockedError";
+  }
+}
+
 export function isLeadStatus(value: unknown): value is LeadStatus {
   return typeof value === "string" && LEAD_STATUSES.includes(value as LeadStatus);
+}
+
+export function isAiState(value: unknown): value is AiState {
+  return typeof value === "string" && AI_STATES.includes(value as AiState);
 }

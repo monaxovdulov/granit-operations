@@ -16,16 +16,22 @@ import { MANAGER_SESSION_COOKIE, hashSessionToken } from "../src/auth/session.js
 import type { YandexOAuthClient } from "../src/auth/yandex-oauth.js";
 import {
   IdempotencyConflictError,
+  type AcceptInboundMessageInput,
+  type AcceptInboundMessageResult,
   type ChangeManagerLeadStatusInput,
   type IntakeRepository,
   type ManagerLeadDetail,
   type ManagerLeadListItem,
+  type PersistAiReplyWithSendGateInput,
+  type RecordManualContactInput,
   type SaveAcceptedSiteFormSubmissionInput,
   type SaveAcceptedSiteFormSubmissionResult,
   type SaveAcceptedSiteWidgetMessageInput,
   type SaveAcceptedSiteWidgetMessageResult,
   type SaveSiteWidgetAiMessageInput,
   type SaveSiteWidgetAiMessageResult,
+  type SetNextStepInput,
+  type TakeoverConversationInput,
   type TakeoverSiteWidgetConversationInput
 } from "../src/repositories/intake-repository.js";
 import {
@@ -585,11 +591,57 @@ class MemoryIntakeRepository implements IntakeRepository {
     };
   }
 
+  async acceptInboundMessage(input: AcceptInboundMessageInput): Promise<AcceptInboundMessageResult> {
+    if (input.channel !== "site_widget") {
+      throw new Error("not implemented in manager auth tests");
+    }
+
+    const saved = await this.saveAcceptedSiteWidgetMessage({
+      publicMessageId: input.publicMessageId,
+      publicSessionId: input.widgetPublicSessionId ?? randomUUID(),
+      agentAllowedToReply: input.automationRequested,
+      request: {
+        schema_version: "site_widget.v1",
+        event_type: "site_widget.message_submitted",
+        idempotency_key: input.idempotencyKey,
+        submitted_at: input.message.submittedAt,
+        public_session_id: input.widgetPublicSessionId,
+        source: {
+          channel: "site_widget",
+          page_url: input.sourcePageUrl ?? "https://granit.example/widget",
+          widget_instance_id: input.widgetInstanceId ?? "widget"
+        },
+        message: {
+          role: "visitor",
+          text: input.message.text
+        },
+        consent: {
+          privacy_policy: true
+        }
+      },
+      requestFingerprint: input.requestFingerprint
+    });
+
+    return {
+      leadId: saved.leadId,
+      conversationId: saved.conversationId,
+      publicConversationId: saved.publicConversationId,
+      channelIdentityId: saved.channelIdentityId,
+      publicMessageId: saved.publicMessageId,
+      widgetPublicSessionId: saved.publicSessionId,
+      agentAllowedToReply: saved.agentAllowedToReply,
+      aiState: saved.aiState,
+      replayed: saved.replayed
+    };
+  }
+
   async saveAcceptedSiteWidgetMessage(
     input: SaveAcceptedSiteWidgetMessageInput
   ): Promise<SaveAcceptedSiteWidgetMessageResult> {
     const leadId = randomUUID();
     const conversationId = randomUUID();
+    const publicConversationId = randomUUID();
+    const channelIdentityId = randomUUID();
     const now = new Date().toISOString();
     this.leads.set(leadId, {
       leadId,
@@ -613,6 +665,7 @@ class MemoryIntakeRepository implements IntakeRepository {
       },
       submittedAt: input.request.submitted_at,
       createdAt: now,
+      updatedAt: now,
       timeline: [
         {
           eventType: "lead.created_from_site_widget",
@@ -623,12 +676,17 @@ class MemoryIntakeRepository implements IntakeRepository {
       ],
       conversations: [
         {
+          publicConversationId,
           channel: "site_widget",
-          publicSessionId: input.publicSessionId,
+          channelIdentity: {
+            provider: "site_widget",
+            widgetPublicSessionId: input.publicSessionId,
+            widgetInstanceId: input.request.source.widget_instance_id
+          },
           status: "open",
+          aiState: "ai_collecting_info",
           agentAllowedToReply: input.agentAllowedToReply,
           sourcePageUrl: input.request.source.page_url,
-          widgetInstanceId: input.request.source.widget_instance_id,
           createdAt: now,
           updatedAt: now,
           messages: [
@@ -637,6 +695,7 @@ class MemoryIntakeRepository implements IntakeRepository {
               direction: "inbound",
               senderRole: "visitor",
               body: input.request.message.text,
+              contentType: "text",
               createdAt: now
             }
           ]
@@ -648,11 +707,20 @@ class MemoryIntakeRepository implements IntakeRepository {
     return {
       leadId,
       conversationId,
+      publicConversationId,
+      channelIdentityId,
       publicSessionId: input.publicSessionId,
       publicMessageId: input.publicMessageId,
       agentAllowedToReply: input.agentAllowedToReply,
+      aiState: "ai_collecting_info",
       replayed: false
     };
+  }
+
+  async persistAiReplyWithSendGate(
+    _input: PersistAiReplyWithSendGateInput
+  ): Promise<SaveSiteWidgetAiMessageResult> {
+    throw new Error("not implemented in manager auth tests");
   }
 
   async saveSiteWidgetAiMessage(
@@ -662,9 +730,9 @@ class MemoryIntakeRepository implements IntakeRepository {
   }
 
   async listManagerLeads(): Promise<ManagerLeadListItem[]> {
-    return Array.from(this.leads.values()).map(
-      ({ timeline, conversations, internalNotePlaceholder, ...lead }) => lead
-    );
+    return Array.from(this.leads.values())
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+      .map(({ timeline, conversations, internalNotePlaceholder, ...lead }) => lead);
   }
 
   async getManagerLead(leadId: string): Promise<ManagerLeadDetail | null> {
@@ -684,9 +752,19 @@ class MemoryIntakeRepository implements IntakeRepository {
       return lead;
     }
 
+    const changedAt = new Date().toISOString();
     const updatedLead: ManagerLeadDetail = {
       ...lead,
       status: input.status,
+      nextStep:
+        input.status === "in_progress" || input.status === "waiting_response"
+          ? {
+              at: changedAt,
+              summary: "Связаться с клиентом",
+              channel: "manager_call"
+            }
+          : lead.nextStep,
+      updatedAt: changedAt,
       timeline: [
         ...lead.timeline,
         {
@@ -699,7 +777,7 @@ class MemoryIntakeRepository implements IntakeRepository {
             changed_by_manager_email: input.changedByManagerEmail,
             changed_by_manager_role: input.changedByManagerRole
           },
-          createdAt: new Date().toISOString()
+          createdAt: changedAt
         }
       ]
     };
@@ -708,9 +786,21 @@ class MemoryIntakeRepository implements IntakeRepository {
     return updatedLead;
   }
 
+  async setNextStep(_input: SetNextStepInput): Promise<ManagerLeadDetail | null> {
+    return null;
+  }
+
+  async recordManualContact(_input: RecordManualContactInput): Promise<ManagerLeadDetail | null> {
+    return null;
+  }
+
   async takeoverSiteWidgetConversation(
     _input: TakeoverSiteWidgetConversationInput
   ): Promise<ManagerLeadDetail | null> {
+    return null;
+  }
+
+  async takeoverConversation(_input: TakeoverConversationInput): Promise<ManagerLeadDetail | null> {
     return null;
   }
 }
@@ -744,6 +834,7 @@ function toManagerLead(
     },
     submittedAt: input.request.submitted_at,
     createdAt,
+    updatedAt: createdAt,
     timeline: [
       {
         eventType: "lead.created_from_site_form",

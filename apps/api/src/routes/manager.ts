@@ -69,8 +69,8 @@ export function registerManagerRoutes(
     }
   );
 
-  app.patch<{ Params: { leadId: string; publicSessionId: string } }>(
-    "/manager/leads/:leadId/conversations/:publicSessionId/takeover",
+  app.patch<{ Params: { leadId: string; publicConversationId: string } }>(
+    "/manager/leads/:leadId/conversations/:publicConversationId/takeover",
     { preHandler: auth.requireManagerSession },
     async (request, reply) => {
       const managerUser = (request as RequestWithManager).managerUser;
@@ -83,9 +83,9 @@ export function registerManagerRoutes(
         return reply.code(403).send({ error: "manager_forbidden" });
       }
 
-      const lead = await repository.takeoverSiteWidgetConversation({
+      const lead = await repository.takeoverConversation({
         leadId: request.params.leadId,
-        publicSessionId: request.params.publicSessionId,
+        publicConversationId: request.params.publicConversationId,
         changedByManagerId: managerUser.id,
         changedByManagerEmail: managerUser.email,
         changedByManagerRole: managerUser.role

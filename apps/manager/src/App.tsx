@@ -77,8 +77,8 @@ type StatusChangeState =
 
 type TakeoverState =
   | { status: "idle" }
-  | { status: "saving"; publicSessionId: string }
-  | { status: "error"; publicSessionId: string; message: string };
+  | { status: "saving"; publicConversationId: string }
+  | { status: "error"; publicConversationId: string; message: string };
 
 const theme = createTheme({
   primaryColor: "green",
@@ -216,6 +216,10 @@ function ManagerWorkspace({
   const [statusChangeState, setStatusChangeState] = useState<StatusChangeState>({ status: "idle" });
   const [takeoverState, setTakeoverState] = useState<TakeoverState>({ status: "idle" });
   const leads = leadsState.leads;
+  const selectedLead = useMemo(
+    () => leads.find((lead) => lead.leadId === selectedLeadId) ?? null,
+    [leads, selectedLeadId]
+  );
 
   const loadLeads = useCallback(async () => {
     setLeadsState((current) => ({ status: "loading", leads: current.leads }));
@@ -289,12 +293,7 @@ function ManagerWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [onSignedOut, selectedLeadId]);
-
-  const selectedLead = useMemo(
-    () => leads.find((lead) => lead.leadId === selectedLeadId) ?? null,
-    [leads, selectedLeadId]
-  );
+  }, [onSignedOut, selectedLeadId, selectedLead?.updatedAt]);
 
   const handleStatusChange = useCallback(
     async (status: LeadStatus) => {
@@ -310,9 +309,7 @@ function ManagerWorkspace({
         setDetailState({ status: "loaded", lead: response.lead });
         setLeadsState((current) => ({
           ...current,
-          leads: current.leads.map((lead) =>
-            lead.leadId === response.lead.leadId ? { ...lead, status: response.lead.status } : lead
-          )
+          leads: replaceLeadListItem(current.leads, response.lead)
         }));
         setStatusChangeState({ status: "idle" });
       } catch (error) {
@@ -328,17 +325,24 @@ function ManagerWorkspace({
   );
 
   const handleTakeover = useCallback(
-    async (publicSessionId: string) => {
+    async (publicConversationId: string) => {
       if (!selectedLeadId) {
         return;
       }
 
-      setTakeoverState({ status: "saving", publicSessionId });
+      setTakeoverState({ status: "saving", publicConversationId });
 
       try {
-        const response = await managerApi.takeoverConversation(selectedLeadId, publicSessionId);
+        const response = await managerApi.takeoverConversation(
+          selectedLeadId,
+          publicConversationId
+        );
 
         setDetailState({ status: "loaded", lead: response.lead });
+        setLeadsState((current) => ({
+          ...current,
+          leads: replaceLeadListItem(current.leads, response.lead)
+        }));
         setTakeoverState({ status: "idle" });
       } catch (error) {
         if (error instanceof AuthRequiredError) {
@@ -348,7 +352,7 @@ function ManagerWorkspace({
 
         setTakeoverState({
           status: "error",
-          publicSessionId,
+          publicConversationId,
           message: errorMessage(error)
         });
       }
@@ -542,7 +546,7 @@ function LeadInbox({
                       {sourceChannelLabel(lead.source.channel)}
                     </Badge>
                     <Text size="xs" c="dimmed" truncate="end">
-                      {formatDate(lead.createdAt)}
+                      Активность {formatDate(lead.updatedAt)}
                     </Text>
                   </Group>
                 </Stack>
@@ -570,7 +574,7 @@ function LeadDetailPanel({
   onStatusChange: (status: LeadStatus) => void;
   takeoverState: TakeoverState;
   canManageAi: boolean;
-  onTakeover: (publicSessionId: string) => void;
+  onTakeover: (publicConversationId: string) => void;
 }) {
   if (!selectedLead) {
     return (
@@ -585,7 +589,11 @@ function LeadDetailPanel({
     );
   }
 
-  if (detailState.status === "loading" || detailState.status === "idle") {
+  if (
+    detailState.status === "loading" ||
+    detailState.status === "idle" ||
+    (detailState.status === "loaded" && detailState.lead.leadId !== selectedLead.leadId)
+  ) {
     return (
       <Paper className="detailPanel" withBorder>
         <Stack gap="md">
@@ -638,7 +646,7 @@ function LoadedLeadDetail({
   onStatusChange: (status: LeadStatus) => void;
   takeoverState: TakeoverState;
   canManageAi: boolean;
-  onTakeover: (publicSessionId: string) => void;
+  onTakeover: (publicConversationId: string) => void;
 }) {
   const [selectedStatus, setSelectedStatus] = useState<LeadStatus>(lead.status);
   const utmEntries = Object.entries(lead.source.utm ?? {}).filter(([, value]) => Boolean(value));
@@ -663,7 +671,7 @@ function LoadedLeadDetail({
             </Group>
             <Title order={2}>{displayContactName(lead)}</Title>
             <Text c="dimmed" size="sm">
-              Создана {formatDate(lead.createdAt)}
+              Создана {formatDate(lead.createdAt)} · активность {formatDate(lead.updatedAt)}
             </Text>
           </Box>
           <Code className="leadCode">{lead.publicSubmissionId}</Code>
@@ -725,7 +733,7 @@ function LoadedLeadDetail({
             <Stack gap="md">
               {lead.conversations.map((conversation) => (
                 <ConversationHistory
-                  key={conversation.publicSessionId}
+                  key={conversation.publicConversationId}
                   conversation={conversation}
                   takeoverState={takeoverState}
                   canManageAi={canManageAi}
@@ -740,16 +748,25 @@ function LoadedLeadDetail({
           <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
             <Field label="Форма" value={formKindLabel(lead.source.formKind)} />
             <Field label="Отправлена" value={formatDate(lead.submittedAt)} />
-            <Field label="Виджет" value={lead.source.widgetInstanceId} />
-            <Box className="field mdSpan2">
-              <Text size="xs" c="dimmed" fw={700} tt="uppercase">
-                Страница
-              </Text>
-              <Anchor href={lead.source.pageUrl} target="_blank" rel="noreferrer" className="linkLine">
-                <span>{lead.source.pageUrl}</span>
-                <ExternalLink size={14} />
-              </Anchor>
-            </Box>
+            {lead.source.channel === "site_widget" ? (
+              <Field label="Виджет" value={lead.source.widgetInstanceId} />
+            ) : null}
+            {lead.source.pageUrl ? (
+              <Box className="field mdSpan2">
+                <Text size="xs" c="dimmed" fw={700} tt="uppercase">
+                  Страница
+                </Text>
+                <Anchor
+                  href={lead.source.pageUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="linkLine"
+                >
+                  <span>{lead.source.pageUrl}</span>
+                  <ExternalLink size={14} />
+                </Anchor>
+              </Box>
+            ) : null}
             {lead.source.referrerUrl ? (
               <Box className="field mdSpan2">
                 <Text size="xs" c="dimmed" fw={700} tt="uppercase">
@@ -812,16 +829,16 @@ function ConversationHistory({
   conversation: ManagerLeadDetail["conversations"][number];
   takeoverState: TakeoverState;
   canManageAi: boolean;
-  onTakeover: (publicSessionId: string) => void;
+  onTakeover: (publicConversationId: string) => void;
 }) {
   const [expanded, setExpanded] = useState(true);
   const canCollapse = conversation.messages.length > COLLAPSED_DIALOG_MESSAGE_LIMIT;
   const isTakingOver =
     takeoverState.status === "saving" &&
-    takeoverState.publicSessionId === conversation.publicSessionId;
+    takeoverState.publicConversationId === conversation.publicConversationId;
   const takeoverError =
     takeoverState.status === "error" &&
-    takeoverState.publicSessionId === conversation.publicSessionId
+    takeoverState.publicConversationId === conversation.publicConversationId
       ? takeoverState.message
       : null;
   const visibleMessages = expanded
@@ -831,7 +848,7 @@ function ConversationHistory({
 
   useEffect(() => {
     setExpanded(true);
-  }, [conversation.publicSessionId]);
+  }, [conversation.publicConversationId]);
 
   return (
     <Stack gap="sm" className="conversationBlock">
@@ -839,7 +856,7 @@ function ConversationHistory({
         <Box>
           <Group gap="xs">
             <Badge color="blue" variant="light">
-              Виджет сайта
+              {conversationChannelLabel(conversation.channel)}
             </Badge>
             <Badge color={conversation.agentAllowedToReply ? "green" : "red"} variant="light">
               {conversation.agentAllowedToReply ? "AI включен" : "AI отключен"}
@@ -849,7 +866,21 @@ function ConversationHistory({
             </Badge>
           </Group>
           <Text size="xs" c="dimmed" mt={8}>
-            Сессия: <Code>{conversation.publicSessionId}</Code>
+            {conversation.channel === "site_widget" &&
+            conversation.channelIdentity.widgetPublicSessionId ? (
+              <>
+                Сессия: <Code>{conversation.channelIdentity.widgetPublicSessionId}</Code>
+              </>
+            ) : (
+              <>
+                Telegram:{" "}
+                <Code>
+                  {conversation.channelIdentity.username ??
+                    conversation.channelIdentity.externalChatId ??
+                    conversation.channelIdentity.provider}
+                </Code>
+              </>
+            )}
           </Text>
         </Box>
 
@@ -861,7 +892,7 @@ function ConversationHistory({
               color="red"
               loading={isTakingOver}
               leftSection={<BotOff size={14} />}
-              onClick={() => onTakeover(conversation.publicSessionId)}
+              onClick={() => onTakeover(conversation.publicConversationId)}
             >
               Взять диалог
             </Button>
@@ -916,7 +947,7 @@ function ConversationHistory({
                 {conversationMessageSenderLabel(message.senderRole)} · {formatDate(message.createdAt)}
               </Text>
             </Group>
-            <Text className="requestText">{message.body}</Text>
+            <Text className="requestText">{conversationMessageBody(message)}</Text>
           </Box>
         ))}
       </Stack>
@@ -968,6 +999,48 @@ function formatDate(value: string) {
   }
 
   return dateFormatter.format(date);
+}
+
+function replaceLeadListItem(
+  leads: ManagerLeadListItem[],
+  updatedLead: ManagerLeadDetail
+): ManagerLeadListItem[] {
+  const listItem = toLeadListItem(updatedLead);
+  let replaced = false;
+  const nextLeads = leads.map((lead) => {
+    if (lead.leadId !== listItem.leadId) {
+      return lead;
+    }
+
+    replaced = true;
+    return listItem;
+  });
+
+  return sortLeadListItems(replaced ? nextLeads : [listItem, ...nextLeads]);
+}
+
+function toLeadListItem(lead: ManagerLeadDetail): ManagerLeadListItem {
+  return {
+    leadId: lead.leadId,
+    publicSubmissionId: lead.publicSubmissionId,
+    status: lead.status,
+    source: lead.source,
+    contact: lead.contact,
+    request: lead.request,
+    submittedAt: lead.submittedAt,
+    nextStep: lead.nextStep,
+    createdAt: lead.createdAt,
+    updatedAt: lead.updatedAt
+  };
+}
+
+function sortLeadListItems(leads: ManagerLeadListItem[]) {
+  return [...leads].sort(
+    (left, right) =>
+      right.updatedAt.localeCompare(left.updatedAt) ||
+      right.createdAt.localeCompare(left.createdAt) ||
+      right.leadId.localeCompare(left.leadId)
+  );
 }
 
 function errorMessage(error: unknown) {
@@ -1033,29 +1106,41 @@ function statusBadgeColor(status: ManagerLeadListItem["status"]) {
 function sourceChannelLabel(channel: ManagerLeadListItem["source"]["channel"]) {
   const labels: Record<ManagerLeadListItem["source"]["channel"], string> = {
     site_form: "Форма сайта",
-    site_widget: "Виджет сайта"
+    site_widget: "Виджет сайта",
+    telegram: "Telegram"
   };
 
   return labels[channel];
 }
 
-function formKindLabel(value: string) {
+function conversationChannelLabel(channel: ManagerLeadDetail["conversations"][number]["channel"]) {
+  const labels: Record<ManagerLeadDetail["conversations"][number]["channel"], string> = {
+    site_widget: "Виджет сайта",
+    telegram: "Telegram"
+  };
+
+  return labels[channel];
+}
+
+function formKindLabel(value?: string) {
   const labels: Record<string, string> = {
     catalog_request: "Запрос из каталога",
     contact: "Контактная форма",
     site_widget: "Виджет сайта"
   };
 
-  return labels[value] ?? "Форма сайта";
+  return value ? (labels[value] ?? "Форма сайта") : "Не указана";
 }
 
 function timelineEventLabel(eventType: string) {
   const labels: Record<string, string> = {
     "lead.created_from_site_form": "Заявка создана",
     "lead.created_from_site_widget": "Заявка из виджета",
+    "lead.created_from_telegram": "Заявка из Telegram",
     "conversation.message_received": "Сообщение получено",
     "conversation.ai_message_sent": "AI-ответ сохранен",
     "conversation.manager_takeover": "AI отключен менеджером",
+    "manager.notification_enqueued": "Уведомление менеджеру",
     "lead.status_changed": "Статус изменен"
   };
 
@@ -1079,9 +1164,11 @@ function timelineSummaryLabel(event: ManagerLeadDetail["timeline"][number]) {
   const labels: Record<string, string> = {
     "lead.created_from_site_form": "Заявка создана из формы на сайте",
     "lead.created_from_site_widget": "Заявка создана из виджета сайта",
-    "conversation.message_received": "Получено сообщение из виджета",
+    "lead.created_from_telegram": "Заявка создана из Telegram",
+    "conversation.message_received": "Получено сообщение клиента",
     "conversation.ai_message_sent": "AI-ответ сохранен в диалоге",
-    "conversation.manager_takeover": "Менеджер взял диалог, AI отключен"
+    "conversation.manager_takeover": "Менеджер взял диалог, AI отключен",
+    "manager.notification_enqueued": "Уведомление менеджеру поставлено в очередь"
   };
 
   return labels[event.eventType] ?? "Событие заявки";
@@ -1111,6 +1198,24 @@ function conversationMessageSenderLabel(
   senderRole: ManagerLeadDetail["conversations"][number]["messages"][number]["senderRole"]
 ) {
   return senderRole === "ai_assistant" ? "AI-помощник" : "Посетитель";
+}
+
+function conversationMessageBody(
+  message: ManagerLeadDetail["conversations"][number]["messages"][number]
+) {
+  if (message.contentType === "text") {
+    return message.body;
+  }
+
+  const labels: Record<typeof message.contentType, string> = {
+    voice: "Голосовое сообщение",
+    sticker: "Стикер",
+    video_note: "Видеосообщение",
+    photo: "Фото",
+    document: "Документ"
+  };
+
+  return message.caption ? `${labels[message.contentType]}: ${message.caption}` : labels[message.contentType];
 }
 
 function metadataLeadStatus(value: unknown): LeadStatus | null {
@@ -1157,6 +1262,10 @@ function contactLabel(value: ManagerLeadListItem["contact"]["preferredContact"])
 function displayContactName(lead: ManagerLeadListItem) {
   if (lead.source.channel === "site_widget" && lead.contact.name === "Site visitor") {
     return "Посетитель сайта";
+  }
+
+  if (lead.source.channel === "telegram" && lead.contact.name === "Telegram") {
+    return "Клиент Telegram";
   }
 
   return lead.contact.name;

@@ -25,16 +25,27 @@ import type {
 import {
   AgentReplyBlockedError,
   IdempotencyConflictError,
+  TelegramIdentityRequiredError,
+  TelegramOutboundBlockedError,
+  type AcceptInboundMessageInput,
+  type AcceptInboundMessageResult,
   type ChangeManagerLeadStatusInput,
+  type ConversationContentType,
   type IntakeRepository,
   type ManagerLeadDetail,
   type ManagerLeadListItem,
+  type NextStepChannel,
+  type PersistAiReplyWithSendGateInput,
+  type RecordManualContactInput,
   type SaveAcceptedSiteFormSubmissionInput,
   type SaveAcceptedSiteFormSubmissionResult,
   type SaveAcceptedSiteWidgetMessageInput,
   type SaveAcceptedSiteWidgetMessageResult,
   type SaveSiteWidgetAiMessageInput,
   type SaveSiteWidgetAiMessageResult,
+  type SiteWidgetStoredAiReply,
+  type SetNextStepInput,
+  type TakeoverConversationInput,
   type TakeoverSiteWidgetConversationInput
 } from "../src/repositories/intake-repository.js";
 import type {
@@ -197,6 +208,77 @@ describe("public site_form intake", () => {
     });
     expect(response.json().public_submission_id).toBeUndefined();
     expect(repository.leadCount).toBe(0);
+  });
+
+  it("raises manager-touched leads to the top of the manager list", async () => {
+    const repository = new MemoryIntakeRepository();
+    const managerAuthRepository = new MemoryManagerAuthRepository();
+    const app = track(
+      buildApi({
+        repository,
+        managerAuth: {
+          repository: managerAuthRepository,
+          config: testManagerAuthConfig()
+        }
+      })
+    );
+    const managerCookie = managerAuthRepository.createSessionCookie();
+
+    await app.inject({
+      method: "POST",
+      url: "/public/intake/site-form",
+      payload: {
+        ...validRequest(),
+        idempotency_key: "form-manager-touch-order-0001"
+      }
+    });
+    const firstLeadId = repository.onlyLead().leadId;
+
+    await waitForNextClockTick();
+    await app.inject({
+      method: "POST",
+      url: "/public/intake/site-form",
+      payload: {
+        ...validRequest(),
+        idempotency_key: "form-manager-touch-order-0002"
+      }
+    });
+
+    let managerList = await app.inject({
+      method: "GET",
+      url: "/manager/leads",
+      headers: { cookie: managerCookie }
+    });
+
+    expect(managerList.statusCode).toBe(200);
+    expect(managerList.json().leads).toHaveLength(2);
+    expect(managerList.json().leads[0].leadId).not.toBe(firstLeadId);
+
+    await waitForNextClockTick();
+    const statusChange = await app.inject({
+      method: "PATCH",
+      url: `/manager/leads/${firstLeadId}/status`,
+      headers: { cookie: managerCookie },
+      payload: { status: "in_progress" }
+    });
+    managerList = await app.inject({
+      method: "GET",
+      url: "/manager/leads",
+      headers: { cookie: managerCookie }
+    });
+
+    expect(statusChange.statusCode).toBe(200);
+    expect(managerList.statusCode).toBe(200);
+    expect(managerList.json().leads[0]).toMatchObject({
+      leadId: firstLeadId,
+      status: "in_progress",
+      nextStep: {
+        summary: "Связаться с клиентом",
+        channel: "manager_call"
+      },
+      updatedAt: statusChange.json().lead.updatedAt
+    });
+    expect(managerList.json().leads[0].updatedAt).not.toBe(managerList.json().leads[0].createdAt);
   });
 
   it("keeps viewer manager role read-only for status changes", async () => {
@@ -381,6 +463,8 @@ describe("public site_widget intake", () => {
     );
     expect(response.json().lead_id).toBeUndefined();
     expect(response.json().conversation_id).toBeUndefined();
+    expect(response.json().publicConversationId).toBeUndefined();
+    expect(response.json().public_conversation_id).toBeUndefined();
     expect(response.json().trace_id).toBeUndefined();
 
     const managerList = await app.inject({
@@ -419,9 +503,12 @@ describe("public site_widget intake", () => {
       conversations: [
         {
           channel: "site_widget",
-          publicSessionId: response.json().public_session_id,
+          publicConversationId: expect.any(String),
+          channelIdentity: {
+            widgetPublicSessionId: response.json().public_session_id,
+            widgetInstanceId: "floating-widget-v1"
+          },
           agentAllowedToReply: false,
-          widgetInstanceId: "floating-widget-v1",
           messages: [
             {
               publicMessageId: response.json().public_message_id,
@@ -444,6 +531,75 @@ describe("public site_widget intake", () => {
           }
         }
       ]
+    });
+  });
+
+  it("raises returning widget sessions to the top of the manager list after new activity", async () => {
+    const repository = new MemoryIntakeRepository();
+    const managerAuthRepository = new MemoryManagerAuthRepository();
+    const app = track(
+      buildApi({
+        repository,
+        managerAuth: {
+          repository: managerAuthRepository,
+          config: testManagerAuthConfig()
+        }
+      })
+    );
+    const managerCookie = managerAuthRepository.createSessionCookie();
+
+    const first = await app.inject({
+      method: "POST",
+      url: "/public/intake/site-widget/messages",
+      payload: validWidgetRequest({
+        idempotencyKey: "widget-returning-session-0001",
+        messageText: "Первый диалог"
+      })
+    });
+    const firstLeadId = repository.onlyLead().leadId;
+    const firstPublicSessionId = first.json().public_session_id as string;
+
+    await waitForNextClockTick();
+    await app.inject({
+      method: "POST",
+      url: "/public/intake/site-widget/messages",
+      payload: validWidgetRequest({
+        idempotencyKey: "widget-returning-session-0002",
+        messageText: "Более новый отдельный диалог"
+      })
+    });
+
+    await waitForNextClockTick();
+    await app.inject({
+      method: "POST",
+      url: "/public/intake/site-widget/messages",
+      payload: validWidgetRequest({
+        idempotencyKey: "widget-returning-session-0003",
+        publicSessionId: firstPublicSessionId,
+        messageText: "Вернулся в старую сессию"
+      })
+    });
+
+    const managerList = await app.inject({
+      method: "GET",
+      url: "/manager/leads",
+      headers: { cookie: managerCookie }
+    });
+
+    expect(managerList.statusCode).toBe(200);
+    expect(managerList.json().leads).toHaveLength(2);
+    expect(managerList.json().leads[0].leadId).toBe(firstLeadId);
+    expect(managerList.json().leads[0].updatedAt).not.toBe(managerList.json().leads[0].createdAt);
+
+    const detail = await app.inject({
+      method: "GET",
+      url: `/manager/leads/${firstLeadId}`,
+      headers: { cookie: managerCookie }
+    });
+
+    expect(detail.statusCode).toBe(200);
+    expect(detail.json().lead.conversations[0].messages.at(-1)).toMatchObject({
+      body: "Вернулся в старую сессию"
     });
   });
 
@@ -751,10 +907,15 @@ describe("public site_widget intake", () => {
     });
     const publicSessionId = first.json().public_session_id as string;
     const leadId = repository.onlyLead().leadId;
+    const publicConversationId = repository.onlyLead().conversations[0]?.publicConversationId;
+
+    if (!publicConversationId) {
+      throw new Error("expected public conversation id");
+    }
 
     const takeover = await app.inject({
       method: "PATCH",
-      url: `/manager/leads/${leadId}/conversations/${publicSessionId}/takeover`,
+      url: `/manager/leads/${leadId}/conversations/${publicConversationId}/takeover`,
       headers: { cookie: managerAuthRepository.createSessionCookie() }
     });
 
@@ -772,14 +933,17 @@ describe("public site_widget intake", () => {
     expect(first.json().automation.status).toBe("replied");
     expect(takeover.statusCode).toBe(200);
     expect(takeover.json().lead.conversations[0]).toMatchObject({
-      publicSessionId,
+      publicConversationId,
+      channelIdentity: {
+        widgetPublicSessionId: publicSessionId
+      },
       agentAllowedToReply: false
     });
     expect(takeover.json().lead.timeline).toContainEqual(
       expect.objectContaining({
         eventType: "conversation.manager_takeover",
         metadata: expect.objectContaining({
-          public_session_id: publicSessionId,
+          public_conversation_id: publicConversationId,
           previous_agent_allowed_to_reply: true,
           changed_by_manager_email: "owner@yandex.ru"
         })
@@ -804,6 +968,75 @@ describe("public site_widget intake", () => {
     });
   });
 
+  it("keeps repeated manager takeover from creating stale activity", async () => {
+    const repository = new MemoryIntakeRepository();
+    const managerAuthRepository = new MemoryManagerAuthRepository();
+    const app = track(
+      buildApi({
+        repository,
+        widgetAi: {
+          enabled: true,
+          provider: new FakeWidgetAiProvider({
+            text: "Могу помочь с общими вариантами памятника. Какие детали важны?"
+          }),
+          modelName: "gpt-5.5"
+        },
+        managerAuth: {
+          repository: managerAuthRepository,
+          config: testManagerAuthConfig()
+        }
+      })
+    );
+    const managerCookie = managerAuthRepository.createSessionCookie();
+
+    const firstMessage = await app.inject({
+      method: "POST",
+      url: "/public/intake/site-widget/messages",
+      payload: validWidgetRequest({
+        idempotencyKey: "widget-repeat-takeover-0001",
+        messageText: "Расскажите про варианты памятника"
+      })
+    });
+    const publicSessionId = firstMessage.json().public_session_id as string;
+    const leadId = repository.onlyLead().leadId;
+    const publicConversationId = repository.onlyLead().conversations[0]?.publicConversationId;
+
+    if (!publicConversationId) {
+      throw new Error("expected public conversation id");
+    }
+
+    const firstTakeover = await app.inject({
+      method: "PATCH",
+      url: `/manager/leads/${leadId}/conversations/${publicConversationId}/takeover`,
+      headers: { cookie: managerCookie }
+    });
+    await waitForNextClockTick();
+    const repeatedTakeover = await app.inject({
+      method: "PATCH",
+      url: `/manager/leads/${leadId}/conversations/${publicConversationId}/takeover`,
+      headers: { cookie: managerCookie }
+    });
+
+    expect(firstMessage.statusCode).toBe(202);
+    expect(firstTakeover.statusCode).toBe(200);
+    expect(repeatedTakeover.statusCode).toBe(200);
+    expect(repeatedTakeover.json().lead.updatedAt).toBe(firstTakeover.json().lead.updatedAt);
+    expect(
+      repeatedTakeover
+        .json()
+        .lead.timeline.filter(
+          (event: { eventType: string }) => event.eventType === "conversation.manager_takeover"
+        )
+    ).toHaveLength(1);
+    expect(repeatedTakeover.json().lead.conversations[0]).toMatchObject({
+      publicConversationId,
+      channelIdentity: {
+        widgetPublicSessionId: publicSessionId
+      },
+      agentAllowedToReply: false
+    });
+  });
+
   it("blocks a stale AI draft when manager takeover happens before AI persistence", async () => {
     const repository = new MemoryIntakeRepository();
     const provider = new FakeWidgetAiProvider({
@@ -816,9 +1049,9 @@ describe("public site_widget intake", () => {
           throw new Error("expected conversation before model reply");
         }
 
-        await repository.takeoverSiteWidgetConversation({
+        await repository.takeoverConversation({
           leadId: lead.leadId,
-          publicSessionId: conversation.publicSessionId,
+          publicConversationId: conversation.publicConversationId,
           changedByManagerId: "manager-stale-test",
           changedByManagerEmail: "owner@yandex.ru",
           changedByManagerRole: "owner"
@@ -930,6 +1163,262 @@ describe("public site_widget intake", () => {
   });
 });
 
+describe("channel-neutral conversation use cases", () => {
+  it("accepts Telegram text inbound without widget-only fields and reuses provider identity", async () => {
+    const repository = new MemoryIntakeRepository();
+    const first = await repository.acceptInboundMessage(
+      validTelegramInbound({
+        idempotencyKey: "telegram-text-0001",
+        providerMessageId: "tg-msg-1",
+        providerUpdateId: "tg-update-1",
+        text: "Здравствуйте, нужен памятник"
+      })
+    );
+    const second = await repository.acceptInboundMessage(
+      validTelegramInbound({
+        idempotencyKey: "telegram-text-0002",
+        providerMessageId: "tg-msg-2",
+        providerUpdateId: "tg-update-2",
+        text: "Город Чикаго"
+      })
+    );
+    const replay = await repository.acceptInboundMessage(
+      validTelegramInbound({
+        idempotencyKey: "telegram-text-0002-retry",
+        providerMessageId: "tg-msg-2",
+        providerUpdateId: "tg-update-2",
+        text: "Город Чикаго"
+      })
+    );
+
+    expect(first.widgetPublicSessionId).toBeUndefined();
+    expect(second).toMatchObject({
+      leadId: first.leadId,
+      conversationId: first.conversationId,
+      publicConversationId: first.publicConversationId,
+      channelIdentityId: first.channelIdentityId,
+      agentAllowedToReply: true,
+      aiState: "ai_collecting_info"
+    });
+    expect(replay).toMatchObject({
+      publicMessageId: second.publicMessageId,
+      replayed: true
+    });
+    expect(repository.onlyLead().source.pageUrl).toBeUndefined();
+    expect(repository.onlyLead().source.formKind).toBeUndefined();
+    expect(repository.onlyLead()).toMatchObject({
+      source: {
+        channel: "telegram"
+      },
+      conversations: [
+        {
+          channel: "telegram",
+          publicConversationId: first.publicConversationId,
+          channelIdentity: {
+            provider: "telegram_bot",
+            externalChatId: "chat-42",
+            externalUserId: "user-42"
+          },
+          messages: [
+            { body: "Здравствуйте, нужен памятник", contentType: "text" },
+            { body: "Город Чикаго", contentType: "text" }
+          ]
+        }
+      ]
+    });
+  });
+
+  it("uses one manager takeover route and state transition for Telegram conversations", async () => {
+    const repository = new MemoryIntakeRepository();
+    const managerAuthRepository = new MemoryManagerAuthRepository();
+    const inbound = await repository.acceptInboundMessage(
+      validTelegramInbound({
+        idempotencyKey: "telegram-takeover-0001",
+        providerMessageId: "tg-takeover-msg-1",
+        providerUpdateId: "tg-takeover-update-1",
+        text: "Хочу поговорить с менеджером"
+      })
+    );
+    const app = track(
+      buildApi({
+        repository,
+        managerAuth: {
+          repository: managerAuthRepository,
+          config: testManagerAuthConfig()
+        }
+      })
+    );
+
+    const takeover = await app.inject({
+      method: "PATCH",
+      url: `/manager/leads/${inbound.leadId}/conversations/${inbound.publicConversationId}/takeover`,
+      headers: { cookie: managerAuthRepository.createSessionCookie() }
+    });
+
+    expect(takeover.statusCode).toBe(200);
+    expect(takeover.json().lead.conversations[0]).toMatchObject({
+      publicConversationId: inbound.publicConversationId,
+      channel: "telegram",
+      aiState: "manager_active",
+      agentAllowedToReply: false
+    });
+    expect(takeover.json().lead.nextStep).toMatchObject({
+      summary: "Связаться с клиентом",
+      channel: "telegram"
+    });
+    expect(takeover.json().lead.timeline).toContainEqual(
+      expect.objectContaining({
+        eventType: "conversation.manager_takeover",
+        metadata: expect.objectContaining({
+          public_conversation_id: inbound.publicConversationId,
+          channel: "telegram"
+        })
+      })
+    );
+  });
+
+  it("keeps viewer managers read-only for conversation takeover", async () => {
+    const repository = new MemoryIntakeRepository();
+    const managerAuthRepository = new MemoryManagerAuthRepository("viewer");
+    const inbound = await repository.acceptInboundMessage(
+      validTelegramInbound({
+        idempotencyKey: "telegram-viewer-takeover-0001",
+        providerMessageId: "tg-viewer-msg-1",
+        providerUpdateId: "tg-viewer-update-1"
+      })
+    );
+    const app = track(
+      buildApi({
+        repository,
+        managerAuth: {
+          repository: managerAuthRepository,
+          config: testManagerAuthConfig()
+        }
+      })
+    );
+
+    const takeover = await app.inject({
+      method: "PATCH",
+      url: `/manager/leads/${inbound.leadId}/conversations/${inbound.publicConversationId}/takeover`,
+      headers: { cookie: managerAuthRepository.createSessionCookie() }
+    });
+
+    expect(takeover.statusCode).toBe(403);
+    expect(takeover.json()).toEqual({ error: "manager_forbidden" });
+  });
+
+  it("persists Telegram media as manager-visible needs-manager inbound without AI outbound", async () => {
+    const repository = new MemoryIntakeRepository();
+
+    const inbound = await repository.acceptInboundMessage(
+      validTelegramInbound({
+        idempotencyKey: "telegram-media-0001",
+        providerMessageId: "tg-media-msg-1",
+        providerUpdateId: "tg-media-update-1",
+        text: "",
+        contentType: "voice",
+        providerFileId: "voice-file-1",
+        caption: "Голосовое про заказ"
+      })
+    );
+
+    expect(inbound).toMatchObject({
+      agentAllowedToReply: false,
+      aiState: "needs_manager"
+    });
+    expect(repository.onlyLead().conversations[0]).toMatchObject({
+      channel: "telegram",
+      aiState: "needs_manager",
+      agentAllowedToReply: false,
+      messages: [
+        {
+          body: "Голосовое про заказ",
+          contentType: "voice",
+          providerFileId: "voice-file-1"
+        }
+      ]
+    });
+    expect(repository.onlyLead().timeline).toContainEqual(
+      expect.objectContaining({
+        eventType: "manager.notification_enqueued",
+        metadata: expect.objectContaining({
+          status: "blocked_no_destination",
+          public_message_id: inbound.publicMessageId
+        })
+      })
+    );
+    expect(repository.aiSaveCalls).toBe(0);
+  });
+
+  it("blocks Telegram AI outbound until app-owned delivery worker exists", async () => {
+    const repository = new MemoryIntakeRepository();
+    const inbound = await repository.acceptInboundMessage(
+      validTelegramInbound({
+        idempotencyKey: "telegram-outbound-block-0001",
+        providerMessageId: "tg-outbound-msg-1",
+        providerUpdateId: "tg-outbound-update-1"
+      })
+    );
+
+    await expect(
+      repository.persistAiReplyWithSendGate({
+        leadId: inbound.leadId,
+        conversationId: inbound.conversationId,
+        publicConversationId: inbound.publicConversationId,
+        channel: "telegram",
+        provider: "telegram_bot",
+        publicMessageId: randomUUID(),
+        inboundPublicMessageId: inbound.publicMessageId,
+        idempotencyKey: `ai:${inbound.publicMessageId}`,
+        requestFingerprint: "telegram-ai-outbound-block-fingerprint",
+        body: "AI reply should not be sent",
+        metadata: {}
+      })
+    ).rejects.toBeInstanceOf(TelegramOutboundBlockedError);
+    expect(repository.onlyLead().conversations[0]?.messages).toHaveLength(1);
+  });
+
+  it("records phone and WhatsApp contact as timeline and next-step state, not chat messages", async () => {
+    const repository = new MemoryIntakeRepository();
+    const saved = await repository.saveAcceptedSiteFormSubmission({
+      publicSubmissionId: randomUUID(),
+      request: {
+        ...validRequest(),
+        idempotency_key: "manual-contact-form-0001"
+      },
+      requestFingerprint: "manual-contact-form-fingerprint"
+    });
+
+    const updated = await repository.recordManualContact({
+      leadId: saved.leadId,
+      contactChannel: "whatsapp",
+      summary: "Менеджер написал клиенту в WhatsApp",
+      contactedAt: "2026-05-18T12:00:00.000Z",
+      nextStepAt: "2026-05-19T09:00:00.000Z",
+      nextStepSummary: "Проверить ответ клиента",
+      changedByManagerId: "manager-manual-contact",
+      changedByManagerEmail: "owner@yandex.ru",
+      changedByManagerRole: "owner"
+    });
+
+    expect(updated?.nextStep).toEqual({
+      at: "2026-05-19T09:00:00.000Z",
+      summary: "Проверить ответ клиента",
+      channel: "whatsapp"
+    });
+    expect(updated?.timeline).toContainEqual(
+      expect.objectContaining({
+        eventType: "lead.manual_contact_recorded",
+        metadata: expect.objectContaining({
+          contact_channel: "whatsapp",
+          next_step_at: "2026-05-19T09:00:00.000Z"
+        })
+      })
+    );
+    expect(updated?.conversations).toEqual([]);
+  });
+});
+
 function validRequest(): SiteFormIntakeRequest {
   return {
     schema_version: PUBLIC_INTAKE_CONTRACT_VERSION,
@@ -1003,9 +1492,62 @@ function validWidgetRequest(
   };
 }
 
+function validTelegramInbound(
+  overrides: {
+    idempotencyKey?: string;
+    providerMessageId?: string;
+    providerUpdateId?: string;
+    text?: string;
+    contentType?: ConversationContentType;
+    providerFileId?: string;
+    caption?: string;
+  } = {}
+): AcceptInboundMessageInput {
+  const text = overrides.text ?? "Здравствуйте";
+
+  return {
+    publicMessageId: randomUUID(),
+    channel: "telegram",
+    provider: "telegram_bot",
+    providerAccountId: "bot-main",
+    externalChatId: "chat-42",
+    externalUserId: "user-42",
+    providerMessageId: overrides.providerMessageId,
+    providerUpdateId: overrides.providerUpdateId,
+    displayName: "Telegram Visitor",
+    username: "telegram_visitor",
+    contact: {
+      name: "Telegram Visitor",
+      preferredContact: "telegram",
+      username: "telegram_visitor"
+    },
+    message: {
+      role: "visitor",
+      text,
+      submittedAt: "2026-05-18T10:00:00.000Z",
+      contentType: overrides.contentType ?? "text",
+      providerFileId: overrides.providerFileId,
+      caption: overrides.caption
+    },
+    idempotencyKey: overrides.idempotencyKey ?? "telegram-key-0001",
+    requestFingerprint: `fingerprint:${overrides.providerMessageId ?? overrides.idempotencyKey ?? text}`,
+    automationRequested: true,
+    metadata: {
+      schema_version: "telegram_update.v1",
+      event_type: "telegram.message_received"
+    }
+  };
+}
+
 function track<T extends ReturnType<typeof buildApi>>(app: T): T {
   openApps.push(app);
   return app;
+}
+
+async function waitForNextClockTick() {
+  await new Promise((resolve) => {
+    setTimeout(resolve, 10);
+  });
 }
 
 function testManagerAuthConfig() {
@@ -1048,10 +1590,27 @@ class MemoryIntakeRepository implements IntakeRepository {
       requestFingerprint: string;
     }
   >();
+  private readonly telegramIdempotency = new Map<
+    string,
+    {
+      leadId: string;
+      conversationId: string;
+      publicConversationId: string;
+      channelIdentityId: string;
+      publicMessageId: string;
+      requestFingerprint: string;
+    }
+  >();
   private readonly sessionLeads = new Map<string, string>();
   private readonly sessionConversations = new Map<string, string>();
   private readonly conversationLeads = new Map<string, string>();
   private readonly conversationSessions = new Map<string, string>();
+  private readonly conversationPublicIds = new Map<string, string>();
+  private readonly publicConversationIds = new Map<string, string>();
+  private readonly conversationIdentityIds = new Map<string, string>();
+  private readonly telegramIdentityLeads = new Map<string, string>();
+  private readonly telegramIdentityConversations = new Map<string, string>();
+  private readonly telegramProviderMessages = new Map<string, string>();
 
   constructor(
     private readonly options: { failPersistence?: boolean; failAiPersistence?: boolean } = {}
@@ -1111,6 +1670,220 @@ class MemoryIntakeRepository implements IntakeRepository {
     };
   }
 
+  async acceptInboundMessage(input: AcceptInboundMessageInput): Promise<AcceptInboundMessageResult> {
+    if (input.channel === "site_widget") {
+      const saved = await this.saveAcceptedSiteWidgetMessage({
+        publicMessageId: input.publicMessageId,
+        publicSessionId: input.widgetPublicSessionId ?? randomUUID(),
+        agentAllowedToReply: input.automationRequested,
+        request: {
+          schema_version: SITE_WIDGET_CONTRACT_VERSION,
+          event_type: SITE_WIDGET_MESSAGE_EVENT_TYPE,
+          idempotency_key: input.idempotencyKey,
+          submitted_at: input.message.submittedAt,
+          public_session_id: input.widgetPublicSessionId,
+          source: {
+            channel: "site_widget",
+            page_url: input.sourcePageUrl ?? "https://granit.example/widget",
+            widget_instance_id: input.widgetInstanceId ?? "widget",
+            referrer_url: input.referrerUrl,
+            page_title: input.pageTitle,
+            utm: input.utm ?? undefined
+          },
+          contact: {
+            name: input.contact?.name,
+            phone: input.contact?.phone,
+            email: input.contact?.email,
+            preferred_contact: input.contact?.preferredContact,
+            city: input.contact?.city
+          },
+          message: {
+            role: "visitor",
+            text: input.message.text
+          },
+          visitor_context: input.visitorContext,
+          consent: {
+            privacy_policy: true
+          }
+        },
+        requestFingerprint: input.requestFingerprint
+      });
+
+      return {
+        leadId: saved.leadId,
+        conversationId: saved.conversationId,
+        publicConversationId: saved.publicConversationId,
+        channelIdentityId: saved.channelIdentityId,
+        publicMessageId: saved.publicMessageId,
+        widgetPublicSessionId: saved.publicSessionId,
+        agentAllowedToReply: saved.agentAllowedToReply,
+        aiState: saved.aiState,
+        replayed: saved.replayed,
+        existingAiReply: saved.aiReply
+      };
+    }
+
+    if (!input.providerAccountId || !input.externalChatId) {
+      throw new TelegramIdentityRequiredError();
+    }
+
+    if (this.options.failPersistence) {
+      throw new Error("persistence unavailable");
+    }
+
+    const existing = this.telegramIdempotency.get(input.idempotencyKey);
+
+    if (existing) {
+      if (existing.requestFingerprint !== input.requestFingerprint) {
+        throw new IdempotencyConflictError();
+      }
+
+      const lead = this.leads.get(existing.leadId);
+      const conversation = lead?.conversations.find(
+        (candidate) => candidate.publicConversationId === existing.publicConversationId
+      );
+
+      return {
+        leadId: existing.leadId,
+        conversationId: existing.conversationId,
+        publicConversationId: existing.publicConversationId,
+        channelIdentityId: existing.channelIdentityId,
+        publicMessageId: existing.publicMessageId,
+        agentAllowedToReply: conversation?.agentAllowedToReply ?? false,
+        aiState: conversation?.aiState ?? "needs_manager",
+        replayed: true
+      };
+    }
+
+    const providerReplayKey = telegramProviderReplayKey(input);
+    const providerReplayIdempotency = providerReplayKey
+      ? this.telegramProviderMessages.get(providerReplayKey)
+      : undefined;
+
+    if (providerReplayIdempotency) {
+      const replay = this.telegramIdempotency.get(providerReplayIdempotency);
+
+      if (replay) {
+        return this.acceptInboundMessage({
+          ...input,
+          idempotencyKey: providerReplayIdempotency,
+          requestFingerprint: replay.requestFingerprint
+        });
+      }
+    }
+
+    const identityKey = telegramIdentityKey(input);
+    let leadId = this.telegramIdentityLeads.get(identityKey);
+    let conversationId = this.telegramIdentityConversations.get(identityKey);
+    let lead = leadId ? this.leads.get(leadId) : undefined;
+    const now = new Date().toISOString();
+    const channelIdentityId =
+      this.conversationIdentityIds.get(conversationId ?? "") ?? randomUUID();
+    const contentType = input.message.contentType ?? "text";
+    const isMedia = contentType !== "text";
+    const publicConversationId =
+      (conversationId ? this.conversationPublicIds.get(conversationId) : undefined) ??
+      randomUUID();
+
+    if (!leadId || !conversationId || !lead) {
+      leadId = randomUUID();
+      conversationId = randomUUID();
+      lead = toManagerTelegramLead(input, leadId, conversationId, publicConversationId, channelIdentityId, now);
+      this.leads.set(leadId, lead);
+      this.telegramIdentityLeads.set(identityKey, leadId);
+      this.telegramIdentityConversations.set(identityKey, conversationId);
+      this.conversationLeads.set(conversationId, leadId);
+      this.conversationPublicIds.set(conversationId, publicConversationId);
+      this.publicConversationIds.set(publicConversationId, conversationId);
+      this.conversationIdentityIds.set(conversationId, channelIdentityId);
+    } else {
+      const nextAiState = isMedia ? "needs_manager" : "ai_collecting_info";
+      const nextAgentAllowed = input.automationRequested && !isMedia;
+      lead = {
+        ...lead,
+        updatedAt: now,
+        request: {
+          ...lead.request,
+          text: input.message.text || input.message.caption || lead.request.text
+        },
+        timeline: [
+          ...lead.timeline,
+          {
+            eventType: "conversation.message_received",
+            summary: "Telegram message received",
+            metadata: {
+              public_message_id: input.publicMessageId,
+              public_conversation_id: publicConversationId,
+              channel: "telegram",
+              content_type: contentType,
+              provider_message_id: input.providerMessageId,
+              provider_update_id: input.providerUpdateId
+            },
+            createdAt: now
+          },
+          ...(isMedia
+            ? [
+                {
+                  eventType: "manager.notification_enqueued",
+                  summary:
+                    "Telegram manager notification blocked because no destination is bound",
+                  metadata: {
+                    public_conversation_id: publicConversationId,
+                    public_message_id: input.publicMessageId,
+                    status: "blocked_no_destination"
+                  },
+                  createdAt: now
+                }
+              ]
+            : [])
+        ],
+        conversations: lead.conversations.map((conversation) =>
+          conversation.publicConversationId === publicConversationId
+            ? {
+                ...conversation,
+                aiState: nextAiState,
+                agentAllowedToReply: nextAgentAllowed && conversation.agentAllowedToReply,
+                updatedAt: now,
+                messages: [
+                  ...conversation.messages,
+                  toManagerConversationMessage(input, contentType, now)
+                ]
+              }
+            : conversation
+        )
+      };
+      this.leads.set(leadId, lead);
+    }
+
+    this.telegramIdempotency.set(input.idempotencyKey, {
+      leadId,
+      conversationId,
+      publicConversationId,
+      channelIdentityId,
+      publicMessageId: input.publicMessageId,
+      requestFingerprint: input.requestFingerprint
+    });
+
+    if (providerReplayKey) {
+      this.telegramProviderMessages.set(providerReplayKey, input.idempotencyKey);
+    }
+
+    const conversation = lead.conversations.find(
+      (candidate) => candidate.publicConversationId === publicConversationId
+    );
+
+    return {
+      leadId,
+      conversationId,
+      publicConversationId,
+      channelIdentityId,
+      publicMessageId: input.publicMessageId,
+      agentAllowedToReply: conversation?.agentAllowedToReply ?? false,
+      aiState: conversation?.aiState ?? (isMedia ? "needs_manager" : "ai_collecting_info"),
+      replayed: false
+    };
+  }
+
   async saveAcceptedSiteWidgetMessage(
     input: SaveAcceptedSiteWidgetMessageInput
   ): Promise<SaveAcceptedSiteWidgetMessageResult> {
@@ -1132,14 +1905,30 @@ class MemoryIntakeRepository implements IntakeRepository {
       return {
         leadId: existing.leadId,
         conversationId: this.sessionConversations.get(existing.publicSessionId) ?? randomUUID(),
+        publicConversationId:
+          this.conversationPublicIds.get(
+            this.sessionConversations.get(existing.publicSessionId) ?? ""
+          ) ?? randomUUID(),
+        channelIdentityId:
+          this.conversationIdentityIds.get(
+            this.sessionConversations.get(existing.publicSessionId) ?? ""
+          ) ?? randomUUID(),
         publicSessionId: existing.publicSessionId,
         publicMessageId: existing.publicMessageId,
         agentAllowedToReply:
           this.leads
             .get(existing.leadId)
             ?.conversations.find(
-              (conversation) => conversation.publicSessionId === existing.publicSessionId
+              (conversation) =>
+                conversation.channelIdentity.widgetPublicSessionId === existing.publicSessionId
             )?.agentAllowedToReply ?? false,
+        aiState:
+          this.leads
+            .get(existing.leadId)
+            ?.conversations.find(
+              (conversation) =>
+                conversation.channelIdentity.widgetPublicSessionId === existing.publicSessionId
+            )?.aiState ?? "ai_collecting_info",
         replayed: true,
         aiReply: aiReply
           ? {
@@ -1160,22 +1949,33 @@ class MemoryIntakeRepository implements IntakeRepository {
     if (!leadId || !lead) {
       leadId = randomUUID();
       conversationId = randomUUID();
-      lead = toManagerWidgetLead(input, leadId, conversationId, now);
+      const publicConversationId = randomUUID();
+      const channelIdentityId = randomUUID();
+      lead = toManagerWidgetLead(input, leadId, conversationId, publicConversationId, channelIdentityId, now);
       this.leads.set(leadId, lead);
       this.sessionLeads.set(publicSessionId, leadId);
       this.sessionConversations.set(publicSessionId, conversationId);
       this.conversationLeads.set(conversationId, leadId);
       this.conversationSessions.set(conversationId, publicSessionId);
+      this.conversationPublicIds.set(conversationId, publicConversationId);
+      this.publicConversationIds.set(publicConversationId, conversationId);
+      this.conversationIdentityIds.set(conversationId, channelIdentityId);
     } else {
       if (!conversationId) {
         conversationId = randomUUID();
+        const publicConversationId = randomUUID();
+        const channelIdentityId = randomUUID();
         this.sessionConversations.set(publicSessionId, conversationId);
         this.conversationLeads.set(conversationId, leadId);
         this.conversationSessions.set(conversationId, publicSessionId);
+        this.conversationPublicIds.set(conversationId, publicConversationId);
+        this.publicConversationIds.set(publicConversationId, conversationId);
+        this.conversationIdentityIds.set(conversationId, channelIdentityId);
       }
 
       lead = {
         ...lead,
+        updatedAt: now,
         timeline: [
           ...lead.timeline,
           {
@@ -1190,7 +1990,7 @@ class MemoryIntakeRepository implements IntakeRepository {
           }
         ],
         conversations: lead.conversations.map((conversation) =>
-          conversation.publicSessionId === publicSessionId
+          conversation.channelIdentity.widgetPublicSessionId === publicSessionId
             ? {
                 ...conversation,
                 agentAllowedToReply: input.agentAllowedToReply && conversation.agentAllowedToReply,
@@ -1202,6 +2002,7 @@ class MemoryIntakeRepository implements IntakeRepository {
                     direction: "inbound",
                     senderRole: "visitor",
                     body: input.request.message.text,
+                    contentType: "text",
                     createdAt: now
                   }
                 ]
@@ -1222,15 +2023,36 @@ class MemoryIntakeRepository implements IntakeRepository {
     return {
       leadId,
       conversationId,
+      publicConversationId: this.conversationPublicIds.get(conversationId) ?? randomUUID(),
+      channelIdentityId: this.conversationIdentityIds.get(conversationId) ?? randomUUID(),
       publicSessionId,
       publicMessageId: input.publicMessageId,
       agentAllowedToReply:
         this.leads
           .get(leadId)
-          ?.conversations.find((conversation) => conversation.publicSessionId === publicSessionId)
+          ?.conversations.find(
+            (conversation) => conversation.channelIdentity.widgetPublicSessionId === publicSessionId
+          )
           ?.agentAllowedToReply ?? false,
+      aiState:
+        this.leads
+          .get(leadId)
+          ?.conversations.find(
+            (conversation) => conversation.channelIdentity.widgetPublicSessionId === publicSessionId
+          )?.aiState ?? "ai_collecting_info",
       replayed: false
     };
+  }
+
+  async persistAiReplyWithSendGate(
+    input: PersistAiReplyWithSendGateInput
+  ): Promise<SaveSiteWidgetAiMessageResult> {
+    if (input.channel === "telegram") {
+      throw new TelegramOutboundBlockedError();
+    }
+
+    const { channel: _channel, provider: _provider, publicConversationId: _publicConversationId, ...siteWidgetInput } = input;
+    return this.saveSiteWidgetAiMessage(siteWidgetInput);
   }
 
   async saveSiteWidgetAiMessage(
@@ -1265,7 +2087,7 @@ class MemoryIntakeRepository implements IntakeRepository {
     }
 
     const conversation = lead.conversations.find(
-      (candidate) => candidate.publicSessionId === publicSessionId
+      (candidate) => candidate.channelIdentity.widgetPublicSessionId === publicSessionId
     );
 
     if (!conversation?.agentAllowedToReply) {
@@ -1275,6 +2097,7 @@ class MemoryIntakeRepository implements IntakeRepository {
     const createdAt = new Date().toISOString();
     const updatedLead: ManagerLeadDetail = {
       ...lead,
+      updatedAt: createdAt,
       timeline: [
         ...lead.timeline,
         {
@@ -1289,11 +2112,15 @@ class MemoryIntakeRepository implements IntakeRepository {
         }
       ],
       conversations: lead.conversations.map((candidate) =>
-        candidate.publicSessionId === publicSessionId
+        candidate.channelIdentity.widgetPublicSessionId === publicSessionId
           ? {
               ...candidate,
               agentAllowedToReply:
                 input.agentAllowedToReplyAfterSend ?? candidate.agentAllowedToReply,
+              aiState:
+                input.agentAllowedToReplyAfterSend === false
+                  ? "needs_manager"
+                  : candidate.aiState,
               updatedAt: createdAt,
               messages: [
                 ...candidate.messages,
@@ -1302,6 +2129,7 @@ class MemoryIntakeRepository implements IntakeRepository {
                   direction: "outbound",
                   senderRole: "ai_assistant",
                   body: input.body,
+                  contentType: "text",
                   createdAt
                 }
               ]
@@ -1326,9 +2154,9 @@ class MemoryIntakeRepository implements IntakeRepository {
   }
 
   async listManagerLeads(): Promise<ManagerLeadListItem[]> {
-    return Array.from(this.leads.values()).map(
-      ({ timeline, conversations, internalNotePlaceholder, ...lead }) => lead
-    );
+    return Array.from(this.leads.values())
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+      .map(({ timeline, conversations, internalNotePlaceholder, ...lead }) => lead);
   }
 
   async getManagerLead(leadId: string): Promise<ManagerLeadDetail | null> {
@@ -1348,9 +2176,18 @@ class MemoryIntakeRepository implements IntakeRepository {
       return lead;
     }
 
+    const changedAt = new Date().toISOString();
     const updatedLead: ManagerLeadDetail = {
       ...lead,
       status: input.status,
+      nextStep: statusRequiresNextStep(input.status)
+        ? {
+            at: changedAt,
+            summary: "Связаться с клиентом",
+            channel: "manager_call"
+          }
+        : lead.nextStep,
+      updatedAt: changedAt,
       timeline: [
         ...lead.timeline,
         {
@@ -1363,10 +2200,154 @@ class MemoryIntakeRepository implements IntakeRepository {
             changed_by_manager_email: input.changedByManagerEmail,
             changed_by_manager_role: input.changedByManagerRole
           },
-          createdAt: new Date().toISOString()
+          createdAt: changedAt
         }
       ]
     };
+    this.leads.set(input.leadId, updatedLead);
+
+    return updatedLead;
+  }
+
+  async setNextStep(input: SetNextStepInput): Promise<ManagerLeadDetail | null> {
+    const lead = this.leads.get(input.leadId);
+
+    if (!lead) {
+      return null;
+    }
+
+    const changedAt = new Date().toISOString();
+    const updatedLead: ManagerLeadDetail = {
+      ...lead,
+      nextStep: {
+        at: input.nextStepAt,
+        summary: input.nextStepSummary,
+        channel: input.nextStepChannel
+      },
+      updatedAt: changedAt,
+      timeline: [
+        ...lead.timeline,
+        {
+          eventType: "lead.next_step_updated",
+          summary: "Lead next step updated",
+          metadata: {
+            next_step_at: input.nextStepAt,
+            next_step_summary: input.nextStepSummary,
+            next_step_channel: input.nextStepChannel,
+            changed_by_manager_id: input.changedByManagerId,
+            changed_by_manager_email: input.changedByManagerEmail,
+            changed_by_manager_role: input.changedByManagerRole
+          },
+          createdAt: changedAt
+        }
+      ]
+    };
+
+    this.leads.set(input.leadId, updatedLead);
+
+    return updatedLead;
+  }
+
+  async recordManualContact(input: RecordManualContactInput): Promise<ManagerLeadDetail | null> {
+    const lead = this.leads.get(input.leadId);
+
+    if (!lead) {
+      return null;
+    }
+
+    const changedAt = new Date().toISOString();
+    const updatedLead: ManagerLeadDetail = {
+      ...lead,
+      nextStep: input.nextStepAt
+        ? {
+            at: input.nextStepAt,
+            summary: input.nextStepSummary ?? input.summary,
+            channel: input.contactChannel
+          }
+        : lead.nextStep,
+      updatedAt: changedAt,
+      timeline: [
+        ...lead.timeline,
+        {
+          eventType: "lead.manual_contact_recorded",
+          summary: "Manual contact recorded",
+          metadata: {
+            contact_channel: input.contactChannel,
+            contacted_at: input.contactedAt,
+            summary: input.summary,
+            next_step_at: input.nextStepAt,
+            next_step_summary: input.nextStepSummary,
+            changed_by_manager_id: input.changedByManagerId,
+            changed_by_manager_email: input.changedByManagerEmail,
+            changed_by_manager_role: input.changedByManagerRole
+          },
+          createdAt: changedAt
+        }
+      ]
+    };
+
+    this.leads.set(input.leadId, updatedLead);
+
+    return updatedLead;
+  }
+
+  async takeoverConversation(input: TakeoverConversationInput): Promise<ManagerLeadDetail | null> {
+    const lead = this.leads.get(input.leadId);
+
+    if (!lead) {
+      return null;
+    }
+
+    const conversation = lead.conversations.find(
+      (candidate) => candidate.publicConversationId === input.publicConversationId
+    );
+
+    if (!conversation) {
+      return null;
+    }
+
+    if (!conversation.agentAllowedToReply && conversation.aiState === "manager_active") {
+      return lead;
+    }
+
+    const changedAt = new Date().toISOString();
+    const updatedLead: ManagerLeadDetail = {
+      ...lead,
+      nextStep: {
+        at: changedAt,
+        summary: "Связаться с клиентом",
+        channel: conversation.channel === "telegram" ? "telegram" : "site_widget"
+      },
+      updatedAt: changedAt,
+      timeline: [
+        ...lead.timeline,
+        {
+          eventType: "conversation.manager_takeover",
+          summary: "Manager takeover disabled AI replies",
+          metadata: {
+            public_conversation_id: input.publicConversationId,
+            channel: conversation.channel,
+            previous_agent_allowed_to_reply: conversation.agentAllowedToReply,
+            previous_ai_state: conversation.aiState,
+            changed_by_manager_id: input.changedByManagerId,
+            changed_by_manager_email: input.changedByManagerEmail,
+            changed_by_manager_role: input.changedByManagerRole
+          },
+          createdAt: changedAt
+        }
+      ],
+      conversations: lead.conversations.map((candidate) =>
+        candidate.publicConversationId === input.publicConversationId
+          ? {
+              ...candidate,
+              agentAllowedToReply: false,
+              aiState: "manager_active",
+              updatedAt: changedAt
+            }
+          : candidate
+      )
+    };
+
     this.leads.set(input.leadId, updatedLead);
 
     return updatedLead;
@@ -1382,45 +2363,20 @@ class MemoryIntakeRepository implements IntakeRepository {
     }
 
     const conversation = lead.conversations.find(
-      (candidate) => candidate.publicSessionId === input.publicSessionId
+      (candidate) => candidate.channelIdentity.widgetPublicSessionId === input.publicSessionId
     );
 
     if (!conversation) {
       return null;
     }
 
-    const changedAt = new Date().toISOString();
-    const updatedLead: ManagerLeadDetail = {
-      ...lead,
-      timeline: [
-        ...lead.timeline,
-        {
-          eventType: "conversation.manager_takeover",
-          summary: "Manager takeover disabled AI replies",
-          metadata: {
-            public_session_id: input.publicSessionId,
-            previous_agent_allowed_to_reply: conversation.agentAllowedToReply,
-            changed_by_manager_id: input.changedByManagerId,
-            changed_by_manager_email: input.changedByManagerEmail,
-            changed_by_manager_role: input.changedByManagerRole
-          },
-          createdAt: changedAt
-        }
-      ],
-      conversations: lead.conversations.map((candidate) =>
-        candidate.publicSessionId === input.publicSessionId
-          ? {
-              ...candidate,
-              agentAllowedToReply: false,
-              updatedAt: changedAt
-            }
-          : candidate
-      )
-    };
-
-    this.leads.set(input.leadId, updatedLead);
-
-    return updatedLead;
+    return this.takeoverConversation({
+      leadId: input.leadId,
+      publicConversationId: conversation.publicConversationId,
+      changedByManagerId: input.changedByManagerId,
+      changedByManagerEmail: input.changedByManagerEmail,
+      changedByManagerRole: input.changedByManagerRole
+    });
   }
 }
 
@@ -1453,6 +2409,7 @@ function toManagerLead(
     },
     submittedAt: input.request.submitted_at,
     createdAt,
+    updatedAt: createdAt,
     timeline: [
       {
         eventType: "lead.created_from_site_form",
@@ -1470,6 +2427,8 @@ function toManagerWidgetLead(
   input: SaveAcceptedSiteWidgetMessageInput,
   leadId: string,
   _conversationId: string,
+  publicConversationId: string,
+  channelIdentityId: string,
   createdAt: string
 ): ManagerLeadDetail {
   return {
@@ -1496,12 +2455,15 @@ function toManagerWidgetLead(
     },
     submittedAt: input.request.submitted_at,
     createdAt,
+    updatedAt: createdAt,
     timeline: [
       {
         eventType: "lead.created_from_site_widget",
         summary: "Lead created from public website widget",
         metadata: {
           public_session_id: input.publicSessionId,
+          public_conversation_id: publicConversationId,
+          channel_identity_id: channelIdentityId,
           automation_status: input.agentAllowedToReply ? "enabled" : "disabled"
         },
         createdAt
@@ -1512,6 +2474,7 @@ function toManagerWidgetLead(
         metadata: {
           public_message_id: input.publicMessageId,
           public_session_id: input.publicSessionId,
+          public_conversation_id: publicConversationId,
           automation_status: input.agentAllowedToReply ? "enabled" : "disabled"
         },
         createdAt
@@ -1519,12 +2482,17 @@ function toManagerWidgetLead(
     ],
     conversations: [
       {
+        publicConversationId,
         channel: "site_widget",
-        publicSessionId: input.publicSessionId,
+        channelIdentity: {
+          provider: "site_widget",
+          widgetPublicSessionId: input.publicSessionId,
+          widgetInstanceId: input.request.source.widget_instance_id
+        },
         status: "open",
+        aiState: "ai_collecting_info",
         agentAllowedToReply: input.agentAllowedToReply,
         sourcePageUrl: input.request.source.page_url,
-        widgetInstanceId: input.request.source.widget_instance_id,
         createdAt,
         updatedAt: createdAt,
         messages: [
@@ -1533,6 +2501,7 @@ function toManagerWidgetLead(
             direction: "inbound",
             senderRole: "visitor",
             body: input.request.message.text,
+            contentType: "text",
             createdAt
           }
         ]
@@ -1542,8 +2511,147 @@ function toManagerWidgetLead(
   };
 }
 
+function toManagerTelegramLead(
+  input: AcceptInboundMessageInput,
+  leadId: string,
+  _conversationId: string,
+  publicConversationId: string,
+  channelIdentityId: string,
+  createdAt: string
+): ManagerLeadDetail {
+  const contentType = input.message.contentType ?? "text";
+  const isMedia = contentType !== "text";
+
+  return {
+    leadId,
+    publicSubmissionId: input.publicMessageId,
+    status: "new",
+    source: {
+      channel: "telegram"
+    },
+    contact: {
+      name: input.contact?.name ?? input.displayName ?? "Telegram",
+      phone: input.contact?.phone,
+      email: input.contact?.email,
+      preferredContact: input.contact?.preferredContact ?? "telegram",
+      city: input.contact?.city
+    },
+    request: {
+      text: input.message.text || input.message.caption
+    },
+    submittedAt: input.message.submittedAt,
+    createdAt,
+    updatedAt: createdAt,
+    timeline: [
+      {
+        eventType: "lead.created_from_telegram",
+        summary: "Lead created from Telegram inbound",
+        metadata: {
+          public_conversation_id: publicConversationId,
+          channel_identity_id: channelIdentityId,
+          provider_account_id: input.providerAccountId,
+          external_chat_id: input.externalChatId
+        },
+        createdAt
+      },
+      {
+        eventType: "conversation.message_received",
+        summary: "Telegram message received",
+        metadata: {
+          public_message_id: input.publicMessageId,
+          public_conversation_id: publicConversationId,
+          channel: "telegram",
+          content_type: contentType,
+          provider_message_id: input.providerMessageId,
+          provider_update_id: input.providerUpdateId
+        },
+        createdAt
+      },
+      ...(isMedia
+        ? [
+            {
+              eventType: "manager.notification_enqueued",
+              summary: "Telegram manager notification blocked because no destination is bound",
+              metadata: {
+                public_conversation_id: publicConversationId,
+                public_message_id: input.publicMessageId,
+                status: "blocked_no_destination"
+              },
+              createdAt
+            }
+          ]
+        : [])
+    ],
+    conversations: [
+      {
+        publicConversationId,
+        channel: "telegram",
+        channelIdentity: {
+          provider: input.provider,
+          displayName: input.displayName ?? input.contact?.name,
+          username: input.username ?? input.contact?.username,
+          externalChatId: input.externalChatId,
+          externalUserId: input.externalUserId
+        },
+        status: "open",
+        aiState: isMedia ? "needs_manager" : "ai_collecting_info",
+        agentAllowedToReply: input.automationRequested && !isMedia,
+        createdAt,
+        updatedAt: createdAt,
+        messages: [toManagerConversationMessage(input, contentType, createdAt)]
+      }
+    ],
+    internalNotePlaceholder: ""
+  };
+}
+
+function toManagerConversationMessage(
+  input: AcceptInboundMessageInput,
+  contentType: ConversationContentType,
+  createdAt: string
+): ManagerLeadDetail["conversations"][number]["messages"][number] {
+  return {
+    publicMessageId: input.publicMessageId,
+    direction: "inbound",
+    senderRole: "visitor",
+    body: input.message.text || input.message.caption || `[${contentType}]`,
+    contentType,
+    caption: input.message.caption,
+    providerFileId: input.message.providerFileId,
+    createdAt
+  };
+}
+
+function telegramIdentityKey(input: AcceptInboundMessageInput) {
+  return `${input.provider}:${input.providerAccountId}:${input.externalChatId}`;
+}
+
+function telegramProviderReplayKey(input: AcceptInboundMessageInput) {
+  const providerBase = telegramIdentityKey(input);
+
+  if (input.providerMessageId) {
+    return `${providerBase}:message:${input.providerMessageId}`;
+  }
+
+  if (input.providerUpdateId) {
+    return `${providerBase}:update:${input.providerUpdateId}`;
+  }
+
+  return null;
+}
+
+function statusRequiresNextStep(status: ManagerLeadListItem["status"]) {
+  return status === "in_progress" || status === "waiting_response";
+}
+
 function expectNoInternalPublicFields(value: unknown) {
-  const forbidden = new Set(["lead_id", "conversation_id", "trace_id"]);
+  const forbidden = new Set([
+    "lead_id",
+    "conversation_id",
+    "publicConversationId",
+    "public_conversation_id",
+    "trace_id"
+  ]);
 
   if (!value || typeof value !== "object") {
     return;
