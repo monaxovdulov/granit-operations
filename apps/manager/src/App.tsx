@@ -51,6 +51,8 @@ import {
   type LeadStatus,
   type ManagerLeadDetail,
   type ManagerLeadListItem,
+  type MessageDeliveryStatus,
+  type ManagerTelegramBindingStatus,
   type ManagerUser
 } from "./types";
 
@@ -58,7 +60,11 @@ type SessionState =
   | { status: "loading" }
   | { status: "signed-out" }
   | { status: "error"; message: string }
-  | { status: "signed-in"; user: ManagerUser };
+  | {
+      status: "signed-in";
+      user: ManagerUser;
+      telegramBinding: ManagerTelegramBindingStatus;
+    };
 
 type LeadsState =
   | { status: "idle" | "loading"; leads: ManagerLeadListItem[] }
@@ -79,6 +85,12 @@ type TakeoverState =
   | { status: "idle" }
   | { status: "saving"; publicConversationId: string }
   | { status: "error"; publicConversationId: string; message: string };
+
+type TelegramBindTokenState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "loaded"; token: string; expiresAt: string }
+  | { status: "error"; message: string };
 
 const theme = createTheme({
   primaryColor: "green",
@@ -119,7 +131,11 @@ function ManagerApp() {
 
     try {
       const response = await managerApi.me();
-      setSession({ status: "signed-in", user: response.user });
+      setSession({
+        status: "signed-in",
+        user: response.user,
+        telegramBinding: response.telegramBinding
+      });
     } catch (error) {
       if (error instanceof AuthRequiredError) {
         setSession({ status: "signed-out" });
@@ -149,6 +165,7 @@ function ManagerApp() {
   return (
     <ManagerWorkspace
       user={session.user}
+      telegramBinding={session.telegramBinding}
       onSignedOut={() => setSession({ status: "signed-out" })}
     />
   );
@@ -199,11 +216,65 @@ function LoginScreen({ error, onRetry }: { error?: string; onRetry?: () => void 
   );
 }
 
+function TelegramBindingControl({
+  binding,
+  tokenState,
+  onCreateToken,
+  disabled
+}: {
+  binding: ManagerTelegramBindingStatus;
+  tokenState: TelegramBindTokenState;
+  onCreateToken: () => void;
+  disabled: boolean;
+}) {
+  if (binding.bound) {
+    return (
+      <Box className="telegramBinding" visibleFrom="md">
+        <Text size="xs" c="dimmed" fw={700} tt="uppercase">
+          Telegram
+        </Text>
+        <Text size="sm" fw={600} truncate="end">
+          {binding.username ? `@${binding.username}` : binding.displayName ?? "Привязан"}
+        </Text>
+      </Box>
+    );
+  }
+
+  return (
+    <Box className="telegramBinding" visibleFrom="lg">
+      <Group gap="xs" wrap="nowrap">
+        <Button
+          size="xs"
+          variant="default"
+          leftSection={<MessageCircle size={14} />}
+          loading={tokenState.status === "loading"}
+          disabled={disabled}
+          onClick={onCreateToken}
+        >
+          Telegram
+        </Button>
+        {tokenState.status === "loaded" ? (
+          <Tooltip label={`Действует до ${formatDate(tokenState.expiresAt)}`}>
+            <Code className="telegramBindCode">/start {tokenState.token}</Code>
+          </Tooltip>
+        ) : null}
+      </Group>
+      {tokenState.status === "error" ? (
+        <Text size="xs" c="red">
+          {tokenState.message}
+        </Text>
+      ) : null}
+    </Box>
+  );
+}
+
 function ManagerWorkspace({
   user,
+  telegramBinding,
   onSignedOut
 }: {
   user: ManagerUser;
+  telegramBinding: ManagerTelegramBindingStatus;
   onSignedOut: () => void;
 }) {
   const [opened, { toggle, close }] = useDisclosure();
@@ -215,6 +286,9 @@ function ManagerWorkspace({
   const [detailState, setDetailState] = useState<DetailState>({ status: "idle" });
   const [statusChangeState, setStatusChangeState] = useState<StatusChangeState>({ status: "idle" });
   const [takeoverState, setTakeoverState] = useState<TakeoverState>({ status: "idle" });
+  const [telegramBindTokenState, setTelegramBindTokenState] = useState<TelegramBindTokenState>({
+    status: "idle"
+  });
   const leads = leadsState.leads;
   const selectedLead = useMemo(
     () => leads.find((lead) => lead.leadId === selectedLeadId) ?? null,
@@ -368,6 +442,26 @@ function ManagerWorkspace({
     }
   };
 
+  const handleCreateTelegramBindToken = async () => {
+    setTelegramBindTokenState({ status: "loading" });
+
+    try {
+      const response = await managerApi.createTelegramBindToken();
+      setTelegramBindTokenState({
+        status: "loaded",
+        token: response.bindToken.token,
+        expiresAt: response.bindToken.expiresAt
+      });
+    } catch (error) {
+      if (error instanceof AuthRequiredError) {
+        onSignedOut();
+        return;
+      }
+
+      setTelegramBindTokenState({ status: "error", message: errorMessage(error) });
+    }
+  };
+
   return (
     <AppShell
       header={{ height: 64 }}
@@ -402,6 +496,12 @@ function ManagerWorkspace({
           </Group>
 
           <Group gap="sm" wrap="nowrap">
+            <TelegramBindingControl
+              binding={telegramBinding}
+              tokenState={telegramBindTokenState}
+              onCreateToken={handleCreateTelegramBindToken}
+              disabled={user.role === "viewer"}
+            />
             <Box className="userBadge" visibleFrom="sm">
               <Text size="sm" fw={600} truncate="end">
                 {user.email}
@@ -946,6 +1046,17 @@ function ConversationHistory({
               <Text size="xs" c="dimmed">
                 {conversationMessageSenderLabel(message.senderRole)} · {formatDate(message.createdAt)}
               </Text>
+              {message.delivery ? (
+                <Tooltip label={deliveryTooltip(message.delivery)}>
+                  <Badge
+                    size="xs"
+                    variant="light"
+                    color={deliveryStatusColor(message.delivery.status)}
+                  >
+                    {deliveryStatusLabel(message.delivery.status)}
+                  </Badge>
+                </Tooltip>
+              ) : null}
             </Group>
             <Text className="requestText">{conversationMessageBody(message)}</Text>
           </Box>
@@ -1140,6 +1251,11 @@ function timelineEventLabel(eventType: string) {
     "conversation.message_received": "Сообщение получено",
     "conversation.ai_message_sent": "AI-ответ сохранен",
     "conversation.manager_takeover": "AI отключен менеджером",
+    "conversation.manager_message_queued": "Ответ ожидает отправки",
+    "conversation.delivery_sent": "Сообщение доставлено",
+    "conversation.delivery_retrying": "Повтор доставки",
+    "conversation.delivery_failed": "Ошибка доставки",
+    "conversation.delivery_blocked": "Доставка заблокирована",
     "manager.notification_enqueued": "Уведомление менеджеру",
     "lead.status_changed": "Статус изменен"
   };
@@ -1168,6 +1284,11 @@ function timelineSummaryLabel(event: ManagerLeadDetail["timeline"][number]) {
     "conversation.message_received": "Получено сообщение клиента",
     "conversation.ai_message_sent": "AI-ответ сохранен в диалоге",
     "conversation.manager_takeover": "Менеджер взял диалог, AI отключен",
+    "conversation.manager_message_queued": "Ответ менеджера ждет отправки",
+    "conversation.delivery_sent": "Сообщение доставлено в Telegram",
+    "conversation.delivery_retrying": "Доставка не прошла, будет повтор",
+    "conversation.delivery_failed": "Доставка в Telegram завершилась ошибкой",
+    "conversation.delivery_blocked": "Доставка в Telegram заблокирована",
     "manager.notification_enqueued": "Уведомление менеджеру поставлено в очередь"
   };
 
@@ -1191,13 +1312,21 @@ function timelineIconColor(event: ManagerLeadDetail["timeline"][number]) {
     return "red";
   }
 
+  if (event.eventType.startsWith("conversation.delivery_")) {
+    return event.eventType === "conversation.delivery_sent" ? "green" : "red";
+  }
+
   return "green";
 }
 
 function conversationMessageSenderLabel(
   senderRole: ManagerLeadDetail["conversations"][number]["messages"][number]["senderRole"]
 ) {
-  return senderRole === "ai_assistant" ? "AI-помощник" : "Посетитель";
+  if (senderRole === "ai_assistant") {
+    return "AI-помощник";
+  }
+
+  return senderRole === "manager" ? "Менеджер" : "Посетитель";
 }
 
 function conversationMessageBody(
@@ -1216,6 +1345,54 @@ function conversationMessageBody(
   };
 
   return message.caption ? `${labels[message.contentType]}: ${message.caption}` : labels[message.contentType];
+}
+
+function deliveryStatusLabel(status: MessageDeliveryStatus) {
+  const labels: Record<MessageDeliveryStatus, string> = {
+    pending: "Ждет отправки",
+    retrying: "Повтор",
+    sent: "Доставлено",
+    failed: "Ошибка",
+    blocked_no_destination: "Нет получателя",
+    blocked: "Заблокировано"
+  };
+
+  return labels[status];
+}
+
+function deliveryStatusColor(status: MessageDeliveryStatus) {
+  const colors: Record<MessageDeliveryStatus, string> = {
+    pending: "gray",
+    retrying: "yellow",
+    sent: "green",
+    failed: "red",
+    blocked_no_destination: "orange",
+    blocked: "orange"
+  };
+
+  return colors[status];
+}
+
+function deliveryTooltip(
+  delivery: NonNullable<
+    ManagerLeadDetail["conversations"][number]["messages"][number]["delivery"]
+  >
+) {
+  const parts = [
+    `Статус: ${deliveryStatusLabel(delivery.status)}`,
+    `Попыток: ${delivery.attemptCount}`,
+    `Обновлено: ${formatDate(delivery.updatedAt)}`
+  ];
+
+  if (delivery.lastError) {
+    parts.push(`Ошибка: ${delivery.lastError}`);
+  }
+
+  if (delivery.providerMessageId) {
+    parts.push(`ID сообщения Telegram: ${delivery.providerMessageId}`);
+  }
+
+  return parts.join("\n");
 }
 
 function metadataLeadStatus(value: unknown): LeadStatus | null {

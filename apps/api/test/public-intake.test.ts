@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 
 import {
   PUBLIC_INTAKE_CONTRACT_VERSION,
@@ -25,16 +26,30 @@ import type {
 import {
   AgentReplyBlockedError,
   IdempotencyConflictError,
+  ManagerTelegramReplyContextMissingError,
+  ManagerTelegramReplyRequiresTakeoverError,
   TelegramIdentityRequiredError,
   TelegramOutboundBlockedError,
   type AcceptInboundMessageInput,
   type AcceptInboundMessageResult,
+  type BindManagerTelegramChatInput,
+  type BindManagerTelegramChatResult,
   type ChangeManagerLeadStatusInput,
+  type ClearManagerTelegramReplyContextInput,
   type ConversationContentType,
+  type CreateManagerTelegramBindTokenInput,
+  type CreateManagerTelegramBindTokenResult,
+  type CreateManagerTelegramReplyContextInput,
+  type CreateManagerTelegramReplyContextResult,
+  type FindManagerTelegramActorInput,
   type IntakeRepository,
   type ManagerLeadDetail,
   type ManagerLeadListItem,
+  type ManagerTelegramActor,
+  type ManagerTelegramBindingStatus,
   type NextStepChannel,
+  type PersistManagerTelegramReplyInput,
+  type PersistManagerTelegramReplyResult,
   type PersistAiReplyWithSendGateInput,
   type RecordManualContactInput,
   type SaveAcceptedSiteFormSubmissionInput,
@@ -45,6 +60,7 @@ import {
   type SaveSiteWidgetAiMessageResult,
   type SiteWidgetStoredAiReply,
   type SetNextStepInput,
+  type TakeoverConversationByPublicIdInput,
   type TakeoverConversationInput,
   type TakeoverSiteWidgetConversationInput
 } from "../src/repositories/intake-repository.js";
@@ -1419,6 +1435,388 @@ describe("channel-neutral conversation use cases", () => {
   });
 });
 
+describe("Telegram manager mini-panel webhook", () => {
+  it("keeps the webhook disabled by default", async () => {
+    const app = track(buildApi({ repository: new MemoryIntakeRepository() }));
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/telegram/webhook",
+      payload: telegramTextUpdate()
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toEqual({ error: "telegram_bot_disabled" });
+  });
+
+  it("validates the webhook secret before accepting Telegram updates", async () => {
+    const app = track(
+      buildApi({
+        repository: new MemoryIntakeRepository(),
+        telegramBot: testTelegramBotOptions()
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/telegram/webhook",
+      headers: { "x-telegram-bot-api-secret-token": "wrong-secret" },
+      payload: telegramTextUpdate()
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toEqual({ error: "telegram_webhook_secret_invalid" });
+  });
+
+  it("binds a manager Telegram chat through a web-panel token", async () => {
+    const repository = new MemoryIntakeRepository();
+    const managerAuthRepository = new MemoryManagerAuthRepository();
+    const app = track(
+      buildApi({
+        repository,
+        managerAuth: {
+          repository: managerAuthRepository,
+          config: testManagerAuthConfig()
+        },
+        telegramBot: testTelegramBotOptions()
+      })
+    );
+    const cookie = managerAuthRepository.createSessionCookie();
+
+    const tokenResponse = await app.inject({
+      method: "POST",
+      url: "/manager/me/telegram-bind-token",
+      headers: { cookie }
+    });
+    const token = tokenResponse.json().bindToken.token as string;
+    const bind = await app.inject({
+      method: "POST",
+      url: "/telegram/webhook",
+      headers: testTelegramSecretHeader(),
+      payload: telegramTextUpdate({
+        updateId: 2001,
+        messageId: 501,
+        chatId: 9001,
+        fromId: 9001,
+        username: "owner_manager",
+        text: `/start ${token}`
+      })
+    });
+    const me = await app.inject({
+      method: "GET",
+      url: "/manager/me",
+      headers: { cookie }
+    });
+
+    expect(tokenResponse.statusCode).toBe(200);
+    expect(bind.statusCode).toBe(200);
+    expect(bind.json()).toEqual({ ok: true, status: "bound_manager" });
+    expect(me.json().telegramBinding).toMatchObject({
+      bound: true,
+      username: "owner_manager"
+    });
+  });
+
+  it("does not bind a manager token from non-private Telegram chats", async () => {
+    const repository = new MemoryIntakeRepository();
+    const managerAuthRepository = new MemoryManagerAuthRepository();
+    const app = track(
+      buildApi({
+        repository,
+        managerAuth: {
+          repository: managerAuthRepository,
+          config: testManagerAuthConfig()
+        },
+        telegramBot: testTelegramBotOptions()
+      })
+    );
+    const cookie = managerAuthRepository.createSessionCookie();
+    const tokenResponse = await app.inject({
+      method: "POST",
+      url: "/manager/me/telegram-bind-token",
+      headers: { cookie }
+    });
+    const token = tokenResponse.json().bindToken.token as string;
+
+    const groupBind = await app.inject({
+      method: "POST",
+      url: "/telegram/webhook",
+      headers: testTelegramSecretHeader(),
+      payload: telegramTextUpdate({
+        updateId: 2051,
+        messageId: 551,
+        chatId: -1009001,
+        chatType: "group",
+        fromId: 9001,
+        username: "owner_manager",
+        text: `/start ${token}`
+      })
+    });
+    const meAfterGroup = await app.inject({
+      method: "GET",
+      url: "/manager/me",
+      headers: { cookie }
+    });
+    const privateBind = await app.inject({
+      method: "POST",
+      url: "/telegram/webhook",
+      headers: testTelegramSecretHeader(),
+      payload: telegramTextUpdate({
+        updateId: 2052,
+        messageId: 552,
+        chatId: 9001,
+        chatType: "private",
+        fromId: 9001,
+        username: "owner_manager",
+        text: `/start ${token}`
+      })
+    });
+
+    expect(groupBind.statusCode).toBe(200);
+    expect(groupBind.json()).toEqual({ ok: true, status: "ignored_unsupported_update" });
+    expect(meAfterGroup.json().telegramBinding).toEqual({ bound: false });
+    expect(privateBind.json()).toEqual({ ok: true, status: "bound_manager" });
+  });
+
+  it("persists customer inbound and queues a manager notification after binding", async () => {
+    const { app, repository } = await boundTelegramManagerApp();
+
+    const first = await app.inject({
+      method: "POST",
+      url: "/telegram/webhook",
+      headers: testTelegramSecretHeader(),
+      payload: telegramTextUpdate({
+        updateId: 2101,
+        messageId: 601,
+        chatId: 42,
+        fromId: 42,
+        username: "customer",
+        text: "Срочно нужен памятник"
+      })
+    });
+    const duplicate = await app.inject({
+      method: "POST",
+      url: "/telegram/webhook",
+      headers: testTelegramSecretHeader(),
+      payload: telegramTextUpdate({
+        updateId: 2101,
+        messageId: 601,
+        chatId: 42,
+        fromId: 42,
+        username: "customer",
+        text: "Срочно нужен памятник"
+      })
+    });
+
+    expect(first.statusCode).toBe(200);
+    expect(first.json()).toEqual({ ok: true, status: "accepted" });
+    expect(duplicate.statusCode).toBe(200);
+    expect(repository.leadCount).toBe(1);
+    expect(repository.onlyLead().conversations[0]).toMatchObject({
+      channel: "telegram",
+      aiState: "needs_manager",
+      agentAllowedToReply: false,
+      messages: [
+        {
+          direction: "inbound",
+          senderRole: "visitor",
+          body: "Срочно нужен памятник"
+        }
+      ]
+    });
+    expect(repository.onlyLead().timeline).toContainEqual(
+      expect.objectContaining({
+        eventType: "manager.notification_enqueued",
+        metadata: expect.objectContaining({
+          status: "pending",
+          needs_manager_reason: "telegram_urgent"
+        })
+      })
+    );
+  });
+
+  it("blocks Telegram manager replies until takeover creates an active reply context", async () => {
+    const { app, repository } = await boundTelegramManagerApp();
+    await app.inject({
+      method: "POST",
+      url: "/telegram/webhook",
+      headers: testTelegramSecretHeader(),
+      payload: telegramTextUpdate({
+        updateId: 2201,
+        messageId: 701,
+        chatId: 77,
+        fromId: 77,
+        text: "Нужен человек"
+      })
+    });
+    const publicConversationId = repository.onlyLead().conversations[0]?.publicConversationId;
+
+    if (!publicConversationId) {
+      throw new Error("expected telegram conversation");
+    }
+
+    const replyAction = await app.inject({
+      method: "POST",
+      url: "/telegram/webhook",
+      headers: testTelegramSecretHeader(),
+      payload: telegramCallbackUpdate({
+        updateId: 2202,
+        chatId: 9001,
+        fromId: 9001,
+        data: `reply:${publicConversationId}`
+      })
+    });
+    const managerText = await app.inject({
+      method: "POST",
+      url: "/telegram/webhook",
+      headers: testTelegramSecretHeader(),
+      payload: telegramTextUpdate({
+        updateId: 2203,
+        messageId: 702,
+        chatId: 9001,
+        fromId: 9001,
+        text: "Здравствуйте, я менеджер"
+      })
+    });
+
+    expect(replyAction.json()).toEqual({ ok: true, status: "manager_reply_requires_takeover" });
+    expect(managerText.json()).toEqual({ ok: true, status: "manager_reply_context_missing" });
+    expect(repository.onlyLead().conversations[0]?.messages).toHaveLength(1);
+  });
+
+  it("blocks Telegram viewer text replies from a bound manager chat", async () => {
+    const repository = new MemoryIntakeRepository();
+    const bindToken = await repository.createManagerTelegramBindToken({
+      managerUserId: "viewer-manager-1",
+      managerEmail: "viewer@example.com",
+      managerRole: "viewer"
+    });
+    await repository.bindManagerTelegramChat({
+      token: bindToken.token,
+      providerAccountId: "bot-main",
+      externalChatId: "9002",
+      externalUserId: "9002",
+      username: "viewer_manager"
+    });
+    const app = track(
+      buildApi({
+        repository,
+        telegramBot: testTelegramBotOptions()
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/telegram/webhook",
+      headers: testTelegramSecretHeader(),
+      payload: telegramTextUpdate({
+        updateId: 2251,
+        messageId: 751,
+        chatId: 9002,
+        fromId: 9002,
+        text: "Попробую ответить клиенту"
+      })
+    });
+
+    expect(response.json()).toEqual({ ok: true, status: "manager_forbidden" });
+    await expect(repository.listManagerLeads()).resolves.toEqual([]);
+  });
+
+  it("allows Telegram manager reply after takeover and records pending delivery state", async () => {
+    const { app, repository } = await boundTelegramManagerApp();
+    await app.inject({
+      method: "POST",
+      url: "/telegram/webhook",
+      headers: testTelegramSecretHeader(),
+      payload: telegramTextUpdate({
+        updateId: 2301,
+        messageId: 801,
+        chatId: 88,
+        fromId: 88,
+        text: "Нужен менеджер"
+      })
+    });
+    const publicConversationId = repository.onlyLead().conversations[0]?.publicConversationId;
+
+    if (!publicConversationId) {
+      throw new Error("expected telegram conversation");
+    }
+
+    const takeover = await app.inject({
+      method: "POST",
+      url: "/telegram/webhook",
+      headers: testTelegramSecretHeader(),
+      payload: telegramCallbackUpdate({
+        updateId: 2302,
+        chatId: 9001,
+        fromId: 9001,
+        data: `takeover:${publicConversationId}`
+      })
+    });
+    const replyContext = await app.inject({
+      method: "POST",
+      url: "/telegram/webhook",
+      headers: testTelegramSecretHeader(),
+      payload: telegramCallbackUpdate({
+        updateId: 2303,
+        chatId: 9001,
+        fromId: 9001,
+        data: `reply:${publicConversationId}`
+      })
+    });
+    const reply = await app.inject({
+      method: "POST",
+      url: "/telegram/webhook",
+      headers: testTelegramSecretHeader(),
+      payload: telegramTextUpdate({
+        updateId: 2304,
+        messageId: 802,
+        chatId: 9001,
+        fromId: 9001,
+        text: "Здравствуйте. Уточню детали заказа."
+      })
+    });
+
+    expect(takeover.json()).toEqual({ ok: true, status: "manager_takeover_done" });
+    expect(replyContext.json()).toEqual({ ok: true, status: "manager_reply_context_created" });
+    expect(reply.json()).toEqual({ ok: true, status: "manager_reply_queued" });
+    expect(repository.onlyLead().conversations[0]).toMatchObject({
+      aiState: "manager_active",
+      agentAllowedToReply: false,
+      messages: [
+        expect.objectContaining({ senderRole: "visitor" }),
+        expect.objectContaining({
+          direction: "outbound",
+          senderRole: "manager",
+          body: "Здравствуйте. Уточню детали заказа.",
+          delivery: expect.objectContaining({
+            status: "pending",
+            attemptCount: 0
+          })
+        })
+      ]
+    });
+    expect(repository.onlyLead().timeline).toContainEqual(
+      expect.objectContaining({
+        eventType: "conversation.manager_message_queued",
+        metadata: expect.objectContaining({
+          delivery_status: "pending"
+        })
+      })
+    );
+  });
+
+  it("keeps the webhook free of direct Telegram provider sends", () => {
+    const serviceSource = readFixtureSource("apps/api/src/services/telegram-bot-service.ts");
+    const routeSource = readFixtureSource("apps/api/src/routes/telegram.ts");
+    const runtimeSource = `${serviceSource}\n${routeSource}`;
+
+    expect(runtimeSource).not.toMatch(/\bsendMessage\b/);
+    expect(runtimeSource).not.toMatch(/\bforwardMessage\b/);
+    expect(runtimeSource).not.toMatch(/\bcopyMessage\b/);
+  });
+});
+
 function validRequest(): SiteFormIntakeRequest {
   return {
     schema_version: PUBLIC_INTAKE_CONTRACT_VERSION,
@@ -1560,6 +1958,119 @@ function testManagerAuthConfig() {
   };
 }
 
+function testTelegramBotOptions() {
+  return {
+    enabled: true,
+    providerAccountId: "bot-main",
+    webhookSecret: "test-telegram-secret",
+    publicManagerBaseUrl: "https://manager.example"
+  };
+}
+
+function testTelegramSecretHeader() {
+  return { "x-telegram-bot-api-secret-token": "test-telegram-secret" };
+}
+
+async function boundTelegramManagerApp() {
+  const repository = new MemoryIntakeRepository();
+  const managerAuthRepository = new MemoryManagerAuthRepository();
+  const app = track(
+    buildApi({
+      repository,
+      managerAuth: {
+        repository: managerAuthRepository,
+        config: testManagerAuthConfig()
+      },
+      telegramBot: testTelegramBotOptions()
+    })
+  );
+  const tokenResponse = await app.inject({
+    method: "POST",
+    url: "/manager/me/telegram-bind-token",
+    headers: { cookie: managerAuthRepository.createSessionCookie() }
+  });
+
+  await app.inject({
+    method: "POST",
+    url: "/telegram/webhook",
+    headers: testTelegramSecretHeader(),
+    payload: telegramTextUpdate({
+      updateId: 1901,
+      messageId: 401,
+      chatId: 9001,
+      fromId: 9001,
+      username: "owner_manager",
+      text: `/start ${tokenResponse.json().bindToken.token}`
+    })
+  });
+
+  return { app, repository };
+}
+
+function telegramTextUpdate(
+  overrides: {
+    updateId?: number;
+    messageId?: number;
+    chatId?: number;
+    chatType?: string;
+    fromId?: number;
+    username?: string;
+    text?: string;
+  } = {}
+) {
+  const fromId = overrides.fromId ?? 42;
+  const username = overrides.username ?? "telegram_visitor";
+
+  return {
+    update_id: overrides.updateId ?? 1001,
+    message: {
+      message_id: overrides.messageId ?? 101,
+      date: 1_779_109_200,
+      chat: {
+        id: overrides.chatId ?? 42,
+        type: overrides.chatType ?? "private"
+      },
+      from: {
+        id: fromId,
+        first_name: username,
+        username
+      },
+      text: overrides.text ?? "Здравствуйте"
+    }
+  };
+}
+
+function telegramCallbackUpdate(input: {
+  updateId: number;
+  chatId: number;
+  chatType?: string;
+  fromId: number;
+  data: string;
+}) {
+  return {
+    update_id: input.updateId,
+    callback_query: {
+      id: `callback-${input.updateId}`,
+      from: {
+        id: input.fromId,
+        first_name: "owner_manager",
+        username: "owner_manager"
+      },
+      message: {
+        chat: {
+          id: input.chatId,
+          type: input.chatType ?? "private"
+        }
+      },
+      data: input.data
+    }
+  };
+}
+
+function readFixtureSource(path: string) {
+  return readFileSync(path, "utf8");
+}
+
 class MemoryIntakeRepository implements IntakeRepository {
   saveCalls = 0;
   aiSaveCalls = 0;
@@ -1611,6 +2122,52 @@ class MemoryIntakeRepository implements IntakeRepository {
   private readonly telegramIdentityLeads = new Map<string, string>();
   private readonly telegramIdentityConversations = new Map<string, string>();
   private readonly telegramProviderMessages = new Map<string, string>();
+  private readonly managerTelegramTokens = new Map<
+    string,
+    {
+      managerUserId: string;
+      managerEmail: string;
+      managerRole: string;
+      expiresAt: string;
+      usedAt?: string;
+    }
+  >();
+  private readonly managerTelegramBindings = new Map<
+    string,
+    {
+      id: string;
+      managerUserId: string;
+      managerEmail: string;
+      managerRole: string;
+      providerAccountId: string;
+      externalChatId: string;
+      externalUserId?: string;
+      username?: string;
+      displayName?: string;
+      boundAt: string;
+    }
+  >();
+  private readonly managerTelegramReplyContexts = new Map<
+    string,
+    {
+      managerUserId: string;
+      managerTelegramBindingId: string;
+      leadId: string;
+      conversationId: string;
+      publicConversationId: string;
+      expiresAt: string;
+      status: "pending" | "used" | "cancelled" | "expired";
+    }
+  >();
+  private readonly managerReplyIdempotency = new Map<
+    string,
+    {
+      leadId: string;
+      publicConversationId: string;
+      publicMessageId: string;
+      requestFingerprint: string;
+    }
+  >();
 
   constructor(
     private readonly options: { failPersistence?: boolean; failAiPersistence?: boolean } = {}
@@ -1780,7 +2337,7 @@ class MemoryIntakeRepository implements IntakeRepository {
     const channelIdentityId =
       this.conversationIdentityIds.get(conversationId ?? "") ?? randomUUID();
     const contentType = input.message.contentType ?? "text";
-    const isMedia = contentType !== "text";
+    const needsManager = Boolean(input.needsManagerReason) || contentType !== "text";
     const publicConversationId =
       (conversationId ? this.conversationPublicIds.get(conversationId) : undefined) ??
       randomUUID();
@@ -1789,6 +2346,9 @@ class MemoryIntakeRepository implements IntakeRepository {
       leadId = randomUUID();
       conversationId = randomUUID();
       lead = toManagerTelegramLead(input, leadId, conversationId, publicConversationId, channelIdentityId, now);
+      if (needsManager && this.hasActiveManagerTelegramDestination(input.providerAccountId)) {
+        lead = markTelegramNotificationPending(lead);
+      }
       this.leads.set(leadId, lead);
       this.telegramIdentityLeads.set(identityKey, leadId);
       this.telegramIdentityConversations.set(identityKey, conversationId);
@@ -1797,8 +2357,8 @@ class MemoryIntakeRepository implements IntakeRepository {
       this.publicConversationIds.set(publicConversationId, conversationId);
       this.conversationIdentityIds.set(conversationId, channelIdentityId);
     } else {
-      const nextAiState = isMedia ? "needs_manager" : "ai_collecting_info";
-      const nextAgentAllowed = input.automationRequested && !isMedia;
+      const nextAiState = needsManager ? "needs_manager" : "ai_collecting_info";
+      const nextAgentAllowed = input.automationRequested && !needsManager;
       lead = {
         ...lead,
         updatedAt: now,
@@ -1821,16 +2381,20 @@ class MemoryIntakeRepository implements IntakeRepository {
             },
             createdAt: now
           },
-          ...(isMedia
+          ...(needsManager
             ? [
                 {
                   eventType: "manager.notification_enqueued",
-                  summary:
-                    "Telegram manager notification blocked because no destination is bound",
+                  summary: this.hasActiveManagerTelegramDestination(input.providerAccountId)
+                    ? "Telegram manager notification queued"
+                    : "Telegram manager notification blocked because no destination is bound",
                   metadata: {
                     public_conversation_id: publicConversationId,
                     public_message_id: input.publicMessageId,
-                    status: "blocked_no_destination"
+                    status: this.hasActiveManagerTelegramDestination(input.providerAccountId)
+                      ? "pending"
+                      : "blocked_no_destination",
+                    needs_manager_reason: input.needsManagerReason ?? "telegram_media"
                   },
                   createdAt: now
                 }
@@ -1879,7 +2443,7 @@ class MemoryIntakeRepository implements IntakeRepository {
       channelIdentityId,
       publicMessageId: input.publicMessageId,
       agentAllowedToReply: conversation?.agentAllowedToReply ?? false,
-      aiState: conversation?.aiState ?? (isMedia ? "needs_manager" : "ai_collecting_info"),
+      aiState: conversation?.aiState ?? (needsManager ? "needs_manager" : "ai_collecting_info"),
       replayed: false
     };
   }
@@ -2353,6 +2917,25 @@ class MemoryIntakeRepository implements IntakeRepository {
     return updatedLead;
   }
 
+  async takeoverConversationByPublicId(
+    input: TakeoverConversationByPublicIdInput
+  ): Promise<ManagerLeadDetail | null> {
+    const conversationId = this.publicConversationIds.get(input.publicConversationId);
+    const leadId = conversationId ? this.conversationLeads.get(conversationId) : undefined;
+
+    if (!leadId) {
+      return null;
+    }
+
+    return this.takeoverConversation({
+      leadId,
+      publicConversationId: input.publicConversationId,
+      changedByManagerId: input.changedByManagerId,
+      changedByManagerEmail: input.changedByManagerEmail,
+      changedByManagerRole: input.changedByManagerRole
+    });
+  }
+
   async takeoverSiteWidgetConversation(
     input: TakeoverSiteWidgetConversationInput
   ): Promise<ManagerLeadDetail | null> {
@@ -2377,6 +2960,290 @@ class MemoryIntakeRepository implements IntakeRepository {
       changedByManagerEmail: input.changedByManagerEmail,
       changedByManagerRole: input.changedByManagerRole
     });
+  }
+
+  async getManagerTelegramBindingStatus(
+    managerUserId: string
+  ): Promise<ManagerTelegramBindingStatus> {
+    const binding = Array.from(this.managerTelegramBindings.values()).find(
+      (candidate) => candidate.managerUserId === managerUserId
+    );
+
+    if (!binding) {
+      return { bound: false };
+    }
+
+    return {
+      bound: true,
+      username: binding.username,
+      displayName: binding.displayName,
+      externalChatId: `***${binding.externalChatId.slice(-4)}`,
+      boundAt: binding.boundAt
+    };
+  }
+
+  async createManagerTelegramBindToken(
+    input: CreateManagerTelegramBindTokenInput
+  ): Promise<CreateManagerTelegramBindTokenResult> {
+    const token = `bind-${randomUUID()}`;
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+    this.managerTelegramTokens.set(token, {
+      managerUserId: input.managerUserId,
+      managerEmail: input.managerEmail,
+      managerRole: input.managerRole,
+      expiresAt
+    });
+
+    return { token, expiresAt };
+  }
+
+  async bindManagerTelegramChat(
+    input: BindManagerTelegramChatInput
+  ): Promise<BindManagerTelegramChatResult> {
+    const token = this.managerTelegramTokens.get(input.token);
+
+    if (!token) {
+      return { status: "invalid_token" };
+    }
+
+    if (token.usedAt) {
+      return { status: "used_token" };
+    }
+
+    if (new Date(token.expiresAt).getTime() <= Date.now()) {
+      return { status: "expired_token" };
+    }
+
+    const bindingId = randomUUID();
+    const now = new Date().toISOString();
+    this.managerTelegramTokens.set(input.token, { ...token, usedAt: now });
+
+    for (const [key, binding] of this.managerTelegramBindings.entries()) {
+      if (
+        binding.managerUserId === token.managerUserId ||
+        (binding.providerAccountId === input.providerAccountId &&
+          binding.externalChatId === input.externalChatId)
+      ) {
+        this.managerTelegramBindings.delete(key);
+      }
+    }
+
+    this.managerTelegramBindings.set(bindingId, {
+      id: bindingId,
+      managerUserId: token.managerUserId,
+      managerEmail: token.managerEmail,
+      managerRole: token.managerRole,
+      providerAccountId: input.providerAccountId,
+      externalChatId: input.externalChatId,
+      externalUserId: input.externalUserId,
+      username: input.username,
+      displayName: input.displayName,
+      boundAt: now
+    });
+
+    return {
+      status: "bound",
+      managerUserId: token.managerUserId,
+      managerEmail: token.managerEmail,
+      managerRole: token.managerRole,
+      bindingId
+    };
+  }
+
+  async findManagerTelegramActor(
+    input: FindManagerTelegramActorInput
+  ): Promise<ManagerTelegramActor | null> {
+    const binding = Array.from(this.managerTelegramBindings.values()).find(
+      (candidate) =>
+        candidate.providerAccountId === input.providerAccountId &&
+        candidate.externalChatId === input.externalChatId &&
+        candidate.externalUserId === input.externalUserId
+    );
+
+    if (!binding) {
+      return null;
+    }
+
+    return {
+      managerUserId: binding.managerUserId,
+      managerEmail: binding.managerEmail,
+      managerRole: binding.managerRole,
+      bindingId: binding.id,
+      externalChatId: binding.externalChatId
+    };
+  }
+
+  async createManagerTelegramReplyContext(
+    input: CreateManagerTelegramReplyContextInput
+  ): Promise<CreateManagerTelegramReplyContextResult | null> {
+    const conversationId = this.publicConversationIds.get(input.publicConversationId);
+    const leadId = conversationId ? this.conversationLeads.get(conversationId) : undefined;
+    const lead = leadId ? this.leads.get(leadId) : undefined;
+    const conversation = lead?.conversations.find(
+      (candidate) => candidate.publicConversationId === input.publicConversationId
+    );
+
+    if (!lead || !conversation || !conversationId || !leadId) {
+      return null;
+    }
+
+    if (
+      conversation.channel !== "telegram" ||
+      conversation.agentAllowedToReply ||
+      conversation.aiState !== "manager_active"
+    ) {
+      throw new ManagerTelegramReplyRequiresTakeoverError();
+    }
+
+    for (const context of this.managerTelegramReplyContexts.values()) {
+      if (context.managerUserId === input.managerUserId && context.status === "pending") {
+        context.status = "cancelled";
+      }
+    }
+
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+    this.managerTelegramReplyContexts.set(input.managerUserId, {
+      managerUserId: input.managerUserId,
+      managerTelegramBindingId: input.managerTelegramBindingId,
+      leadId,
+      conversationId,
+      publicConversationId: input.publicConversationId,
+      expiresAt,
+      status: "pending"
+    });
+
+    return {
+      leadId,
+      publicConversationId: input.publicConversationId,
+      expiresAt
+    };
+  }
+
+  async clearManagerTelegramReplyContext(
+    input: ClearManagerTelegramReplyContextInput
+  ): Promise<void> {
+    const context = this.managerTelegramReplyContexts.get(input.managerUserId);
+
+    if (context?.managerTelegramBindingId === input.managerTelegramBindingId) {
+      context.status = input.reason;
+    }
+  }
+
+  async persistManagerTelegramReply(
+    input: PersistManagerTelegramReplyInput
+  ): Promise<PersistManagerTelegramReplyResult> {
+    const existing = this.managerReplyIdempotency.get(input.idempotencyKey);
+
+    if (existing) {
+      if (existing.requestFingerprint !== input.requestFingerprint) {
+        throw new IdempotencyConflictError();
+      }
+
+      return {
+        leadId: existing.leadId,
+        publicConversationId: existing.publicConversationId,
+        publicMessageId: existing.publicMessageId,
+        deliveryStatus: "pending",
+        replayed: true
+      };
+    }
+
+    const context = this.managerTelegramReplyContexts.get(input.managerUserId);
+
+    if (
+      !context ||
+      context.managerTelegramBindingId !== input.managerTelegramBindingId ||
+      context.status !== "pending" ||
+      new Date(context.expiresAt).getTime() <= Date.now()
+    ) {
+      throw new ManagerTelegramReplyContextMissingError();
+    }
+
+    const lead = this.leads.get(context.leadId);
+    const conversation = lead?.conversations.find(
+      (candidate) => candidate.publicConversationId === context.publicConversationId
+    );
+
+    if (!lead || !conversation) {
+      throw new ManagerTelegramReplyContextMissingError();
+    }
+
+    if (
+      conversation.channel !== "telegram" ||
+      conversation.agentAllowedToReply ||
+      conversation.aiState !== "manager_active"
+    ) {
+      throw new ManagerTelegramReplyRequiresTakeoverError();
+    }
+
+    const createdAt = new Date().toISOString();
+    const updatedLead: ManagerLeadDetail = {
+      ...lead,
+      updatedAt: createdAt,
+      timeline: [
+        ...lead.timeline,
+        {
+          eventType: "conversation.manager_message_queued",
+          summary: "Manager Telegram reply queued for delivery",
+          metadata: {
+            public_conversation_id: context.publicConversationId,
+            public_message_id: input.publicMessageId,
+            delivery_status: "pending",
+            changed_by_manager_email: input.managerEmail
+          },
+          createdAt
+        }
+      ],
+      conversations: lead.conversations.map((candidate) =>
+        candidate.publicConversationId === context.publicConversationId
+          ? {
+              ...candidate,
+              updatedAt: createdAt,
+              messages: [
+                ...candidate.messages,
+                {
+                  publicMessageId: input.publicMessageId,
+                  direction: "outbound",
+                  senderRole: "manager",
+                  body: input.body,
+                  contentType: "text",
+                  delivery: {
+                    status: "pending",
+                    attemptCount: 0,
+                    updatedAt: createdAt
+                  },
+                  createdAt
+                }
+              ]
+            }
+          : candidate
+      )
+    };
+
+    context.status = "used";
+    this.leads.set(lead.leadId, updatedLead);
+    this.managerReplyIdempotency.set(input.idempotencyKey, {
+      leadId: lead.leadId,
+      publicConversationId: context.publicConversationId,
+      publicMessageId: input.publicMessageId,
+      requestFingerprint: input.requestFingerprint
+    });
+
+    return {
+      leadId: lead.leadId,
+      publicConversationId: context.publicConversationId,
+      publicMessageId: input.publicMessageId,
+      deliveryStatus: "pending",
+      replayed: false
+    };
+  }
+
+  private hasActiveManagerTelegramDestination(providerAccountId?: string) {
+    return Array.from(this.managerTelegramBindings.values()).some(
+      (binding) =>
+        binding.providerAccountId === providerAccountId &&
+        (binding.managerRole === "owner" || binding.managerRole === "manager")
+    );
   }
 }
 
@@ -2520,7 +3387,7 @@ function toManagerTelegramLead(
   createdAt: string
 ): ManagerLeadDetail {
   const contentType = input.message.contentType ?? "text";
-  const isMedia = contentType !== "text";
+  const needsManager = Boolean(input.needsManagerReason) || contentType !== "text";
 
   return {
     leadId,
@@ -2567,7 +3434,7 @@ function toManagerTelegramLead(
         },
         createdAt
       },
-      ...(isMedia
+      ...(needsManager
         ? [
             {
               eventType: "manager.notification_enqueued",
@@ -2575,7 +3442,8 @@ function toManagerTelegramLead(
               metadata: {
                 public_conversation_id: publicConversationId,
                 public_message_id: input.publicMessageId,
-                status: "blocked_no_destination"
+                status: "blocked_no_destination",
+                needs_manager_reason: input.needsManagerReason ?? "telegram_media"
               },
               createdAt
             }
@@ -2594,8 +3462,8 @@ function toManagerTelegramLead(
           externalUserId: input.externalUserId
         },
         status: "open",
-        aiState: isMedia ? "needs_manager" : "ai_collecting_info",
-        agentAllowedToReply: input.automationRequested && !isMedia,
+        aiState: needsManager ? "needs_manager" : "ai_collecting_info",
+        agentAllowedToReply: input.automationRequested && !needsManager,
         createdAt,
         updatedAt: createdAt,
         messages: [toManagerConversationMessage(input, contentType, createdAt)]
@@ -2619,6 +3487,24 @@ function toManagerConversationMessage(
     caption: input.message.caption,
     providerFileId: input.message.providerFileId,
     createdAt
+  };
+}
+
+function markTelegramNotificationPending(lead: ManagerLeadDetail): ManagerLeadDetail {
+  return {
+    ...lead,
+    timeline: lead.timeline.map((event) =>
+      event.eventType === "manager.notification_enqueued"
+        ? {
+            ...event,
+            summary: "Telegram manager notification queued",
+            metadata: {
+              ...event.metadata,
+              status: "pending"
+            }
+          }
+        : event
+    )
   };
 }
 

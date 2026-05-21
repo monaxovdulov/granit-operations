@@ -9,6 +9,13 @@ export type ApiConfig = {
     openAiApiKey?: string;
     openAiModel: string;
   };
+  telegramBot: {
+    enabled: boolean;
+    token?: string;
+    providerAccountId?: string;
+    webhookSecret?: string;
+    publicManagerBaseUrl?: string;
+  };
   managerAuth: ManagerAuthConfig | null;
 };
 
@@ -27,6 +34,13 @@ export function loadConfig(env: NodeJS.ProcessEnv): ApiConfig {
       enabled: env.AI_WIDGET_ENABLED === "true",
       openAiApiKey: env.OPENAI_API_KEY,
       openAiModel: env.OPENAI_MODEL ?? "gpt-5.5"
+    },
+    telegramBot: {
+      enabled: env.TELEGRAM_BOT_ENABLED === "true",
+      token: env.TELEGRAM_BOT_TOKEN,
+      providerAccountId: env.TELEGRAM_BOT_PROVIDER_ACCOUNT_ID,
+      webhookSecret: env.TELEGRAM_WEBHOOK_SECRET,
+      publicManagerBaseUrl: env.PUBLIC_MANAGER_BASE_URL
     },
     managerAuth: loadManagerAuthConfig(env)
   };

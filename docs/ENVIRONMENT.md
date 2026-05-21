@@ -19,8 +19,11 @@ Future environment/config names:
 | `AI_WIDGET_ENABLED` | Enables website widget AI replies only after S05 checks/staging smoke | server only | S05 runtime, default `false` |
 | `OPENAI_API_KEY` | OpenAI Responses API access for website widget AI | server only | S05 runtime when AI enabled |
 | `OPENAI_MODEL` | OpenAI model for website widget AI, default `gpt-5.5` | server only | S05 runtime |
-| `TELEGRAM_BOT_TOKEN` | Telegram adapter token | server only | deferred |
-| `TELEGRAM_WEBHOOK_SECRET` | Telegram webhook validation | server only | deferred |
+| `TELEGRAM_BOT_ENABLED` | Enables Telegram webhook adapter; default must remain `false` outside tested environments | server only | Telegram inbound + manager mini-panel runtime, default `false` |
+| `TELEGRAM_BOT_TOKEN` | Telegram adapter token; used only by the separate delivery sender, never by the webhook for direct business sends | server only | Telegram delivery sender runtime |
+| `TELEGRAM_BOT_PROVIDER_ACCOUNT_ID` | Stable app-owned provider account id for Telegram bot identity/idempotency | server only | Telegram inbound + manager binding runtime |
+| `TELEGRAM_WEBHOOK_SECRET` | Telegram webhook validation through `x-telegram-bot-api-secret-token` | server only | Telegram inbound + manager binding runtime |
+| `PUBLIC_MANAGER_BASE_URL` | Public base URL for manager-panel links stored in Telegram notification outbox metadata | server only | Telegram manager notification outbox metadata |
 | `URGENT_NOTIFICATION_DESTINATION` | Working-phone or owner-DM destination | server only | blocked until confirmed |
 | `BACKUP_STORAGE_URL` | Backup storage target | server only | future |
 

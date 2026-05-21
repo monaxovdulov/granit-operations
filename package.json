@@ -13,6 +13,7 @@
     "test": "vitest run",
     "smoke:api": "vitest run apps/api/test/public-intake.test.ts",
     "seed:manager-user": "tsx apps/api/src/scripts/seed-manager-user.ts",
+    "deliver:telegram:once": "tsx apps/api/src/scripts/deliver-telegram-pending-once.ts",
     "dev:api": "tsx apps/api/src/index.ts"
   },
   "devDependencies": {

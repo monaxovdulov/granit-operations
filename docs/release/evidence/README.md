@@ -38,3 +38,8 @@ Current evidence records:
 - `S05_WEBSITE_SAFE_AI_RU.md` - local safe AI backend, persistence, manager visibility, and fallback evidence.
 - `S06_MANAGER_TAKEOVER_RU.md` - manager takeover, blocked follow-up AI, and stale draft send-time gate evidence.
 - `P0_CHANNEL_NEUTRAL_CONVERSATION_FOUNDATION_RU.md` - channel-neutral widget/Telegram-ready conversation foundation evidence.
+- `TELEGRAM_INBOUND_MANAGER_MINI_PANEL_RU.md` - Telegram inbound webhook, manager binding, takeover/reply mini-panel, and no-direct-send evidence.
+- `TELEGRAM_OUTBOUND_DELIVERY_SENDER_RU.md` - Telegram delivery sender path, retry/failure status and manager-visible delivery evidence.
+- `TELEGRAM_SAFE_SENDER_LOCAL_SMOKE_PREP_RU.md` - safe sender audit verdict, private-chat hardening, local manual smoke checklist, and controlled staging Bot API smoke evidence.
+
+Telegram acceleration assumption, 2026-05-21: requester stated there are currently no real clients and no real managers depending on the Telegram path. Use this to prioritize controlled staging Bot API smoke with test bot/private chats; do not treat it as production approval.

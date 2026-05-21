@@ -52,6 +52,18 @@ body {
   background: #f8faf9;
 }
 
+.telegramBinding {
+  max-width: 360px;
+  min-width: 0;
+}
+
+.telegramBindCode {
+  max-width: 230px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .navbarContent {
   height: 100%;
   background: #ffffff;

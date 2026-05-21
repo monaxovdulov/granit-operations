@@ -9,6 +9,14 @@ export type ManagerUser = {
   lastLoginAt: string | null;
 };
 
+export type ManagerTelegramBindingStatus = {
+  bound: boolean;
+  username?: string;
+  displayName?: string;
+  externalChatId?: string;
+  boundAt?: string;
+};
+
 export type ManagerLeadSource = {
   channel: "site_form" | "site_widget" | "telegram";
   pageUrl?: string;
@@ -55,14 +63,29 @@ export type ManagerTimelineEvent = {
   createdAt: string;
 };
 
+export type MessageDeliveryStatus =
+  | "pending"
+  | "sent"
+  | "failed"
+  | "retrying"
+  | "blocked_no_destination"
+  | "blocked";
+
 export type ManagerConversationMessage = {
   publicMessageId: string;
   direction: "inbound" | "outbound";
-  senderRole: "visitor" | "ai_assistant";
+  senderRole: "visitor" | "ai_assistant" | "manager";
   body: string;
   contentType: "text" | "voice" | "sticker" | "video_note" | "photo" | "document";
   caption?: string;
   providerFileId?: string;
+  delivery?: {
+    status: MessageDeliveryStatus;
+    attemptCount: number;
+    lastError?: string;
+    providerMessageId?: string;
+    updatedAt: string;
+  };
   createdAt: string;
 };
 

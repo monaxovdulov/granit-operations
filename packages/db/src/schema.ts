@@ -137,11 +137,13 @@ export const channelIdentities = pgTable(
     ),
     widgetSessionIdx: uniqueIndex("channel_identities_widget_session_id_idx").on(
       table.widgetSessionId
-    ),
+    ).where(sql`${table.widgetSessionId} IS NOT NULL`),
     telegramChatIdx: uniqueIndex("channel_identities_telegram_chat_idx").on(
       table.provider,
       table.providerAccountId,
       table.externalChatId
+    ).where(
+      sql`${table.channel} = 'telegram' AND ${table.providerAccountId} IS NOT NULL AND ${table.externalChatId} IS NOT NULL`
     )
   })
 );
@@ -227,11 +229,11 @@ export const conversationMessages = pgTable(
     providerMessageIdx: uniqueIndex("conversation_messages_provider_message_idx").on(
       table.channelIdentityId,
       table.providerMessageId
-    ),
+    ).where(sql`${table.providerMessageId} IS NOT NULL`),
     providerUpdateIdx: uniqueIndex("conversation_messages_provider_update_idx").on(
       table.channelIdentityId,
       table.providerUpdateId
-    ),
+    ).where(sql`${table.providerUpdateId} IS NOT NULL`),
     conversationCreatedIdx: index("conversation_messages_conversation_created_idx").on(
       table.conversationId,
       table.createdAt
@@ -280,6 +282,10 @@ export const managerNotificationOutbox = pgTable(
     destinationIdentityId: uuid("destination_identity_id").references(() => channelIdentities.id, {
       onDelete: "set null"
     }),
+    managerTelegramBindingId: uuid("manager_telegram_binding_id").references(
+      () => managerTelegramBindings.id,
+      { onDelete: "set null" }
+    ),
     status: text("status").notNull().default("pending"),
     provider: text("provider").notNull(),
     providerMessageId: text("provider_message_id"),
@@ -294,6 +300,10 @@ export const managerNotificationOutbox = pgTable(
     statusIdx: index("manager_notification_outbox_status_idx").on(table.status, table.updatedAt),
     messageIdx: index("manager_notification_outbox_message_id_idx").on(
       table.conversationMessageId
+    ),
+    managerTelegramBindingIdx: index("manager_notification_outbox_manager_tg_binding_idx").on(
+      table.managerTelegramBindingId,
+      table.createdAt
     )
   })
 );
@@ -335,5 +345,110 @@ export const managerSessions = pgTable(
     tokenHashIdx: uniqueIndex("manager_sessions_token_hash_idx").on(table.sessionTokenHash),
     userIdx: index("manager_sessions_user_idx").on(table.managerUserId),
     expiresAtIdx: index("manager_sessions_expires_at_idx").on(table.expiresAt)
+  })
+);
+
+export const managerTelegramBindings = pgTable(
+  "manager_telegram_bindings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    managerUserId: uuid("manager_user_id")
+      .notNull()
+      .references(() => managerUsers.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull().default("telegram_bot"),
+    providerAccountId: text("provider_account_id").notNull(),
+    externalChatId: text("external_chat_id").notNull(),
+    externalUserId: text("external_user_id"),
+    username: text("username"),
+    displayName: text("display_name"),
+    status: text("status").notNull().default("active"),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    boundAt: timestamp("bound_at", { withTimezone: true }).notNull().defaultNow(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true })
+  },
+  (table) => ({
+    managerIdx: index("manager_telegram_bindings_manager_idx").on(
+      table.managerUserId,
+      table.status
+    ),
+    chatIdx: index("manager_telegram_bindings_chat_idx").on(
+      table.provider,
+      table.providerAccountId,
+      table.externalChatId,
+      table.status
+    ),
+    managerProviderIdx: uniqueIndex("manager_telegram_bindings_manager_provider_idx").on(
+      table.managerUserId,
+      table.provider,
+      table.providerAccountId
+    ).where(sql`${table.status} = 'active'`),
+    chatUniqueIdx: uniqueIndex("manager_telegram_bindings_chat_unique_idx").on(
+      table.provider,
+      table.providerAccountId,
+      table.externalChatId
+    ).where(sql`${table.status} = 'active'`)
+  })
+);
+
+export const managerTelegramBindTokens = pgTable(
+  "manager_telegram_bind_tokens",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    managerUserId: uuid("manager_user_id")
+      .notNull()
+      .references(() => managerUsers.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => ({
+    tokenHashIdx: uniqueIndex("manager_telegram_bind_tokens_hash_idx").on(table.tokenHash),
+    managerIdx: index("manager_telegram_bind_tokens_manager_idx").on(
+      table.managerUserId,
+      table.createdAt
+    ),
+    expiresAtIdx: index("manager_telegram_bind_tokens_expires_idx").on(table.expiresAt)
+  })
+);
+
+export const managerTelegramReplyContexts = pgTable(
+  "manager_telegram_reply_contexts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    managerUserId: uuid("manager_user_id")
+      .notNull()
+      .references(() => managerUsers.id, { onDelete: "cascade" }),
+    managerTelegramBindingId: uuid("manager_telegram_binding_id")
+      .notNull()
+      .references(() => managerTelegramBindings.id, { onDelete: "cascade" }),
+    leadId: uuid("lead_id")
+      .notNull()
+      .references(() => leads.id, { onDelete: "cascade" }),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    publicConversationId: uuid("public_conversation_id").notNull(),
+    status: text("status").notNull().default("pending"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => ({
+    managerStatusIdx: index("manager_telegram_reply_contexts_manager_status_idx").on(
+      table.managerUserId,
+      table.status,
+      table.expiresAt
+    ),
+    conversationIdx: index("manager_telegram_reply_contexts_conversation_idx").on(
+      table.conversationId,
+      table.status
+    ),
+    onePendingIdx: uniqueIndex("manager_telegram_reply_contexts_one_pending_idx").on(
+      table.managerUserId
+    ).where(sql`${table.status} = 'pending'`)
   })
 );

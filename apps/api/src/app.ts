@@ -9,13 +9,16 @@ import {
 } from "./routes/manager-shell.js";
 import { registerManagerRoutes } from "./routes/manager.js";
 import { registerPublicIntakeRoutes } from "./routes/public-intake.js";
+import { registerTelegramRoutes } from "./routes/telegram.js";
 import type { PublicWidgetIntakeServiceOptions } from "./services/public-widget-intake-service.js";
+import type { TelegramBotServiceOptions } from "./services/telegram-bot-service.js";
 
 export type BuildApiOptions = {
   repository: IntakeRepository;
   widgetAi?: PublicWidgetIntakeServiceOptions["ai"];
   managerAuth?: ManagerAuthOptions;
   managerShell?: ManagerShellOptions;
+  telegramBot?: TelegramBotServiceOptions;
   logger?: boolean;
 };
 
@@ -29,9 +32,16 @@ export function buildApi(options: BuildApiOptions) {
   }));
 
   registerPublicIntakeRoutes(app, options.repository, { ai: options.widgetAi });
-  registerManagerAuthRoutes(app, managerAuth);
+  registerManagerAuthRoutes(app, managerAuth, options.repository);
   registerManagerShellRoutes(app, options.managerShell);
   registerManagerRoutes(app, options.repository, managerAuth);
+  registerTelegramRoutes(
+    app,
+    options.repository,
+    options.telegramBot ?? {
+      enabled: false
+    }
+  );
 
   return app;
 }

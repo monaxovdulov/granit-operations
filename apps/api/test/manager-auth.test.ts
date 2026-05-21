@@ -18,10 +18,22 @@ import {
   IdempotencyConflictError,
   type AcceptInboundMessageInput,
   type AcceptInboundMessageResult,
+  type BindManagerTelegramChatInput,
+  type BindManagerTelegramChatResult,
   type ChangeManagerLeadStatusInput,
+  type ClearManagerTelegramReplyContextInput,
+  type CreateManagerTelegramBindTokenInput,
+  type CreateManagerTelegramBindTokenResult,
+  type CreateManagerTelegramReplyContextInput,
+  type CreateManagerTelegramReplyContextResult,
+  type FindManagerTelegramActorInput,
   type IntakeRepository,
   type ManagerLeadDetail,
   type ManagerLeadListItem,
+  type ManagerTelegramActor,
+  type ManagerTelegramBindingStatus,
+  type PersistManagerTelegramReplyInput,
+  type PersistManagerTelegramReplyResult,
   type PersistAiReplyWithSendGateInput,
   type RecordManualContactInput,
   type SaveAcceptedSiteFormSubmissionInput,
@@ -31,6 +43,7 @@ import {
   type SaveSiteWidgetAiMessageInput,
   type SaveSiteWidgetAiMessageResult,
   type SetNextStepInput,
+  type TakeoverConversationByPublicIdInput,
   type TakeoverConversationInput,
   type TakeoverSiteWidgetConversationInput
 } from "../src/repositories/intake-repository.js";
@@ -802,6 +815,55 @@ class MemoryIntakeRepository implements IntakeRepository {
 
   async takeoverConversation(_input: TakeoverConversationInput): Promise<ManagerLeadDetail | null> {
     return null;
+  }
+
+  async takeoverConversationByPublicId(
+    _input: TakeoverConversationByPublicIdInput
+  ): Promise<ManagerLeadDetail | null> {
+    return null;
+  }
+
+  async getManagerTelegramBindingStatus(
+    _managerUserId: string
+  ): Promise<ManagerTelegramBindingStatus> {
+    return { bound: false };
+  }
+
+  async createManagerTelegramBindToken(
+    _input: CreateManagerTelegramBindTokenInput
+  ): Promise<CreateManagerTelegramBindTokenResult> {
+    return {
+      token: `bind-${randomUUID()}`,
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString()
+    };
+  }
+
+  async bindManagerTelegramChat(
+    _input: BindManagerTelegramChatInput
+  ): Promise<BindManagerTelegramChatResult> {
+    return { status: "invalid_token" };
+  }
+
+  async findManagerTelegramActor(
+    _input: FindManagerTelegramActorInput
+  ): Promise<ManagerTelegramActor | null> {
+    return null;
+  }
+
+  async createManagerTelegramReplyContext(
+    _input: CreateManagerTelegramReplyContextInput
+  ): Promise<CreateManagerTelegramReplyContextResult | null> {
+    return null;
+  }
+
+  async clearManagerTelegramReplyContext(
+    _input: ClearManagerTelegramReplyContextInput
+  ): Promise<void> {}
+
+  async persistManagerTelegramReply(
+    _input: PersistManagerTelegramReplyInput
+  ): Promise<PersistManagerTelegramReplyResult> {
+    throw new Error("not implemented in manager auth tests");
   }
 }
 

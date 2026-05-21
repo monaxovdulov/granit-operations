@@ -30,6 +30,14 @@ export type CustomerChannel = "site_widget" | "telegram";
 
 export type ChannelProvider = "site_widget" | "telegram_bot";
 
+export type MessageDeliveryStatus =
+  | "pending"
+  | "sent"
+  | "failed"
+  | "retrying"
+  | "blocked_no_destination"
+  | "blocked";
+
 export type ConversationContentType =
   | "text"
   | "voice"
@@ -37,6 +45,13 @@ export type ConversationContentType =
   | "video_note"
   | "photo"
   | "document";
+
+export type NeedsManagerReason =
+  | "telegram_new_inbound"
+  | "telegram_media"
+  | "telegram_urgent"
+  | "telegram_human_requested"
+  | "ai_tool_failure";
 
 export type NextStepChannel =
   | "manager_call"
@@ -115,6 +130,8 @@ export type AcceptInboundMessageInput = {
   idempotencyKey: string;
   requestFingerprint: string;
   automationRequested: boolean;
+  needsManagerReason?: NeedsManagerReason;
+  managerPanelBaseUrl?: string;
   metadata: Record<string, unknown>;
 };
 
@@ -209,11 +226,18 @@ export type ManagerTimelineEvent = {
 export type ManagerConversationMessage = {
   publicMessageId: string;
   direction: "inbound" | "outbound";
-  senderRole: "visitor" | "ai_assistant";
+  senderRole: "visitor" | "ai_assistant" | "manager";
   body: string;
   contentType: ConversationContentType;
   caption?: string;
   providerFileId?: string;
+  delivery?: {
+    status: MessageDeliveryStatus;
+    attemptCount: number;
+    lastError?: string;
+    providerMessageId?: string;
+    updatedAt: string;
+  };
   createdAt: string;
 };
 
@@ -305,6 +329,113 @@ export type TakeoverConversationInput = {
   changedByManagerRole: string;
 };
 
+export type TakeoverConversationByPublicIdInput = {
+  publicConversationId: string;
+  changedByManagerId: string;
+  changedByManagerEmail: string;
+  changedByManagerRole: string;
+};
+
+export type ManagerTelegramBindingStatus = {
+  bound: boolean;
+  username?: string;
+  displayName?: string;
+  externalChatId?: string;
+  boundAt?: string;
+};
+
+export type CreateManagerTelegramBindTokenInput = {
+  managerUserId: string;
+  managerEmail: string;
+  managerRole: string;
+};
+
+export type CreateManagerTelegramBindTokenResult = {
+  token: string;
+  expiresAt: string;
+};
+
+export type BindManagerTelegramChatInput = {
+  token: string;
+  providerAccountId: string;
+  externalChatId: string;
+  externalUserId?: string;
+  username?: string;
+  displayName?: string;
+  providerUpdateId?: string;
+  providerMessageId?: string;
+};
+
+export type BindManagerTelegramChatResult =
+  | {
+      status: "bound";
+      managerUserId: string;
+      managerEmail: string;
+      managerRole: string;
+      bindingId: string;
+    }
+  | {
+      status: "invalid_token" | "expired_token" | "used_token";
+    };
+
+export type ManagerTelegramActor = {
+  managerUserId: string;
+  managerEmail: string;
+  managerRole: string;
+  bindingId: string;
+  externalChatId: string;
+};
+
+export type FindManagerTelegramActorInput = {
+  providerAccountId: string;
+  externalChatId: string;
+  externalUserId?: string;
+  username?: string;
+  displayName?: string;
+};
+
+export type CreateManagerTelegramReplyContextInput = {
+  managerUserId: string;
+  managerTelegramBindingId: string;
+  publicConversationId: string;
+};
+
+export type CreateManagerTelegramReplyContextResult = {
+  leadId: string;
+  publicConversationId: string;
+  expiresAt: string;
+};
+
+export type ClearManagerTelegramReplyContextInput = {
+  managerUserId: string;
+  managerTelegramBindingId: string;
+  reason: "cancelled" | "expired" | "used";
+};
+
+export type PersistManagerTelegramReplyInput = {
+  managerUserId: string;
+  managerEmail: string;
+  managerRole: string;
+  managerTelegramBindingId: string;
+  publicMessageId: string;
+  idempotencyKey: string;
+  requestFingerprint: string;
+  body: string;
+  providerAccountId: string;
+  externalChatId: string;
+  providerUpdateId?: string;
+  providerMessageId?: string;
+  metadata: Record<string, unknown>;
+};
+
+export type PersistManagerTelegramReplyResult = {
+  leadId: string;
+  publicConversationId: string;
+  publicMessageId: string;
+  deliveryStatus: "pending";
+  replayed: boolean;
+};
+
 export interface IntakeRepository {
   saveAcceptedSiteFormSubmission(
     input: SaveAcceptedSiteFormSubmissionInput
@@ -325,9 +456,29 @@ export interface IntakeRepository {
   setNextStep(input: SetNextStepInput): Promise<ManagerLeadDetail | null>;
   recordManualContact(input: RecordManualContactInput): Promise<ManagerLeadDetail | null>;
   takeoverConversation(input: TakeoverConversationInput): Promise<ManagerLeadDetail | null>;
+  takeoverConversationByPublicId(
+    input: TakeoverConversationByPublicIdInput
+  ): Promise<ManagerLeadDetail | null>;
   takeoverSiteWidgetConversation(
     input: TakeoverSiteWidgetConversationInput
   ): Promise<ManagerLeadDetail | null>;
+  getManagerTelegramBindingStatus(managerUserId: string): Promise<ManagerTelegramBindingStatus>;
+  createManagerTelegramBindToken(
+    input: CreateManagerTelegramBindTokenInput
+  ): Promise<CreateManagerTelegramBindTokenResult>;
+  bindManagerTelegramChat(
+    input: BindManagerTelegramChatInput
+  ): Promise<BindManagerTelegramChatResult>;
+  findManagerTelegramActor(
+    input: FindManagerTelegramActorInput
+  ): Promise<ManagerTelegramActor | null>;
+  createManagerTelegramReplyContext(
+    input: CreateManagerTelegramReplyContextInput
+  ): Promise<CreateManagerTelegramReplyContextResult | null>;
+  clearManagerTelegramReplyContext(input: ClearManagerTelegramReplyContextInput): Promise<void>;
+  persistManagerTelegramReply(
+    input: PersistManagerTelegramReplyInput
+  ): Promise<PersistManagerTelegramReplyResult>;
 }
 
 export class IdempotencyConflictError extends Error {
@@ -353,8 +504,22 @@ export class TelegramIdentityRequiredError extends Error {
 
 export class TelegramOutboundBlockedError extends Error {
   constructor() {
-    super("telegram outbound is blocked until app-owned delivery worker is implemented");
+    super("AI-authored Telegram outbound is blocked until explicit approval");
     this.name = "TelegramOutboundBlockedError";
+  }
+}
+
+export class ManagerTelegramReplyContextMissingError extends Error {
+  constructor() {
+    super("manager Telegram reply context is missing or expired");
+    this.name = "ManagerTelegramReplyContextMissingError";
+  }
+}
+
+export class ManagerTelegramReplyRequiresTakeoverError extends Error {
+  constructor() {
+    super("manager Telegram reply requires takeover before customer reply");
+    this.name = "ManagerTelegramReplyRequiresTakeoverError";
   }
 }
 

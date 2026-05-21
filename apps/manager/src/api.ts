@@ -1,4 +1,10 @@
-import type { LeadStatus, ManagerLeadDetail, ManagerLeadListItem, ManagerUser } from "./types";
+import type {
+  LeadStatus,
+  ManagerLeadDetail,
+  ManagerLeadListItem,
+  ManagerTelegramBindingStatus,
+  ManagerUser
+} from "./types";
 
 export class AuthRequiredError extends Error {
   constructor() {
@@ -19,7 +25,17 @@ export class ApiRequestError extends Error {
 
 export const managerApi = {
   async me() {
-    return requestJson<{ user: ManagerUser }>("/manager/me");
+    return requestJson<{ user: ManagerUser; telegramBinding: ManagerTelegramBindingStatus }>(
+      "/manager/me"
+    );
+  },
+  async createTelegramBindToken() {
+    return requestJson<{ bindToken: { token: string; expiresAt: string } }>(
+      "/manager/me/telegram-bind-token",
+      {
+        method: "POST"
+      }
+    );
   },
   async listLeads() {
     return requestJson<{ leads: ManagerLeadListItem[] }>("/manager/leads");

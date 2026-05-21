@@ -28,6 +28,7 @@ const app = buildApi({
     provider: widgetAiProvider,
     modelName: config.widgetAi.openAiModel
   },
+  telegramBot: config.telegramBot,
   managerAuth: config.managerAuth
     ? {
         repository: managerAuthRepository,
