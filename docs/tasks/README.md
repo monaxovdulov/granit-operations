@@ -20,7 +20,8 @@ Current task records:
 - `P0_CHANNEL_NEUTRAL_CONVERSATION_FOUNDATION_RU.md` - implementation handoff for channel-neutral widget/Telegram conversation foundation before Telegram adapter and production.
 - `TELEGRAM_INBOUND_MANAGER_MINI_PANEL_RU.md` - Telegram inbound webhook plus manager binding/takeover/reply mini-panel after P0.
 - `TELEGRAM_OUTBOUND_DELIVERY_SENDER_RU.md` - separate sender path for pending Telegram manager replies with retry/failure visibility.
-- `TELEGRAM_MANAGER_REPLY_WORKER_RU.md` - planned Postgres-backed worker/scheduler for automatic delivery of manager-authored Telegram replies only.
+- `TELEGRAM_MANAGER_REPLY_WORKER_RU.md` - explicit Postgres-backed worker for automatic delivery of manager-authored Telegram replies only; staging smoke accepted, not production approval.
+- `TELEGRAM_MANAGER_REPLY_WORKER_SUPERVISED_SCHEDULER_RU.md` - systemd timer plus one-shot plus Postgres advisory lock for supervised manager reply delivery; not production approval.
 - `TELEGRAM_SAFE_SENDER_NEXT_TASK_PACK_RU.md` - plain-language next-session task pack for audit, safe refactor, local manual smoke and staging smoke preparation after the local Telegram sender slice.
 
 Required fields:

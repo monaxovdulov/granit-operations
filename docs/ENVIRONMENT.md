@@ -24,6 +24,12 @@ Future environment/config names:
 | `TELEGRAM_BOT_PROVIDER_ACCOUNT_ID` | Stable app-owned provider account id for Telegram bot identity/idempotency | server only | Telegram inbound + manager binding runtime |
 | `TELEGRAM_WEBHOOK_SECRET` | Telegram webhook validation through `x-telegram-bot-api-secret-token` | server only | Telegram inbound + manager binding runtime |
 | `PUBLIC_MANAGER_BASE_URL` | Public base URL for manager-panel links stored in Telegram notification outbox metadata | server only | Telegram manager notification outbox metadata |
+| `TELEGRAM_DELIVERY_BATCH_SIZE` | Max `message_deliveries` rows claimed by one Telegram delivery batch, default `10`, clamped `1..100` | server only | Explicit Telegram delivery worker/one-shot runtime |
+| `TELEGRAM_DELIVERY_POLL_INTERVAL_MS` | Long-running Telegram delivery worker delay between ticks, default `5000`, clamped `250..600000` | server only | Explicit Telegram delivery worker runtime |
+| `TELEGRAM_DELIVERY_MAX_ATTEMPTS` | Max Telegram delivery attempts before `failed`, default `3`, clamped `1..20` | server only | Telegram delivery worker/one-shot runtime |
+| `TELEGRAM_DELIVERY_RETRY_BACKOFF_MS` | Minimum age for `retrying` Telegram deliveries before they are claimed again, default `60000`, clamped `0..86400000`; also used by the worker after unexpected tick errors | server only | Telegram delivery worker/one-shot runtime |
+| `TELEGRAM_DELIVERY_PROVIDER_TIMEOUT_MS` | Per Telegram Bot API `sendMessage` timeout, default `15000`, clamped `1000..120000`; timeout records `uncertain` because provider result is unknown | server only | Supervised Telegram delivery one-shot runtime |
+| `TELEGRAM_DELIVERY_PROCESSING_STALE_MS` | Age after which old `message_deliveries.processing` rows are marked `uncertain`, default `300000`, clamped `60000..86400000`; `uncertain` is not auto-retried | server only | Supervised Telegram delivery one-shot runtime |
 | `URGENT_NOTIFICATION_DESTINATION` | Working-phone or owner-DM destination | server only | blocked until confirmed |
 | `BACKUP_STORAGE_URL` | Backup storage target | server only | future |
 

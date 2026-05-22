@@ -65,11 +65,13 @@ export type ManagerTimelineEvent = {
 
 export type MessageDeliveryStatus =
   | "pending"
+  | "processing"
   | "sent"
   | "failed"
   | "retrying"
   | "blocked_no_destination"
-  | "blocked";
+  | "blocked"
+  | "uncertain";
 
 export type ManagerConversationMessage = {
   publicMessageId: string;

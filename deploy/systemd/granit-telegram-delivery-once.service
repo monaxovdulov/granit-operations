@@ -1,0 +1,16 @@
+[Unit]
+Description=Granit Telegram manager reply delivery one-shot
+Wants=docker.service network-online.target
+After=docker.service network-online.target
+ConditionPathExists=/srv/botops/compose.yml
+ConditionPathExists=/srv/botops/.env.runtime
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/botops
+EnvironmentFile=/srv/botops/.env.runtime
+ExecStart=/usr/bin/docker compose --env-file /srv/botops/.env.runtime -f /srv/botops/compose.yml run --rm --no-deps -e TELEGRAM_DELIVERY_BATCH_SIZE -e TELEGRAM_DELIVERY_MAX_ATTEMPTS -e TELEGRAM_DELIVERY_RETRY_BACKOFF_MS -e TELEGRAM_DELIVERY_PROVIDER_TIMEOUT_MS -e TELEGRAM_DELIVERY_PROCESSING_STALE_MS ops-api npm run deliver:telegram:once
+TimeoutStartSec=300
+KillSignal=SIGTERM
+StandardOutput=journal
+StandardError=journal

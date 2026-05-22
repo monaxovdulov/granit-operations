@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Granit Telegram manager reply delivery one-shot every 45 seconds
+
+[Timer]
+OnBootSec=60s
+OnUnitActiveSec=45s
+AccuracySec=5s
+Persistent=false
+Unit=granit-telegram-delivery-once.service
+
+[Install]
+WantedBy=timers.target

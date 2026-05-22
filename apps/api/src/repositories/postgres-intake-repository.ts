@@ -2305,11 +2305,13 @@ function toLeadStatus(value: string): LeadStatus {
 function toMessageDeliveryStatus(value: string): MessageDeliveryStatus {
   if (
     value === "pending" ||
+    value === "processing" ||
     value === "sent" ||
     value === "failed" ||
     value === "retrying" ||
     value === "blocked_no_destination" ||
-    value === "blocked"
+    value === "blocked" ||
+    value === "uncertain"
   ) {
     return value;
   }

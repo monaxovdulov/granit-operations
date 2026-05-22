@@ -32,11 +32,13 @@ export type ChannelProvider = "site_widget" | "telegram_bot";
 
 export type MessageDeliveryStatus =
   | "pending"
+  | "processing"
   | "sent"
   | "failed"
   | "retrying"
   | "blocked_no_destination"
-  | "blocked";
+  | "blocked"
+  | "uncertain";
 
 export type ConversationContentType =
   | "text"

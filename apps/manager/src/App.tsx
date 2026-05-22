@@ -1256,6 +1256,7 @@ function timelineEventLabel(eventType: string) {
     "conversation.delivery_retrying": "Повтор доставки",
     "conversation.delivery_failed": "Ошибка доставки",
     "conversation.delivery_blocked": "Доставка заблокирована",
+    "conversation.delivery_uncertain": "Статус доставки неясен",
     "manager.notification_enqueued": "Уведомление менеджеру",
     "lead.status_changed": "Статус изменен"
   };
@@ -1289,6 +1290,7 @@ function timelineSummaryLabel(event: ManagerLeadDetail["timeline"][number]) {
     "conversation.delivery_retrying": "Доставка не прошла, будет повтор",
     "conversation.delivery_failed": "Доставка в Telegram завершилась ошибкой",
     "conversation.delivery_blocked": "Доставка в Telegram заблокирована",
+    "conversation.delivery_uncertain": "Результат доставки в Telegram неизвестен",
     "manager.notification_enqueued": "Уведомление менеджеру поставлено в очередь"
   };
 
@@ -1313,6 +1315,10 @@ function timelineIconColor(event: ManagerLeadDetail["timeline"][number]) {
   }
 
   if (event.eventType.startsWith("conversation.delivery_")) {
+    if (event.eventType === "conversation.delivery_uncertain") {
+      return "yellow";
+    }
+
     return event.eventType === "conversation.delivery_sent" ? "green" : "red";
   }
 
@@ -1350,11 +1356,13 @@ function conversationMessageBody(
 function deliveryStatusLabel(status: MessageDeliveryStatus) {
   const labels: Record<MessageDeliveryStatus, string> = {
     pending: "Ждет отправки",
+    processing: "Отправляется",
     retrying: "Повтор",
     sent: "Доставлено",
     failed: "Ошибка",
     blocked_no_destination: "Нет получателя",
-    blocked: "Заблокировано"
+    blocked: "Заблокировано",
+    uncertain: "Неясно"
   };
 
   return labels[status];
@@ -1363,11 +1371,13 @@ function deliveryStatusLabel(status: MessageDeliveryStatus) {
 function deliveryStatusColor(status: MessageDeliveryStatus) {
   const colors: Record<MessageDeliveryStatus, string> = {
     pending: "gray",
+    processing: "blue",
     retrying: "yellow",
     sent: "green",
     failed: "red",
     blocked_no_destination: "orange",
-    blocked: "orange"
+    blocked: "orange",
+    uncertain: "grape"
   };
 
   return colors[status];

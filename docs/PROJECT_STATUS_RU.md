@@ -1,66 +1,69 @@
 # granit-operations - Статус Репозитория
 
-Обновлено: 2026-05-13T15:10:00Z
+Обновлено: 2026-05-22T17:30:22Z
 
-Этот репозиторий отвечает за рабочую систему бизнеса: intake API, Postgres operational state, manager backend/panel, Telegram later, AI workflows later, observability/evals.
+Этот репозиторий отвечает за рабочую систему бизнеса: intake API, Postgres operational state, manager backend/panel, AI workflows, Telegram delivery, future observability/evals.
 
-## Текущий Статус
+## Главный Статус
 
-Активный срез: `S04 widget persistence staging_smoke_passed`.
+`granit-operations` сейчас не production-ready, но основной staging путь сильно продвинулся дальше старого S04.
 
-Стадия repo: `s04_staging_smoke_passed`. S01 staging/review evidence accepted. S02 manager auth через Яндекс ID, S02b React/Mantine manager UI и S03-min статусы/history прошли staging migration/rebuild/API smoke; owner browser check после Яндекс-входа принят в chat 2026-05-13. S04 widget persistence deployed to staging with migration `0004`, public widget POST, Postgres persistence, and manager API visibility smoke passed. Production remains blocked by release gates.
+Что уже доказано:
 
-## Карта Репозиториев
+1. S01: сайтовая форма принимает обращение, сохраняет заявку в Postgres, менеджер видит ее.
+2. S02/S03: менеджерский вход через Яндекс ID, русская панель, карточка заявки, статусы и история прошли staging checks.
+3. S04/S05/S06: website widget baseline сохраняет сообщение до AI, имеет safe AI fallback и takeover/send-time gate для website path.
+4. P0: channel-neutral conversation foundation merged; widget и Telegram используют общий контур заявка / conversation / message / takeover.
+5. Telegram inbound + manager mini-panel reviewed locally; Telegram не становится отдельной CRM.
+6. Telegram outbound delivery sender accepted after controlled staging smoke for manager-authored replies.
+7. Telegram manager reply worker accepted after local checks and controlled staging worker smoke.
+8. Telegram supervised scheduler implemented locally as systemd timer template + one-shot + Postgres advisory lock; runtime enablement still needs supervised smoke/sign-off.
 
-| Репозиторий | За что отвечает | Текущая стадия | Что блокирует | Следующее действие |
-|---|---|---|---|---|
-| `granit-operations` | Public intake API, Postgres lead state, manager visibility, manager panel, AI/Telegram later, observability/evals | `s04_staging_smoke_passed` | Production launch не одобрен | Owner browser-checks S04 on staging; keep AI disabled |
-| `granit-site-cms` | Astro public site, public forms, Payload CMS/admin later, SEO/content workflow | `s04_staging_smoke_passed` | Production launch не одобрен | Owner browser-checks S04 on staging |
-| `granit-plan-app` | Source of truth: ADRs, boundaries, release gates, S01-S15 order | `accepted` для архитектуры | Нельзя менять source-of-truth решения из этого repo | Читать planning wiki перед изменениями |
+Что это означает: путь "менеджер написал ответ -> Postgres delivery state -> Telegram sendMessage -> sent/retrying/failed/blocked status" проверен для manager-authored replies. Это не approval для Telegram AI outbound и не production approval.
 
-## S01 Подзадачи
+## Текущая Стадия
 
-| Срез | Цель | Статус | Доказательства |
-|---|---|---|---|
-| S01 operations provider contract/API | Опубликовать `site_form.v1`, принять форму, вернуть safe public receipt | `accepted (staging/review evidence)` | `PUBLIC_INTAKE_CONTRACT.md`, `S01_FORM_INTAKE.md`, `contracts/public-intake-contract.md`, `release/evidence/S01_PUBLIC_INTAKE_PROVIDER_RU.md` |
-| S01 operations real DB smoke | Сохранить lead в real Postgres и показать его менеджеру | `accepted (staging/review evidence)` | `release/evidence/S01_PUBLIC_INTAKE_PROVIDER_RU.md`; source staging note in `../../granit-site-cms/docs/tasks/STAGING_DEPLOY_FOR_NEO.md` |
-| S01 manager visibility | Менеджер видит source page/form metadata | `accepted (staging/review evidence)` | `S01_FORM_INTAKE.md`, `release/evidence/S01_PUBLIC_INTAKE_PROVIDER_RU.md`, manager endpoint docs in `README.md` |
-| S01 paired smoke | Site-cms consumer работает against operations provider | `accepted (staging/review evidence)` | `release/evidence/S01_PUBLIC_INTAKE_PROVIDER_RU.md` and site staging task |
-| S01 staging deploy readiness | Staging может проверять S01, но не является production approval | `accepted (staging/review evidence)` | `release/evidence/S01_PUBLIC_INTAKE_PROVIDER_RU.md` and site staging task |
-| Future manager staging domain | Зафиксировать домен для защищенной operations platform | `accepted` | `adr/ADR-001-STAGING_MANAGER_DOMAIN_RU.md`; домен `manager.botops.ru`, opening route deferred |
-| S02 manager auth через Яндекс ID | Защитить manager JSON APIs, пускать только allowlist/roles, keep `/manager` as data-free login shell | `accepted_staging_owner_checked` | `MANAGER_AUTH_YANDEX_RU.md`, `tasks/S02_MANAGER_AUTH_YANDEX_RU.md`, `release/evidence/S02_MANAGER_AUTH_YANDEX_RU.md` |
-| S02b manager UI Mantine | React/Vite/Mantine manager panel with Russian user-facing labels/errors | `accepted_staging_owner_checked` | `MANAGER_PANEL_SCOPE.md`, `tasks/S03_MANAGER_UI_MANTINE_RU.md`, `tasks/S02_S03_STAGING_SMOKE_PREP_RU.md`, `release/evidence/S03_MANAGER_UI_MANTINE_RU.md` |
-| S03-min lifecycle | Минимальные статусы и history mutation перед S04 | `accepted_staging_owner_checked` | `LEAD_LIFECYCLE.md`, `tasks/S03_MIN_LIFECYCLE_RU.md`, `release/evidence/S03_MIN_LIFECYCLE_RU.md` |
-| S04 widget persistence | Виджет сайта сохраняет сообщение/диалог в Postgres до любого AI | `staging_smoke_passed` | `site_widget.v1`, `POST /public/intake/site-widget/messages`, staging DB/API/manager smoke, AI disabled |
-| S04-S15 | Следующие slices после manager auth/UI evidence | `planned` | Planning wiki: `../../granit-plan-app/ai-agent-stack-wiki/wiki/25-first-implementation-slices.md` |
+| Область | Статус | Доказательство |
+|---|---|---|
+| Public intake / S01 | `accepted for staging acceleration` | `docs/release/evidence/S01_PUBLIC_INTAKE_PROVIDER_RU.md` |
+| Manager auth/UI/status history / S02-S03 | `accepted for staging acceleration` | `docs/release/evidence/S02_MANAGER_AUTH_YANDEX_RU.md`, `docs/release/evidence/S03_MANAGER_UI_MANTINE_RU.md`, `docs/release/evidence/S03_MIN_LIFECYCLE_RU.md` |
+| Website widget baseline / S04-S06 | `audited/staging evidence` | `docs/release/evidence/S04_WIDGET_PERSISTENCE_RU.md`, `docs/release/evidence/S05_WEBSITE_SAFE_AI_RU.md`, `docs/release/evidence/S06_MANAGER_TAKEOVER_RU.md` |
+| P0 channel-neutral conversation | `merged into main` | `docs/release/evidence/P0_CHANNEL_NEUTRAL_CONVERSATION_FOUNDATION_RU.md` |
+| Telegram inbound + manager mini-panel | `reviewed locally; staging prep accepted` | `docs/release/evidence/TELEGRAM_INBOUND_MANAGER_MINI_PANEL_RU.md` |
+| Telegram manual delivery sender | `accepted after controlled staging smoke` | `docs/release/evidence/TELEGRAM_OUTBOUND_DELIVERY_SENDER_RU.md` |
+| Telegram manager reply worker | `accepted after controlled staging worker smoke` | `docs/release/evidence/TELEGRAM_MANAGER_REPLY_WORKER_RU.md` |
+| Telegram supervised delivery scheduler | `implemented locally; not production approval` | `docs/release/evidence/TELEGRAM_MANAGER_REPLY_WORKER_SUPERVISED_SCHEDULER_RU.md` |
+
+## Что Делать Дальше
+
+1. Провести supervised staging smoke для `granit-telegram-delivery-once.timer`: lock busy, stop/restart, timeout/cancel, DB before/after and no-secret logs.
+2. Не включать Telegram AI outbound. Текущий worker проверяет только ответы менеджера.
+3. Не включать `manager_notification_outbox` sender внутри этого решения; это отдельный scope.
+4. Следующий AI-engineering шаг должен идти через planning task `AI-DIALOG-RISK-REDUCTION-TARGET-ARCHITECTURE`: neutral `AiTurnInput`, compact conversation context, cohesive AI modules, manager-visible degradation/handoff and review/eval linkage.
+5. Production остается заблокирован до G01-G17, backup/restore, rollback evidence и explicit owner sign-off.
 
 ## Блокеры
 
 | Блокер | Статус | Что делать |
 |---|---|---|
-| Рабочее дерево dirty | `clear` для operations/site-cms S04 repos | S02/S03/S04 changes committed and pushed in operations and site-cms |
-| S01 real DB smoke оформлен как operations evidence | `accepted` для staging/review | Evidence accepted in `docs/release/evidence/S01_PUBLIC_INTAKE_PROVIDER_RU.md` |
-| S02/S03 staging smoke | `accepted` | Auth/UI/status/history passed staging API smoke and owner browser check; keep evidence as staging-only |
-| S04 widget persistence | `staging_smoke_passed` | Owner browser check remains; AI stays disabled until S05 |
-| Production deploy | `blocked` | Требует G01-G17, backup/restore/rollback proof и explicit owner/developer sign-off |
-| GitHub Issues | `deferred` | Можно добавить позже как внешнюю task board; repo-local docs остаются durable record |
+| Production rollout | `blocked` | Собрать release evidence bundle, backup/restore, rollback and sign-off |
+| Supervised Telegram scheduler runtime | `implemented locally; runtime enablement blocked` | Установить timer только после supervised smoke, rollback review and owner sign-off |
+| Telegram AI outbound | `blocked` | Не включать до neutral AI boundary, separate AI-authored evidence, notification scope and production gates |
+| Notification sender | `separate scope` | Не смешивать с manager reply worker |
+| AI degradation/review/eval state | `P1 before AI production` | Добавить app-owned quality events, handoff/degradation visibility, review labels and eval cases |
+| Dirty working tree | `release blocker` | Разделить текущие изменения на reviewable commits before any release |
 
-## Следующее Безопасное Действие
+## Главные Ссылки
 
-Owner browser-checks the deployed staging widget and manager panel. Production launch remains blocked until production gates receive explicit sign-off.
-
-## Links
-
-- Source of truth: `source-of-truth.md`
-- Repo workflow: `AGENT_WORKFLOW.md`
-- Task docs: `tasks/README.md`
-- ADR docs: `adr/README.md`
-- Staging manager domain ADR: `adr/ADR-001-STAGING_MANAGER_DOMAIN_RU.md`
-- Manager auth plan: `MANAGER_AUTH_YANDEX_RU.md`
-- Manager UI evidence: `release/evidence/S03_MANAGER_UI_MANTINE_RU.md`
-- S03-min lifecycle evidence: `release/evidence/S03_MIN_LIFECYCLE_RU.md`
-- Evidence docs: `release/evidence/README.md`
-- S01 provider evidence: `release/evidence/S01_PUBLIC_INTAKE_PROVIDER_RU.md`
-- Planning boundaries: `../../granit-plan-app/ai-agent-stack-wiki/wiki/19-system-boundaries.md`
-- First release gates: `../../granit-plan-app/ai-agent-stack-wiki/wiki/23-production-ready-first-release.md`
-- Slice order: `../../granit-plan-app/ai-agent-stack-wiki/wiki/25-first-implementation-slices.md`
+- Task records: `docs/tasks/README.md`
+- Evidence records: `docs/release/evidence/README.md`
+- Telegram manager reply worker task: `docs/tasks/TELEGRAM_MANAGER_REPLY_WORKER_RU.md`
+- Telegram manager reply worker evidence: `docs/release/evidence/TELEGRAM_MANAGER_REPLY_WORKER_RU.md`
+- Telegram supervised scheduler task: `docs/tasks/TELEGRAM_MANAGER_REPLY_WORKER_SUPERVISED_SCHEDULER_RU.md`
+- Telegram supervised scheduler evidence: `docs/release/evidence/TELEGRAM_MANAGER_REPLY_WORKER_SUPERVISED_SCHEDULER_RU.md`
+- Telegram manager boundaries: `docs/architecture/TELEGRAM_MANAGER_BOUNDARIES_RU.md`
+- Worker ADR: `docs/adr/ADR-002-TELEGRAM-MANAGER-REPLY-WORKER_RU.md`
+- Supervised scheduler ADR: `docs/adr/ADR-003-TELEGRAM-MANAGER-REPLY-SUPERVISED-SCHEDULER_RU.md`
+- Supervised scheduler runbook: `docs/runbooks/TELEGRAM_MANAGER_REPLY_SUPERVISED_SCHEDULER_RU.md`
+- Planning project status: `../../granit-plan-app/docs/PROJECT_STATUS_RU.md`
+- Planning task board: `../../granit-plan-app/docs/TASK_BOARD_RU.md`
