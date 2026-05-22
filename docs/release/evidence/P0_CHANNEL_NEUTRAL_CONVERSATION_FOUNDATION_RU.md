@@ -1,11 +1,18 @@
 # Evidence: P0-CHANNEL-NEUTRAL-CONVERSATION - Канально-нейтральная основа диалогов
 
-Status: needs_review
+Status: merged into `main`; reviewed locally; accepted for staging acceleration as foundation; not production approval
 Date: 2026-05-18
 Repo: `granit-operations`
 Slice: P0
 Task link: `docs/tasks/P0_CHANNEL_NEUTRAL_CONVERSATION_FOUNDATION_RU.md`
 Contract/version: public `site_widget.v1` preserved
+
+## Status Clarification 2026-05-21
+
+- Implementation is merged on `main`: feature commit `93c5a8c`, merge commit `a7e2af7`.
+- The old `needs_review` wording was stale after Telegram inbound and manager-reply delivery slices started depending on the P0 foundation.
+- Local checks below are accepted as foundation evidence for staging acceleration only.
+- This evidence does not approve production, Telegram AI outbound, notification sender, worker/scheduler rollout, Mastra runtime/eval linkage or any production deploy.
 
 ## Что Проверяли
 
@@ -14,7 +21,7 @@ Contract/version: public `site_widget.v1` preserved
 - Website widget compatibility: public endpoint/response still uses `public_session_id` and `public_message_id`, not manager/internal conversation ids.
 - Telegram-ready inbound: identity reuse by provider account/chat, provider message replay, no fake `widget_sessions`, media handoff policy, manager notification outbox block when no destination is bound.
 - Manager API/UI: conversation actions target `publicConversationId`; widget session is shown only as channel identity metadata.
-- Telegram AI outbound remains explicitly blocked until a delivery sender/worker is implemented and proven.
+- Telegram AI outbound remains explicitly blocked; manager-authored delivery evidence does not approve AI-authored sends, worker/scheduler rollout, notification sender or production.
 
 ## Команды И Проверки
 
@@ -38,17 +45,18 @@ Contract/version: public `site_widget.v1` preserved
 
 ## Rollback / Manual Fallback
 
-- Rollback path: do not enable Telegram adapter or Telegram AI outbound; revert this backend diff before production if review rejects the foundation.
+- Rollback path: do not enable production Telegram rollout or Telegram AI outbound; revert this backend diff before production if review rejects the foundation.
 - Manual fallback: website widget still saves messages for manager review; Telegram AI outbound remains blocked rather than sending untracked provider messages.
 
 ## Blockers / Watch Items
 
-- Full Telegram webhook/adapter and delivery sender are follow-up work.
+- Telegram webhook/adapter and manual manager-reply sender now exist as follow-up slices on this foundation; automated worker/scheduler remains separate.
+- Telegram AI outbound remains blocked even after manager-authored delivery evidence.
 - Telegram manager notification delivery needs bound manager destinations and provider delivery recording before it can send.
 - Production remains blocked until production gates, backup/restore/rollback proof, and explicit owner sign-off.
 
 ## Sign-Off
 
-- Owner: pending review
-- Developer/release owner: Codex
-- Date: 2026-05-18
+- Owner: no production sign-off recorded
+- Developer/release owner: reviewed locally and accepted for staging acceleration as merged foundation
+- Date: 2026-05-21 status hygiene update over 2026-05-18 implementation evidence

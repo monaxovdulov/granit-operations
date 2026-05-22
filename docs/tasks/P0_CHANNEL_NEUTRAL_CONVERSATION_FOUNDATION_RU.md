@@ -1,10 +1,10 @@
 # Task: P0-CHANNEL-NEUTRAL-CONVERSATION - Канально-нейтральная основа диалогов
 
-Status: needs_review
+Status: merged into `main`; reviewed locally; accepted for staging acceleration as foundation; not production approval
 Created: 2026-05-17
 Repo: `granit-operations`
 Slice: P0 before Telegram adapter and production
-Owner/agent: next Codex implementation agent
+Owner/agent: completed implementation pass; Telegram follow-up slices already depend on this foundation
 
 ## Цель
 
@@ -21,6 +21,14 @@ Owner/agent: next Codex implementation agent
 - A future Telegram manager operations panel is allowed as a second manager UI adapter over the same backend use cases/API. It may show lead summaries, notify about new messages, allow inline manager actions and link to the web manager panel for complex work.
 - Telegram manager operations must use manager identity binding, RBAC, idempotent commands/buttons, audit/timeline events and delivery/outbox for outbound/customer-visible or manager-notification sends.
 - P0 should preserve this future path, but full Telegram manager panel and full bot rollout remain separate follow-up slices.
+
+## Status Clarification 2026-05-21
+
+- P0 implementation was merged to `main` on 2026-05-18: feature commit `93c5a8c`, merge commit `a7e2af7`.
+- The stale `needs_review` status in this task has been replaced with `merged` / `reviewed locally` wording because Telegram inbound and manager-reply delivery follow-up slices now build on this foundation.
+- This is accepted for staging acceleration only as the channel-neutral foundation. It is not production approval.
+- Production remains blocked until production gates, backup/restore/rollback proof and explicit owner sign-off exist.
+- Telegram AI outbound, manager notification sender, Mastra runtime/eval state and production worker/scheduler decisions remain separate blockers.
 
 ## Обязательные Продуктовые Правила
 
@@ -454,12 +462,12 @@ After coding:
 
 ## Blockers
 
-- Full Telegram webhook/adapter rollout remains a separate follow-up slice.
-- Telegram AI outbound remains blocked until an app-owned delivery worker/sender is implemented and proven beyond the current outbox/block foundation.
+- Telegram inbound + manager mini-panel and manual manager-reply delivery sender are follow-up slices on top of this merged foundation; the manager reply worker/scheduler remains separate.
+- Telegram AI outbound remains blocked even though manager-authored delivery has a sender path and staging smoke evidence.
 - Telegram manager notification delivery remains queued/blocked with app-owned state until manager Telegram destinations are bound and a sender records delivery attempts.
 - Human must separately decide later when, if ever, AI responsibility expands beyond v1.
-- Production remains blocked until production gates, backup/restore/rollback proof and explicit sign-off.
+- Production remains blocked until production gates, backup/restore/rollback proof and explicit owner sign-off.
 
 ## Next Action
 
-Review the P0 foundation diff and evidence. Next implementation goal should be Telegram adapter/webhook plus delivery sender over the app-owned outbox state, without enabling Telegram AI outbound before delivery status is proven.
+Use this merged foundation for the already-started Telegram slices. The next separate implementation goal is `TELEGRAM-MANAGER-REPLY-WORKER`: manager-authored replies only, disabled by default, with no Telegram AI outbound or manager notification sender in scope.

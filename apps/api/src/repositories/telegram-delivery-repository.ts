@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, lt, or } from "drizzle-orm";
 
 import {
   channelIdentities,
@@ -11,6 +11,7 @@ import {
 
 import type {
   ClaimPendingTelegramDeliveriesInput,
+  MarkStaleTelegramDeliveriesUncertainInput,
   PendingTelegramDelivery,
   RecordTelegramDeliveryFailedInput,
   RecordTelegramDeliverySentInput,
@@ -24,6 +25,8 @@ export class PostgresTelegramDeliveryRepository implements TelegramDeliveryRepos
     input: ClaimPendingTelegramDeliveriesInput
   ): Promise<PendingTelegramDelivery[]> {
     const limit = Math.max(1, Math.min(input.limit, 100));
+    const retryBackoffMs = Math.max(0, input.retryBackoffMs ?? 0);
+    const retryEligibleBefore = new Date(Date.now() - retryBackoffMs);
 
     return this.db.transaction(async (tx) => {
       const rows = await tx
@@ -49,8 +52,15 @@ export class PostgresTelegramDeliveryRepository implements TelegramDeliveryRepos
           and(
             eq(messageDeliveries.channel, "telegram"),
             eq(messageDeliveries.provider, "telegram_bot"),
-            inArray(messageDeliveries.status, ["pending", "retrying"]),
+            or(
+              eq(messageDeliveries.status, "pending"),
+              and(
+                eq(messageDeliveries.status, "retrying"),
+                lt(messageDeliveries.updatedAt, retryEligibleBefore)
+              )
+            ),
             eq(conversationMessages.direction, "outbound"),
+            eq(conversationMessages.senderRole, "manager"),
             eq(channelIdentities.channel, "telegram"),
             eq(channelIdentities.provider, "telegram_bot"),
             eq(channelIdentities.providerAccountId, input.providerAccountId)
@@ -67,7 +77,7 @@ export class PostgresTelegramDeliveryRepository implements TelegramDeliveryRepos
       await tx
         .update(messageDeliveries)
         .set({
-          status: "retrying",
+          status: "processing",
           updatedAt: new Date()
         })
         .where(
@@ -78,6 +88,85 @@ export class PostgresTelegramDeliveryRepository implements TelegramDeliveryRepos
         );
 
       return rows;
+    });
+  }
+
+  async markStaleTelegramDeliveriesUncertain(
+    input: MarkStaleTelegramDeliveriesUncertainInput
+  ): Promise<number> {
+    const limit = Math.max(1, Math.min(input.limit ?? 100, 100));
+
+    return this.db.transaction(async (tx) => {
+      const rows = await tx
+        .select({
+          deliveryId: messageDeliveries.id,
+          leadId: conversations.leadId,
+          publicConversationId: conversations.publicConversationId,
+          publicMessageId: conversationMessages.publicMessageId,
+          attemptCount: messageDeliveries.attemptCount
+        })
+        .from(messageDeliveries)
+        .innerJoin(
+          conversationMessages,
+          eq(messageDeliveries.conversationMessageId, conversationMessages.id)
+        )
+        .innerJoin(conversations, eq(conversationMessages.conversationId, conversations.id))
+        .innerJoin(channelIdentities, eq(conversationMessages.channelIdentityId, channelIdentities.id))
+        .where(
+          and(
+            eq(messageDeliveries.channel, "telegram"),
+            eq(messageDeliveries.provider, "telegram_bot"),
+            eq(messageDeliveries.status, "processing"),
+            lt(messageDeliveries.updatedAt, input.staleBefore),
+            eq(conversationMessages.direction, "outbound"),
+            eq(conversationMessages.senderRole, "manager"),
+            eq(channelIdentities.channel, "telegram"),
+            eq(channelIdentities.provider, "telegram_bot"),
+            eq(channelIdentities.providerAccountId, input.providerAccountId)
+          )
+        )
+        .orderBy(asc(messageDeliveries.updatedAt), asc(messageDeliveries.createdAt))
+        .limit(limit)
+        .for("update", { of: messageDeliveries, skipLocked: true });
+
+      if (!rows.length) {
+        return 0;
+      }
+
+      await tx
+        .update(messageDeliveries)
+        .set({
+          status: "uncertain",
+          lastError: input.lastError,
+          updatedAt: input.markedAt
+        })
+        .where(
+          inArray(
+            messageDeliveries.id,
+            rows.map((row) => row.deliveryId)
+          )
+        );
+
+      await tx.insert(leadTimelineEvents).values(
+        rows.map((row) => ({
+          leadId: row.leadId,
+          eventType: "conversation.delivery_uncertain",
+          summary: "Telegram delivery result is unknown",
+          metadata: {
+            delivery_id: row.deliveryId,
+            public_conversation_id: row.publicConversationId,
+            public_message_id: row.publicMessageId,
+            channel: "telegram",
+            provider: "telegram_bot",
+            delivery_status: "uncertain",
+            attempt_count: row.attemptCount,
+            last_error: input.lastError
+          },
+          createdAt: input.markedAt
+        }))
+      );
+
+      return rows.length;
     });
   }
 
@@ -162,6 +251,10 @@ function deliveryFailureEventType(status: RecordTelegramDeliveryFailedInput["sta
     return "conversation.delivery_blocked";
   }
 
+  if (status === "uncertain") {
+    return "conversation.delivery_uncertain";
+  }
+
   return "conversation.delivery_failed";
 }
 
@@ -176,6 +269,10 @@ function deliveryFailureSummary(status: RecordTelegramDeliveryFailedInput["statu
 
   if (status === "blocked") {
     return "Telegram delivery blocked";
+  }
+
+  if (status === "uncertain") {
+    return "Telegram delivery result is unknown";
   }
 
   return "Telegram delivery failed";

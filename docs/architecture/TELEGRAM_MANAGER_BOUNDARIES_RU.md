@@ -1,12 +1,12 @@
 # Telegram и мини-панель менеджера: границы и состояние
 
-Статус: снимок текущей архитектуры после локальной реализации. Это не разрешение на боевой запуск.
-Дата: 2026-05-21
+Статус: снимок текущей архитектуры после локальной реализации, controlled staging smoke для manual sender/explicit worker и repo-level supervised scheduler templates. Это не разрешение на боевой запуск.
+Дата: 2026-05-22
 Репозиторий: `granit-operations`
 
 Acceleration assumption от 2026-05-21: requester сообщил, что сейчас нет реальных клиентов и реальных менеджеров, которые зависят от Telegram path. Это снижает blast radius для controlled staging Bot API smoke с test bot/private chats и fake staging rows. Это не разрешает production, worker/scheduler, notification sender или Telegram AI outbound.
 
-Документ объясняет, как сейчас устроены входящие сообщения Telegram, мини-панель менеджера и первый delivery sender path: где проходят границы, какие модули за что отвечают, что сохраняется в Postgres, что отправляет только отдельный sender, а что все еще не разрешает боевой запуск.
+Документ объясняет, как сейчас устроены входящие сообщения Telegram, мини-панель менеджера, delivery sender path, explicit worker и supervised one-shot scheduler: где проходят границы, какие модули за что отвечают, что сохраняется в Postgres, что отправляет только отдельный sender/worker, а что все еще не разрешает боевой запуск.
 
 Главная мысль: Telegram сейчас является входным каналом и интерфейсом для быстрых действий менеджера, но не отдельной CRM. Источник правды остается в `granit-operations`: заявки, диалоги, сообщения, takeover, очереди доставки и аудит.
 
@@ -23,14 +23,18 @@ Acceleration assumption от 2026-05-21: requester сообщил, что сей
 - Текстовый ответ менеджера после takeover сохраняется как исходящее сообщение менеджера и создает `message_deliveries` со статусом `pending`.
 - Уведомления менеджерам о входящих сообщениях Telegram создаются в `manager_notification_outbox`.
 - Добавлен отдельный `TelegramMessageDeliveryService`, который забирает `message_deliveries.pending/retrying`, вызывает Telegram Bot API `sendMessage` и пишет `sent/retrying/failed/blocked_no_destination`.
+- Добавлен explicit long-running worker `npm run deliver:telegram:worker`; он не стартует сам, использует тот же sender service и останавливается по `SIGTERM`/`SIGINT`.
+- Controlled staging smoke подтвердил доставку одной fake manager-authored delivery через worker с записью внешнего Telegram `message_id`.
+- `npm run deliver:telegram:once` теперь production-candidate one-shot: берет Postgres advisory lock, пишет structured logs и быстро выходит `0`, если lock занят.
+- Telegram provider call имеет timeout и получает `AbortSignal`; timeout/cancel/network-unknown переводит delivery в `uncertain`, а не в auto-retry.
+- `message_deliveries` поддерживает `processing` и `uncertain`; `uncertain` не забирается автоматическим claim.
+- Добавлены repo templates для `systemd` service/timer и runbook stop/rollback.
 - Панель менеджера получает delivery status для исходящих сообщений: статус, число попыток, последнюю ошибку и внешний message id после успешной отправки.
 
 Что принципиально не сделано:
 
-- Нет автозапущенного production worker/scheduler для delivery sender.
+- Repo содержит supervised scheduler templates, но они не установлены и не включены как production service.
 - Нет отдельного отправщика, который реально отправляет уведомления менеджерам из `manager_notification_outbox`.
-- Нет staging smoke с реальным Telegram Bot API и реальным внешним message id.
-- Но под no-real-clients/no-real-managers assumption controlled staging smoke можно делать следующим ускоренным шагом.
 - Исходящие AI-ответы в Telegram заблокированы через `TelegramOutboundBlockedError`.
 - Боевой запуск заблокирован до G01-G17, backup/restore/rollback и явного подтверждения владельца.
 
@@ -51,10 +55,11 @@ Acceleration assumption от 2026-05-21: requester сообщил, что сей
 
 - Код сборки API: [app.ts](../../apps/api/src/app.ts), [config.ts](../../apps/api/src/config.ts).
 - Telegram route/service: [telegram.ts](../../apps/api/src/routes/telegram.ts), [telegram-bot-service.ts](../../apps/api/src/services/telegram-bot-service.ts).
-- Delivery sender: [telegram-delivery-service.ts](../../apps/api/src/services/telegram-delivery-service.ts), [telegram-delivery-repository.ts](../../apps/api/src/repositories/telegram-delivery-repository.ts), [deliver-telegram-pending-once.ts](../../apps/api/src/scripts/deliver-telegram-pending-once.ts).
+- Delivery sender/worker: [telegram-delivery-service.ts](../../apps/api/src/services/telegram-delivery-service.ts), [telegram-delivery-worker.ts](../../apps/api/src/services/telegram-delivery-worker.ts), [telegram-delivery-repository.ts](../../apps/api/src/repositories/telegram-delivery-repository.ts), [deliver-telegram-pending-once.ts](../../apps/api/src/scripts/deliver-telegram-pending-once.ts), [deliver-telegram-worker.ts](../../apps/api/src/scripts/deliver-telegram-worker.ts), [postgres-advisory-lock.ts](../../apps/api/src/services/postgres-advisory-lock.ts).
+- Supervised scheduler: [service](../../deploy/systemd/granit-telegram-delivery-once.service), [timer](../../deploy/systemd/granit-telegram-delivery-once.timer), [runbook](../runbooks/TELEGRAM_MANAGER_REPLY_SUPERVISED_SCHEDULER_RU.md).
 - Общий контракт backend-сценариев: [intake-repository.ts](../../apps/api/src/repositories/intake-repository.ts).
 - Postgres реализация: [postgres-intake-repository.ts](../../apps/api/src/repositories/postgres-intake-repository.ts).
-- DB schema/migrations: [schema.ts](../../packages/db/src/schema.ts), [0006](../../packages/db/migrations/0006_p0_channel_neutral_conversation.sql), [0007](../../packages/db/migrations/0007_telegram_manager_mini_panel.sql).
+- DB schema/migrations: [schema.ts](../../packages/db/src/schema.ts), [0006](../../packages/db/migrations/0006_p0_channel_neutral_conversation.sql), [0007](../../packages/db/migrations/0007_telegram_manager_mini_panel.sql), [0009](../../packages/db/migrations/0009_telegram_delivery_processing_uncertain.sql).
 - Задача и доказательства проверки: [описание задачи](../tasks/TELEGRAM_INBOUND_MANAGER_MINI_PANEL_RU.md), [документ проверки](../release/evidence/TELEGRAM_INBOUND_MANAGER_MINI_PANEL_RU.md).
 
 ## 2. Общая Картина
@@ -122,7 +127,7 @@ flowchart TD
 | `apps/api/src/routes` | Маршруты HTTP, вебхук, проверка входа, коды ответа | URL, headers, cookies, body, текущего менеджера | Писать напрямую в БД, вызывать методы отправки Telegram, решать AI-policy | [public-intake.ts](../../apps/api/src/routes/public-intake.ts), [telegram.ts](../../apps/api/src/routes/telegram.ts), [manager.ts](../../apps/api/src/routes/manager.ts), [manager-auth.ts](../../apps/api/src/routes/manager-auth.ts) |
 | `apps/api/src/services` | Валидация публичных контрактов, нормализация Telegram update, запуск логики widget AI | Входные DTO, форму Telegram update, repository interface | Владеть schema, хранить бизнес-истину, отправлять Telegram-сообщения из вебхука | [public-widget-intake-service.ts](../../apps/api/src/services/public-widget-intake-service.ts), [telegram-bot-service.ts](../../apps/api/src/services/telegram-bot-service.ts), [widget-ai-service.ts](../../apps/api/src/services/widget-ai-service.ts) |
 | `apps/api/src/repositories` | Переходы состояния и сохранение в БД | Транзакции, idempotency, таблицы, события таймлайна | Знать Fastify `request/reply`, cookies, Telegram/OpenAI clients | [intake-repository.ts](../../apps/api/src/repositories/intake-repository.ts), [postgres-intake-repository.ts](../../apps/api/src/repositories/postgres-intake-repository.ts) |
-| `packages/db` | Таблицы, индексы, миграции, DB connection | Структуру Postgres | HTTP/UI/provider logic | [schema.ts](../../packages/db/src/schema.ts), [0006](../../packages/db/migrations/0006_p0_channel_neutral_conversation.sql), [0007](../../packages/db/migrations/0007_telegram_manager_mini_panel.sql) |
+| `packages/db` | Таблицы, индексы, миграции, DB connection | Структуру Postgres | HTTP/UI/provider logic | [schema.ts](../../packages/db/src/schema.ts), [0006](../../packages/db/migrations/0006_p0_channel_neutral_conversation.sql), [0007](../../packages/db/migrations/0007_telegram_manager_mini_panel.sql), [0009](../../packages/db/migrations/0009_telegram_delivery_processing_uncertain.sql) |
 | `apps/manager/src` | Панель менеджера: список заявок, карточка, статусы, takeover, token привязки Telegram | Форму ответов manager API и локальное UI state | Писать в БД напрямую, вызывать Telegram Bot API, хранить каноническое состояние | [App.tsx](../../apps/manager/src/App.tsx), [api.ts](../../apps/manager/src/api.ts), [types.ts](../../apps/manager/src/types.ts) |
 | `packages/contracts` | Схемы public intake для сайта и виджета | Публичный request/response contract | Внутренности менеджера и Telegram | [index.ts](../../packages/contracts/src/index.ts) |
 | `packages/shared` | Маленькие deterministic helpers | Хеши, стабильная сериализация | Бизнес-переходы или интеграции | [index.ts](../../packages/shared/src/index.ts) |
@@ -252,10 +257,8 @@ flowchart TD
 
 До боевого включения Telegram нужны:
 
-- Операционный worker/scheduler для `message_deliveries`, а не только ручной `deliver:telegram:once`.
+- Supervised scheduler installation/smoke/sign-off; repo templates exist, but no production timer is approved by this document.
 - Отправщик для `manager_notification_outbox`.
-- Staging smoke с реальной доставкой через Telegram Bot API. Под текущей no-real-clients/no-real-managers assumption это следующий быстрый controlled test, а не production rollout.
-- Доказательство на staging, что внешний message id записывается обратно.
 - Backup/restore/rollback proof.
 - Закрытие G01-G17 из [23-production-ready-first-release.md](/home/devuser/ai-projects/granit-plan-app/ai-agent-stack-wiki/wiki/23-production-ready-first-release.md).
 - Явное подтверждение владельца и ответственного за релиз.
@@ -275,8 +278,11 @@ flowchart TD
 - Где webhook проверяет enabled/configured/secret: [telegram.ts](../../apps/api/src/routes/telegram.ts).
 - Где разбираются `/start`, callback-кнопки, входящие сообщения клиента и ответы менеджера: [telegram-bot-service.ts](../../apps/api/src/services/telegram-bot-service.ts).
 - Где pending-доставки превращаются в Telegram Bot API payload: [telegram-delivery-service.ts](../../apps/api/src/services/telegram-delivery-service.ts), [telegram-delivery-repository.ts](../../apps/api/src/repositories/telegram-delivery-repository.ts).
-- Ручной запуск одного batch без автодеплоя: `npm run deliver:telegram:once`.
+- Где long-running loop: [telegram-delivery-worker.ts](../../apps/api/src/services/telegram-delivery-worker.ts), [deliver-telegram-worker.ts](../../apps/api/src/scripts/deliver-telegram-worker.ts).
+- Ручной/supervised one-shot одного batch с Postgres advisory lock: `npm run deliver:telegram:once`.
+- Explicit staged worker run без автодеплоя как service: `npm run deliver:telegram:worker`.
+- Где systemd templates: [granit-telegram-delivery-once.service](../../deploy/systemd/granit-telegram-delivery-once.service), [granit-telegram-delivery-once.timer](../../deploy/systemd/granit-telegram-delivery-once.timer).
 - Где описан общий контракт backend-сценариев: [intake-repository.ts](../../apps/api/src/repositories/intake-repository.ts).
 - Где реально пишется Postgres-состояние: [postgres-intake-repository.ts](../../apps/api/src/repositories/postgres-intake-repository.ts).
-- Где таблицы и миграции: [schema.ts](../../packages/db/src/schema.ts), [0006](../../packages/db/migrations/0006_p0_channel_neutral_conversation.sql), [0007](../../packages/db/migrations/0007_telegram_manager_mini_panel.sql).
+- Где таблицы и миграции: [schema.ts](../../packages/db/src/schema.ts), [0006](../../packages/db/migrations/0006_p0_channel_neutral_conversation.sql), [0007](../../packages/db/migrations/0007_telegram_manager_mini_panel.sql), [0009](../../packages/db/migrations/0009_telegram_delivery_processing_uncertain.sql).
 - Где UI менеджера показывает привязку Telegram, статус и диалоги: [App.tsx](../../apps/manager/src/App.tsx), [api.ts](../../apps/manager/src/api.ts), [types.ts](../../apps/manager/src/types.ts).

@@ -30,3 +30,5 @@ Required fields:
 Current ADRs:
 
 - `ADR-001-STAGING_MANAGER_DOMAIN_RU.md` - `manager.botops.ru` is the accepted staging domain for the future operations platform / manager UI.
+- `ADR-002-TELEGRAM-MANAGER-REPLY-WORKER_RU.md` - explicit, disabled-by-default Telegram manager reply worker over `message_deliveries`; not production approval.
+- `ADR-003-TELEGRAM-MANAGER-REPLY-SUPERVISED-SCHEDULER_RU.md` - systemd timer plus one-shot plus Postgres advisory lock for manager reply delivery; not production approval.
