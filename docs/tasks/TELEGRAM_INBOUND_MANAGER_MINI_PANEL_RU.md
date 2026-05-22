@@ -1,11 +1,18 @@
 # Task: Telegram inbound + manager mini-panel
 
-Status: implemented locally, needs review
+Status: reviewed locally; prep accepted for staging acceleration; not production approval
 Repo: `granit-operations`
 Slice: Telegram adapter after P0 channel-neutral foundation
 Owner/agent: Codex
 
 Acceleration assumption, 2026-05-21: requester stated that there are currently no real clients and no real managers depending on this Telegram path. Controlled staging smoke can move faster with test bot/private chats and fake staging rows; this does not approve production or Telegram AI outbound.
+
+## Status Clarification 2026-05-21
+
+- Local implementation checks are reviewed and accepted as prep for accelerated controlled staging verification.
+- Follow-up sender evidence confirms the webhook stays free of direct `sendMessage`, `forwardMessage` and `copyMessage`, and manager binding/actions are private-chat only.
+- This status depends on the merged P0 channel-neutral foundation and supports follow-up Telegram delivery slices.
+- This is not production approval and does not approve Telegram AI outbound, notification sender or production worker/scheduler.
 
 ## Коротко Для Человека
 
@@ -64,12 +71,14 @@ Acceleration assumption, 2026-05-21: requester stated that there are currently n
 - `npm test`
 - `npm run build`
 
-## Follow-up Evidence
+## Evidence Links
 
-- Safe sender audit follow-up: `docs/release/evidence/TELEGRAM_SAFE_SENDER_LOCAL_SMOKE_PREP_RU.md`
+- Implementation evidence: `docs/release/evidence/TELEGRAM_INBOUND_MANAGER_MINI_PANEL_RU.md`
+- Safe sender audit/staging follow-up: `docs/release/evidence/TELEGRAM_SAFE_SENDER_LOCAL_SMOKE_PREP_RU.md`
+- P0 foundation evidence: `docs/release/evidence/P0_CHANNEL_NEUTRAL_CONVERSATION_FOUNDATION_RU.md`
 
 ## Blockers
 
-- Production stays blocked until staging delivery evidence, worker/scheduler decision, backup/restore/rollback, G01-G17, and explicit owner sign-off.
+- Production stays blocked until worker/scheduler decision, notification sender scope, backup/restore/rollback, G01-G17, and explicit owner sign-off; manual staging delivery smoke is not production approval.
 - Telegram AI outbound remains blocked.
 - Следующий task pack: `docs/tasks/TELEGRAM_SAFE_SENDER_NEXT_TASK_PACK_RU.md`

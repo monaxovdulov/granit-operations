@@ -1,11 +1,18 @@
 # Task: Telegram outbound delivery sender path
 
-Status: implemented locally, needs review
+Status: accepted after controlled staging smoke for manual manager-reply sender; not production approval
 Repo: `granit-operations`
 Slice: Telegram delivery sender after inbound + manager mini-panel
 Owner/agent: Codex
 
-Acceleration assumption, 2026-05-21: requester stated that there are currently no real clients and no real managers depending on this Telegram path. Prefer moving next to a controlled staging Bot API smoke with test bot/private chats and fake staging rows, while keeping production, worker/scheduler, notification sender and Telegram AI outbound blocked.
+Acceleration assumption, 2026-05-21: requester stated that there are currently no real clients and no real managers depending on this Telegram path. Controlled staging Bot API smoke used test/private Telegram accounts and fake staging rows, while keeping production, worker/scheduler, notification sender and Telegram AI outbound blocked.
+
+## Status Clarification 2026-05-21
+
+- Local sender implementation evidence is reviewed.
+- Controlled staging smoke for the manual `npm run deliver:telegram:once` path passed and is recorded in `docs/release/evidence/TELEGRAM_SAFE_SENDER_LOCAL_SMOKE_PREP_RU.md`.
+- Acceptance is limited to manager-authored replies already persisted in `message_deliveries`; it is not approval for Telegram AI outbound or an automated production worker.
+- The next separate task is `docs/tasks/TELEGRAM_MANAGER_REPLY_WORKER_RU.md`.
 
 ## Коротко Для Человека
 
@@ -43,7 +50,7 @@ Acceleration assumption, 2026-05-21: requester stated that there are currently n
 - Автозапущенный production worker/scheduler.
 - Telegram AI outbound.
 - Отправщик `manager_notification_outbox`.
-- Staging smoke с реальным Telegram Bot API уже можно делать следующим controlled test под no-real-clients/no-real-managers assumption.
+- Автозапущенный worker/scheduler и его отдельный staging smoke; manual sender smoke уже записан в evidence.
 - Backup/restore/rollback и production approval.
 
 ## Files Touched
@@ -74,10 +81,11 @@ Acceleration assumption, 2026-05-21: requester stated that there are currently n
 ## Blockers
 
 - Telegram AI outbound remains blocked by `TelegramOutboundBlockedError`.
-- Production remains blocked until staging delivery smoke evidence, operational worker/scheduler decision, notification outbox sender, backup/restore/rollback, G01-G17 and explicit owner sign-off.
+- Production remains blocked until operational worker/scheduler decision/proof, notification outbox sender, backup/restore/rollback, G01-G17 and explicit owner sign-off; manual staging delivery smoke is not production approval.
 
 ## Evidence
 
 - `docs/release/evidence/TELEGRAM_OUTBOUND_DELIVERY_SENDER_RU.md`
 - Local smoke/staging prep checklist: `docs/release/evidence/TELEGRAM_SAFE_SENDER_LOCAL_SMOKE_PREP_RU.md`
 - Следующий task pack: `docs/tasks/TELEGRAM_SAFE_SENDER_NEXT_TASK_PACK_RU.md`
+- Следующий worker task: `docs/tasks/TELEGRAM_MANAGER_REPLY_WORKER_RU.md`

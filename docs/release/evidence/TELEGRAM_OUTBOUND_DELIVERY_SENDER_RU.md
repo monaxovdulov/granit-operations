@@ -2,9 +2,16 @@
 
 Date: 2026-05-21
 Repo: `granit-operations`
-Status: local implementation evidence, not staging smoke and not production approval
+Status: local implementation evidence plus linked controlled staging smoke; not production approval
 
-Acceleration assumption, 2026-05-21: requester stated that there are currently no real clients and no real managers depending on this Telegram path. This lowers staging smoke blast radius and makes controlled Bot API smoke the preferred next step. It does not approve production, worker/scheduler, notification sender or Telegram AI outbound.
+Acceleration assumption, 2026-05-21: requester stated that there are currently no real clients and no real managers depending on this Telegram path. This lowered staging smoke blast radius; the controlled Bot API smoke is recorded in `docs/release/evidence/TELEGRAM_SAFE_SENDER_LOCAL_SMOKE_PREP_RU.md`. It does not approve production, worker/scheduler, notification sender or Telegram AI outbound.
+
+## Status Clarification 2026-05-21
+
+- This document records local implementation evidence for the sender path.
+- The later controlled staging smoke for manual `npm run deliver:telegram:once` passed with one manager-authored Telegram delivery and is linked as separate evidence.
+- Acceptance is limited to the manual sender path for manager-authored replies already stored in Postgres.
+- Automated worker/scheduler, notification sender, Telegram AI outbound and production approval remain blocked.
 
 ## What Was Verified
 
@@ -48,8 +55,8 @@ Acceleration assumption, 2026-05-21: requester stated that there are currently n
 - Existing Telegram webhook/manager smoke now covers blocked text reply from a bound `viewer`.
 - Safe sender audit regression covers non-private `/start <token>` being ignored without consuming the token.
 - Manager UI tooltip includes attempt count, last error and external Telegram message id when present.
-- Manual sender entrypoint exists as `npm run deliver:telegram:once`, but it was not run against real Telegram because this task explicitly avoids production/deploy/secrets changes.
-- Local manual smoke and staging Bot API smoke prep checklist: `docs/release/evidence/TELEGRAM_SAFE_SENDER_LOCAL_SMOKE_PREP_RU.md`
+- Manual sender entrypoint exists as `npm run deliver:telegram:once`; this local implementation pass did not run it against real Telegram, and the later controlled staging result is recorded separately.
+- Local manual smoke, staging prep checklist and controlled staging Bot API smoke: `docs/release/evidence/TELEGRAM_SAFE_SENDER_LOCAL_SMOKE_PREP_RU.md`
 
 ## Safety Notes
 
@@ -61,11 +68,17 @@ Acceleration assumption, 2026-05-21: requester stated that there are currently n
 
 ## Remaining Blockers
 
-- Staging smoke with real Telegram Bot API delivery and external message id evidence; under the no-real-clients/no-real-managers assumption this should be the next controlled test.
+- Automated worker/scheduler decision and staging smoke without a manual one-shot command.
 - Operational decision for scheduled/daemonized worker execution.
 - Sender for `manager_notification_outbox`.
 - Backup/restore/rollback evidence.
 - Production G01-G17 and explicit owner sign-off.
+
+## Evidence Links
+
+- Task: `docs/tasks/TELEGRAM_OUTBOUND_DELIVERY_SENDER_RU.md`
+- Controlled staging smoke: `docs/release/evidence/TELEGRAM_SAFE_SENDER_LOCAL_SMOKE_PREP_RU.md`
+- Next worker task: `docs/tasks/TELEGRAM_MANAGER_REPLY_WORKER_RU.md`
 
 ## Russian Transformation Gist
 

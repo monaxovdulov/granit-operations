@@ -2,9 +2,15 @@
 
 Date: 2026-05-20
 Repo: `granit-operations`
-Status: local implementation evidence, not production approval
+Status: reviewed locally; prep accepted for staging acceleration; not production approval
 
 Acceleration assumption, 2026-05-21: requester stated that there are currently no real clients and no real managers depending on this Telegram path. Controlled staging smoke can move faster with test bot/private chats and fake staging rows. This is still not production approval.
+
+## Status Clarification 2026-05-21
+
+- This evidence is accepted as local Telegram inbound + manager mini-panel prep on top of the merged P0 foundation.
+- Follow-up sender evidence records controlled staging Bot API smoke for manager-authored delivery, but this inbound evidence itself remains prep evidence, not production approval.
+- Telegram AI outbound, notification sender, production worker/scheduler, backup/restore/rollback and production gates remain blocked.
 
 ## What Was Verified
 
@@ -38,10 +44,16 @@ Acceleration assumption, 2026-05-21: requester stated that there are currently n
 - Manager-visible Telegram notifications are outbox rows; no provider call is made in the webhook.
 - Safe sender audit follow-up: `docs/release/evidence/TELEGRAM_SAFE_SENDER_LOCAL_SMOKE_PREP_RU.md`.
 
+## Evidence Links
+
+- Task: `docs/tasks/TELEGRAM_INBOUND_MANAGER_MINI_PANEL_RU.md`
+- P0 foundation evidence: `docs/release/evidence/P0_CHANNEL_NEUTRAL_CONVERSATION_FOUNDATION_RU.md`
+- Safe sender audit/staging follow-up: `docs/release/evidence/TELEGRAM_SAFE_SENDER_LOCAL_SMOKE_PREP_RU.md`
+
 ## Remaining Blockers
 
 - Production worker/scheduler decision for delivery sender.
 - Sender for `manager_notification_outbox`.
-- Staging webhook/sender smoke with real Telegram delivery evidence; under the no-real-clients/no-real-managers assumption this can be the next accelerated controlled test.
+- Manual staging sender smoke is recorded in `docs/release/evidence/TELEGRAM_SAFE_SENDER_LOCAL_SMOKE_PREP_RU.md`; automated worker/scheduler evidence is still separate.
 - Backup/restore/rollback evidence.
 - Production G01-G17 and explicit owner sign-off.
