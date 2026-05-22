@@ -3,8 +3,8 @@
 ID: `TELEGRAM-MANAGER-REPLY-WORKER-SUPERVISED-SCHEDULER`
 Repo: `granit-operations`
 Slice: production-safe supervised delivery for manager-authored Telegram replies
-Owner/agent: owner decision + Codex implementation later
-Status: `implemented locally; supervised runtime templates added; not production approval`
+Owner/agent: owner decision + Codex implementation/staging smoke
+Status: `supervised staging smoke passed; not production approval`
 
 ## Короткий Вывод
 
@@ -51,7 +51,7 @@ manager reply
 - если lock занят, команда должна быстро завершиться без работы;
 - `message_deliveries` остается source of truth для delivery state;
 - Telegram delivery остается `at-least-once`, пока нет отдельной explicit uncertain/idempotency model;
-- production launch остается заблокирован до timeout, AbortSignal, singleton, observability, stop/rollback and supervised staging smoke.
+- production launch остается заблокирован до production release bundle, backup/restore/rollback, monitoring/watch policy and explicit owner sign-off.
 
 Почему так:
 
@@ -413,29 +413,27 @@ Local:
 
 Staging/supervised:
 
-```text
-Not installed or started by this implementation.
-Capture these before production approval:
-- systemd timer/service status
-- one-shot run logs
-- DB before/after delivery row
-- lock busy behavior
-- SIGTERM/stop behavior
-- restart behavior
-- timeout/cancel behavior
-- no secret logs
-- Telegram receipt persisted
-```
+| Check | Result |
+|---|---|
+| staging `docker compose ... build ops-api` and `up -d ops-api` | passed |
+| staging migration `0009_telegram_delivery_processing_uncertain.sql` | passed |
+| rootless staging user timer install/enable | passed; timer enabled and active |
+| Postgres advisory lock busy behavior | passed; service exited `0` with `telegram_delivery_lock_busy` |
+| stale `processing` timeout/cancel recovery | passed; fake delivery became `uncertain` |
+| timer-triggered manager-authored delivery | passed; fake pending delivery became `sent` with provider receipt |
+| stop timer first, then service | passed; timer list returned `0 timers listed` |
+| restart/no-resend | passed; next run claimed `0`, previous `sent` row stayed `attempt_count=1` |
+| no secret logs grep | passed |
 
-## Evidence To Create
+## Evidence
 
-Create:
+Created/updated:
 
 ```text
 docs/release/evidence/TELEGRAM_MANAGER_REPLY_WORKER_SUPERVISED_SCHEDULER_RU.md
 ```
 
-Evidence must include:
+Evidence includes:
 
 - exact runtime model;
 - service/timer names;
@@ -448,25 +446,21 @@ Evidence must include:
 - known at-least-once / uncertain limitations;
 - explicit statement: not Telegram AI outbound, not notification sender, not production approval unless separate production gate is signed.
 
-## Next-Session Prompt
+## Next Action
 
-Use this prompt in a new Codex session when ready to implement:
+Do not expand this scheduler into Telegram AI outbound or `manager_notification_outbox`.
+The next production-readiness step is a separate release bundle:
 
 ```text
-Implement TELEGRAM-MANAGER-REPLY-WORKER-SUPERVISED-SCHEDULER in granit-operations.
-
 Source of truth:
 - docs/tasks/TELEGRAM_MANAGER_REPLY_WORKER_SUPERVISED_SCHEDULER_RU.md
-- docs/tasks/TELEGRAM_MANAGER_REPLY_WORKER_RU.md
-- docs/release/evidence/TELEGRAM_MANAGER_REPLY_WORKER_RU.md
-- docs/adr/ADR-002-TELEGRAM-MANAGER-REPLY-WORKER_RU.md
+- docs/release/evidence/TELEGRAM_MANAGER_REPLY_WORKER_SUPERVISED_SCHEDULER_RU.md
+- docs/runbooks/TELEGRAM_MANAGER_REPLY_SUPERVISED_SCHEDULER_RU.md
 
-Do not include Telegram AI outbound.
-Do not add manager_notification_outbox sender.
-Do not change AI business logic.
-Do not touch unrelated dirty changes.
-
-Implement the first production candidate as systemd timer + one-shot + Postgres advisory lock, with provider timeout, AbortSignal to Telegram fetch, bounded retry, clear pending/processing/sent/retrying/failed/blocked/uncertain handling or an explicit documented limitation if schema change is deferred.
-
-Prepare supervised staging smoke evidence and stop/rollback runbook.
+Required before production approval:
+- backup/restore evidence;
+- rollback evidence for the concrete release;
+- monitoring/watch policy;
+- owner-readable release bundle;
+- explicit owner sign-off.
 ```

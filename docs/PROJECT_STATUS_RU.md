@@ -1,6 +1,6 @@
 # granit-operations - Статус Репозитория
 
-Обновлено: 2026-05-22T17:30:22Z
+Обновлено: 2026-05-22T18:18:00Z
 
 Этот репозиторий отвечает за рабочую систему бизнеса: intake API, Postgres operational state, manager backend/panel, AI workflows, Telegram delivery, future observability/evals.
 
@@ -17,7 +17,7 @@
 5. Telegram inbound + manager mini-panel reviewed locally; Telegram не становится отдельной CRM.
 6. Telegram outbound delivery sender accepted after controlled staging smoke for manager-authored replies.
 7. Telegram manager reply worker accepted after local checks and controlled staging worker smoke.
-8. Telegram supervised scheduler implemented locally as systemd timer template + one-shot + Postgres advisory lock; runtime enablement still needs supervised smoke/sign-off.
+8. Telegram supervised scheduler passed staging smoke as `systemctl --user` timer + one-shot + Postgres advisory lock: migration applied, lock busy/uncertain/stop/restart/no-resend checked.
 
 Что это означает: путь "менеджер написал ответ -> Postgres delivery state -> Telegram sendMessage -> sent/retrying/failed/blocked status" проверен для manager-authored replies. Это не approval для Telegram AI outbound и не production approval.
 
@@ -32,22 +32,21 @@
 | Telegram inbound + manager mini-panel | `reviewed locally; staging prep accepted` | `docs/release/evidence/TELEGRAM_INBOUND_MANAGER_MINI_PANEL_RU.md` |
 | Telegram manual delivery sender | `accepted after controlled staging smoke` | `docs/release/evidence/TELEGRAM_OUTBOUND_DELIVERY_SENDER_RU.md` |
 | Telegram manager reply worker | `accepted after controlled staging worker smoke` | `docs/release/evidence/TELEGRAM_MANAGER_REPLY_WORKER_RU.md` |
-| Telegram supervised delivery scheduler | `implemented locally; not production approval` | `docs/release/evidence/TELEGRAM_MANAGER_REPLY_WORKER_SUPERVISED_SCHEDULER_RU.md` |
+| Telegram supervised delivery scheduler | `supervised staging smoke passed; not production approval` | `docs/release/evidence/TELEGRAM_MANAGER_REPLY_WORKER_SUPERVISED_SCHEDULER_RU.md` |
 
 ## Что Делать Дальше
 
-1. Провести supervised staging smoke для `granit-telegram-delivery-once.timer`: lock busy, stop/restart, timeout/cancel, DB before/after and no-secret logs.
-2. Не включать Telegram AI outbound. Текущий worker проверяет только ответы менеджера.
-3. Не включать `manager_notification_outbox` sender внутри этого решения; это отдельный scope.
-4. Следующий AI-engineering шаг должен идти через planning task `AI-DIALOG-RISK-REDUCTION-TARGET-ARCHITECTURE`: neutral `AiTurnInput`, compact conversation context, cohesive AI modules, manager-visible degradation/handoff and review/eval linkage.
-5. Production остается заблокирован до G01-G17, backup/restore, rollback evidence и explicit owner sign-off.
+1. Не включать Telegram AI outbound. Текущий scheduler проверяет только ответы менеджера.
+2. Не включать `manager_notification_outbox` sender внутри этого решения; это отдельный scope.
+3. Следующий AI-engineering шаг должен идти через planning task `AI-DIALOG-RISK-REDUCTION-TARGET-ARCHITECTURE`: neutral `AiTurnInput`, compact conversation context, cohesive AI modules, manager-visible degradation/handoff and review/eval linkage.
+4. Production остается заблокирован до G01-G17, backup/restore, rollback evidence, monitoring/watch policy and explicit owner sign-off.
 
 ## Блокеры
 
 | Блокер | Статус | Что делать |
 |---|---|---|
 | Production rollout | `blocked` | Собрать release evidence bundle, backup/restore, rollback and sign-off |
-| Supervised Telegram scheduler runtime | `implemented locally; runtime enablement blocked` | Установить timer только после supervised smoke, rollback review and owner sign-off |
+| Supervised Telegram scheduler runtime | `staging smoke passed; production approval blocked` | Собрать production release bundle, backup/restore, rollback and owner sign-off |
 | Telegram AI outbound | `blocked` | Не включать до neutral AI boundary, separate AI-authored evidence, notification scope and production gates |
 | Notification sender | `separate scope` | Не смешивать с manager reply worker |
 | AI degradation/review/eval state | `P1 before AI production` | Добавить app-owned quality events, handoff/degradation visibility, review labels and eval cases |

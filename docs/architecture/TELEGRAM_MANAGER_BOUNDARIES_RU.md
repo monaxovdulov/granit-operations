@@ -257,7 +257,7 @@ flowchart TD
 
 До боевого включения Telegram нужны:
 
-- Supervised scheduler installation/smoke/sign-off; repo templates exist, but no production timer is approved by this document.
+- Production supervised scheduler sign-off; rootless staging timer smoke passed, but no production timer is approved by this document.
 - Отправщик для `manager_notification_outbox`.
 - Backup/restore/rollback proof.
 - Закрытие G01-G17 из [23-production-ready-first-release.md](/home/devuser/ai-projects/granit-plan-app/ai-agent-stack-wiki/wiki/23-production-ready-first-release.md).

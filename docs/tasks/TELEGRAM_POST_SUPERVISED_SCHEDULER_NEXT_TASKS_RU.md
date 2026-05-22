@@ -1,6 +1,6 @@
 # Task: TELEGRAM-POST-SUPERVISED-SCHEDULER-NEXT-TASKS - Следующие Telegram/production-readiness задачи
 
-Status: planned
+Status: planned; task 1 accepted after supervised staging smoke
 Created: 2026-05-22
 Repo: `granit-operations`
 Slice: Telegram operations after supervised scheduler merge
@@ -21,6 +21,8 @@ AI outbound и handoff automation только отдельными задача
 ## Scope
 
 ### 1. Supervised staging smoke для scheduler
+
+Status: accepted on 2026-05-22 as staging evidence, not production approval.
 
 Проверить уже смерженный runtime:
 
@@ -175,7 +177,7 @@ Acceptance:
 
 ## Blockers
 
-- Staging timer is not installed/enabled by repo merge alone.
+- Production system-level timer install/sign-off remains separate from the rootless staging timer smoke.
 - `uncertain` manual policy needs owner-visible decision before production use.
 - Notification sender is a separate implementation and evidence slice.
 - Backup/restore/rollback proof is still required before production.
@@ -183,4 +185,4 @@ Acceptance:
 
 ## Next Action
 
-Start with task 1: supervised staging smoke for `granit-telegram-delivery-once.timer`, because every later production-readiness decision depends on proving that the current delivery path can be started, observed, stopped and rolled back safely.
+Continue with task 2: define the manual policy/runbook for `uncertain` rows before any production approval or notification sender work.
