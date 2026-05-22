@@ -22,6 +22,7 @@ Current task records:
 - `TELEGRAM_OUTBOUND_DELIVERY_SENDER_RU.md` - separate sender path for pending Telegram manager replies with retry/failure visibility.
 - `TELEGRAM_MANAGER_REPLY_WORKER_RU.md` - explicit Postgres-backed worker for automatic delivery of manager-authored Telegram replies only; staging smoke accepted, not production approval.
 - `TELEGRAM_MANAGER_REPLY_WORKER_SUPERVISED_SCHEDULER_RU.md` - systemd timer plus one-shot plus Postgres advisory lock for supervised manager reply delivery; not production approval.
+- `TELEGRAM_POST_SUPERVISED_SCHEDULER_NEXT_TASKS_RU.md` - ordered next task pack for supervised staging smoke, `uncertain` policy, notification sender, backup/rollback, release bundle, AI handoff policy and branch cleanup.
 - `TELEGRAM_SAFE_SENDER_NEXT_TASK_PACK_RU.md` - plain-language next-session task pack for audit, safe refactor, local manual smoke and staging smoke preparation after the local Telegram sender slice.
 
 Required fields:
