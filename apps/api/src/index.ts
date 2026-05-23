@@ -4,9 +4,9 @@ import { createOperationsDb } from "@granit/db";
 
 import { buildApi } from "./app.js";
 import { loadConfig } from "./config.js";
-import { PostgresIntakeRepository } from "./repositories/postgres-intake-repository.js";
-import { PostgresManagerAuthRepository } from "./repositories/postgres-manager-auth-repository.js";
-import { OpenAiWidgetAssistantProvider } from "./services/widget-ai-service.js";
+import { OpenAiWidgetAssistantProvider } from "./modules/ai/adapters/openai-widget-assistant-provider.js";
+import { PostgresManagerAuthRepository } from "./modules/auth/repositories/postgres-manager-auth-repository.js";
+import { PostgresIntakeRepository } from "./modules/conversations/repositories/postgres-intake-repository.js";
 
 setDefaultResultOrder("ipv4first");
 

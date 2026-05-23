@@ -17,6 +17,7 @@ Current task records:
 - `S03_MIN_LIFECYCLE_RU.md` - minimal manager statuses and status-change history before widget persistence.
 - `S04_WIDGET_PERSISTENCE_RU.md` - website widget message persistence before AI replies.
 - `SERIOUS_AI_LAYER_RU.md` - preparation plan for the serious backend AI layer after S05 website safe AI.
+- `MODULAR_MONOLITH_REFACTOR_RU.md` - planned refactor to make `ops-api` a clearer modular monolith without changing runtime topology, public contracts, DB schema or production state.
 - `P0_CHANNEL_NEUTRAL_CONVERSATION_FOUNDATION_RU.md` - implementation handoff for channel-neutral widget/Telegram conversation foundation before Telegram adapter and production.
 - `TELEGRAM_INBOUND_MANAGER_MINI_PANEL_RU.md` - Telegram inbound webhook plus manager binding/takeover/reply mini-panel after P0.
 - `TELEGRAM_OUTBOUND_DELIVERY_SENDER_RU.md` - separate sender path for pending Telegram manager replies with retry/failure visibility.

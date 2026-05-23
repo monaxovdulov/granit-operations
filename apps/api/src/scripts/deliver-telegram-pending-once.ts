@@ -3,12 +3,10 @@ import { setDefaultResultOrder } from "node:dns";
 import { createOperationsDb } from "@granit/db";
 
 import { loadConfig } from "../config.js";
-import { PostgresTelegramDeliveryRepository } from "../repositories/telegram-delivery-repository.js";
-import { tryAcquirePostgresAdvisoryLock } from "../services/postgres-advisory-lock.js";
-import {
-  TelegramBotApiDeliveryProvider,
-  TelegramMessageDeliveryService
-} from "../services/telegram-delivery-service.js";
+import { TelegramBotApiDeliveryProvider } from "../modules/delivery/adapters/telegram-bot-api-delivery-provider.js";
+import { PostgresTelegramDeliveryRepository } from "../modules/delivery/repositories/telegram-delivery-repository.js";
+import { tryAcquirePostgresAdvisoryLock } from "../modules/delivery/services/postgres-advisory-lock.js";
+import { TelegramMessageDeliveryService } from "../modules/delivery/services/telegram-delivery-service.js";
 
 setDefaultResultOrder("ipv4first");
 

@@ -1,17 +1,18 @@
 import Fastify from "fastify";
 
-import { createManagerAuth, type ManagerAuthOptions } from "./auth/manager-auth.js";
-import type { IntakeRepository } from "./repositories/intake-repository.js";
-import { registerManagerAuthRoutes } from "./routes/manager-auth.js";
+import { buildAppContext } from "./app-context.js";
+import type { ManagerAuthOptions } from "./modules/auth/manager-auth.js";
+import type { IntakeRepository } from "./modules/conversations/repositories/intake-repository.js";
+import { registerManagerAuthRoutes } from "./modules/auth/routes/manager-auth-routes.js";
 import {
   registerManagerShellRoutes,
   type ManagerShellOptions
-} from "./routes/manager-shell.js";
-import { registerManagerRoutes } from "./routes/manager.js";
-import { registerPublicIntakeRoutes } from "./routes/public-intake.js";
-import { registerTelegramRoutes } from "./routes/telegram.js";
-import type { PublicWidgetIntakeServiceOptions } from "./services/public-widget-intake-service.js";
-import type { TelegramBotServiceOptions } from "./services/telegram-bot-service.js";
+} from "./modules/manager/routes/manager-shell-routes.js";
+import { registerManagerRoutes } from "./modules/manager/routes/manager-routes.js";
+import { registerPublicIntakeRoutes } from "./modules/intake/routes/public-intake-routes.js";
+import { registerTelegramRoutes } from "./modules/telegram/inbound/routes/telegram-routes.js";
+import type { PublicWidgetIntakeServiceOptions } from "./modules/intake/use-cases/public-widget-intake-service.js";
+import type { TelegramBotServiceOptions } from "./modules/telegram/inbound/telegram-bot-service.js";
 
 export type BuildApiOptions = {
   repository: IntakeRepository;
@@ -24,24 +25,25 @@ export type BuildApiOptions = {
 
 export function buildApi(options: BuildApiOptions) {
   const app = Fastify({ logger: options.logger ?? false });
-  const managerAuth = createManagerAuth(options.managerAuth);
+  const context = buildAppContext({
+    repository: options.repository,
+    widgetAi: options.widgetAi,
+    managerAuth: options.managerAuth,
+    telegramBot: options.telegramBot ?? {
+      enabled: false
+    }
+  });
 
   app.get("/health", async () => ({
     ok: true,
     service: "granit-operations-api"
   }));
 
-  registerPublicIntakeRoutes(app, options.repository, { ai: options.widgetAi });
-  registerManagerAuthRoutes(app, managerAuth, options.repository);
+  registerPublicIntakeRoutes(app, context.publicIntake);
+  registerManagerAuthRoutes(app, context.managerAuth, context.managerTelegram);
   registerManagerShellRoutes(app, options.managerShell);
-  registerManagerRoutes(app, options.repository, managerAuth);
-  registerTelegramRoutes(
-    app,
-    options.repository,
-    options.telegramBot ?? {
-      enabled: false
-    }
-  );
+  registerManagerRoutes(app, context.managerLeads, context.managerAuth);
+  registerTelegramRoutes(app, context.telegramWebhook);
 
   return app;
 }

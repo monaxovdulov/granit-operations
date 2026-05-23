@@ -8,7 +8,7 @@ import {
   normalizeManagerEmail,
   type ManagerRole,
   type ManagerUserStatus
-} from "../repositories/manager-auth-repository.js";
+} from "../modules/auth/repositories/manager-auth-repository.js";
 
 const args = parseArgs(process.argv.slice(2));
 const databaseUrl = process.env.DATABASE_URL;
