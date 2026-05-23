@@ -1807,8 +1807,12 @@ describe("Telegram manager mini-panel webhook", () => {
   });
 
   it("keeps the webhook free of direct Telegram provider sends", () => {
-    const serviceSource = readFixtureSource("apps/api/src/services/telegram-bot-service.ts");
-    const routeSource = readFixtureSource("apps/api/src/routes/telegram.ts");
+    const serviceSource = readFixtureSource(
+      "apps/api/src/modules/telegram/inbound/telegram-bot-service.ts"
+    );
+    const routeSource = readFixtureSource(
+      "apps/api/src/modules/telegram/inbound/routes/telegram-routes.ts"
+    );
     const runtimeSource = `${serviceSource}\n${routeSource}`;
 
     expect(runtimeSource).not.toMatch(/\bsendMessage\b/);

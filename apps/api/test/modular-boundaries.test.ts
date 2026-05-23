@@ -1,0 +1,143 @@
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import path from "node:path";
+
+import { describe, expect, it } from "vitest";
+
+const apiSrc = path.join(process.cwd(), "apps/api/src");
+
+describe("ops-api modular monolith boundaries", () => {
+  it("keeps runtime assembly in one app context and out of legacy route/service folders", () => {
+    const appSource = readSource("app.ts");
+    const appContextSource = readSource("app-context.ts");
+
+    expect(appSource).toContain("./app-context.js");
+    expect(appSource).toContain("./modules/intake/routes/public-intake-routes.js");
+    expect(appSource).toContain("./modules/telegram/inbound/routes/telegram-routes.js");
+    expect(appSource).not.toMatch(/\.\/routes\//);
+    expect(appSource).not.toMatch(/\.\/services\//);
+    expect(appSource).not.toMatch(/\.\/repositories\//);
+    expect(appContextSource).toContain("new PublicIntakeService");
+    expect(appContextSource).toContain("new PublicWidgetIntakeService");
+    expect(appContextSource).toContain("new ManagerLeadUseCases");
+    expect(appContextSource).toContain("new ManagerTelegramBindingUseCases");
+    expect(appContextSource).toContain("new RepositoryTelegramInboundUseCases");
+    expect(appContextSource).toContain("new TelegramBotService");
+  });
+
+  it("keeps raw Fastify request/reply and manager request mutation out of non-route code", () => {
+    for (const filePath of listFiles(apiSrc)) {
+      if (!filePath.endsWith(".ts")) {
+        continue;
+      }
+
+      const relativePath = path.relative(apiSrc, filePath);
+      const source = readFileSync(filePath, "utf8");
+
+      if (!isRouteFile(filePath)) {
+        expect(source, relativePath).not.toMatch(/\bFastify(?:Request|Reply)\b/);
+      }
+
+      expect(source, relativePath).not.toContain("RequestWithManager");
+      expect(source, relativePath).not.toMatch(/(?:\brequest|\))\s*\.\s*managerUser\b/);
+    }
+  });
+
+  it("keeps routes as protocol adapters without constructing business services", () => {
+    const routeSource = [
+      readTree("modules/auth/routes"),
+      readTree("modules/intake/routes"),
+      readTree("modules/manager/routes"),
+      readTree("modules/telegram/inbound/routes")
+    ].join("\n");
+
+    expect(routeSource).not.toMatch(
+      /new\s+(PublicIntakeService|PublicWidgetIntakeService|TelegramBotService|ManagerLeadUseCases|ManagerTelegramBindingUseCases|RepositoryTelegramInboundUseCases)/
+    );
+    expect(readSource("modules/intake/routes/public-intake-routes.ts")).not.toContain(
+      "IntakeRepository"
+    );
+    expect(readSource("modules/telegram/inbound/routes/telegram-routes.ts")).not.toContain(
+      "TelegramInboundUseCases"
+    );
+  });
+
+  it("keeps Telegram inbound free of delivery provider sends", () => {
+    const inboundSource = readTree("modules/telegram/inbound");
+
+    expect(inboundSource).not.toMatch(/\bsendMessage\b/);
+    expect(inboundSource).not.toContain("TelegramBotApiDeliveryProvider");
+    expect(inboundSource).not.toContain("modules/delivery");
+    expect(inboundSource).not.toContain("../../delivery");
+  });
+
+  it("keeps Telegram delivery independent from webhook handling", () => {
+    const deliverySource = readTree("modules/delivery");
+
+    expect(deliverySource).not.toContain("telegram/inbound");
+    expect(deliverySource).not.toMatch(/webhook/i);
+  });
+
+  it("centralizes timeline event names for delivery uncertainty evidence", () => {
+    const timelineSource = readSource("modules/timeline/timeline-events.ts");
+    const deliveryRepositorySource = readSource(
+      "modules/delivery/repositories/telegram-delivery-repository.ts"
+    );
+
+    expect(timelineSource).toContain("conversation.delivery_uncertain");
+    expect(timelineSource).toContain("conversation.delivery_uncertain_resolution");
+    expect(timelineSource).toContain("DeliveryFailureTimelineInput");
+    expect(timelineSource).not.toContain("../delivery/services");
+    expect(deliveryRepositorySource).toContain("deliveryUncertainTimelineEvent");
+    expect(deliveryRepositorySource).not.toContain('"conversation.delivery_uncertain"');
+  });
+
+  it("keeps provider HTTP fetch implementations in adapter modules", () => {
+    const widgetServiceSource = readSource("modules/ai/services/widget-ai-service.ts");
+    const openAiAdapterSource = readSource(
+      "modules/ai/adapters/openai-widget-assistant-provider.ts"
+    );
+    const deliveryServiceSource = readSource("modules/delivery/services/telegram-delivery-service.ts");
+    const telegramAdapterSource = readSource(
+      "modules/delivery/adapters/telegram-bot-api-delivery-provider.ts"
+    );
+
+    expect(widgetServiceSource).not.toMatch(/\bfetch\(/);
+    expect(widgetServiceSource).not.toContain("OpenAiWidgetAssistantProvider");
+    expect(openAiAdapterSource).toMatch(/\bfetch\(/);
+    expect(openAiAdapterSource).toContain("OpenAiWidgetAssistantProvider");
+    expect(deliveryServiceSource).not.toMatch(/\bfetch\(/);
+    expect(deliveryServiceSource).not.toContain("TelegramBotApiDeliveryProvider");
+    expect(telegramAdapterSource).toMatch(/\bfetch\(/);
+    expect(telegramAdapterSource).toContain("TelegramBotApiDeliveryProvider");
+  });
+});
+
+function readSource(relativePath: string) {
+  return readFileSync(path.join(apiSrc, relativePath), "utf8");
+}
+
+function readTree(relativeDir: string) {
+  const root = path.join(apiSrc, relativeDir);
+  const chunks: string[] = [];
+
+  for (const filePath of listFiles(root)) {
+    if (filePath.endsWith(".ts")) {
+      chunks.push(readFileSync(filePath, "utf8"));
+    }
+  }
+
+  return chunks.join("\n");
+}
+
+function listFiles(root: string): string[] {
+  return readdirSync(root).flatMap((entry) => {
+    const entryPath = path.join(root, entry);
+    const stat = statSync(entryPath);
+
+    return stat.isDirectory() ? listFiles(entryPath) : [entryPath];
+  });
+}
+
+function isRouteFile(filePath: string): boolean {
+  return path.relative(apiSrc, filePath).split(path.sep).includes("routes");
+}
