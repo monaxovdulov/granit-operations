@@ -1,6 +1,4 @@
-import type {
-  ManagerTelegramRepository
-} from "../../conversations/repositories/intake-repository.js";
+import type { ManagerTelegramRepository } from "../../conversations/repositories/manager-telegram-repository.js";
 import {
   assertManagerCanMutate,
   type ManagerActor

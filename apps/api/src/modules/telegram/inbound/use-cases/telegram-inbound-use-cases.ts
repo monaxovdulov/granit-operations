@@ -1,37 +1,48 @@
 import type {
   AcceptInboundMessageInput,
+  ConversationMessageRepository
+} from "../../../conversations/repositories/conversation-message-repository.js";
+import type {
+  ManagerLeadRepository,
+  TakeoverConversationByPublicIdInput
+} from "../../../conversations/repositories/manager-lead-repository.js";
+import type {
   BindManagerTelegramChatInput,
   ClearManagerTelegramReplyContextInput,
   CreateManagerTelegramReplyContextInput,
   FindManagerTelegramActorInput,
-  IntakeRepository,
-  TakeoverConversationByPublicIdInput
-} from "../../../conversations/repositories/intake-repository.js";
+  ManagerTelegramRepository,
+  PersistManagerTelegramReplyInput
+} from "../../../conversations/repositories/manager-telegram-repository.js";
+
+type TelegramInboundRepository = ConversationMessageRepository &
+  ManagerTelegramRepository &
+  Pick<ManagerLeadRepository, "takeoverConversationByPublicId">;
 
 export type TelegramInboundUseCases = {
   acceptInboundMessage(input: AcceptInboundMessageInput): ReturnType<
-    IntakeRepository["acceptInboundMessage"]
+    TelegramInboundRepository["acceptInboundMessage"]
   >;
   bindManagerTelegramChat(input: BindManagerTelegramChatInput): ReturnType<
-    IntakeRepository["bindManagerTelegramChat"]
+    TelegramInboundRepository["bindManagerTelegramChat"]
   >;
   findManagerTelegramActor(input: FindManagerTelegramActorInput): ReturnType<
-    IntakeRepository["findManagerTelegramActor"]
+    TelegramInboundRepository["findManagerTelegramActor"]
   >;
   clearManagerTelegramReplyContext(input: ClearManagerTelegramReplyContextInput): ReturnType<
-    IntakeRepository["clearManagerTelegramReplyContext"]
+    TelegramInboundRepository["clearManagerTelegramReplyContext"]
   >;
-  persistManagerTelegramReply: IntakeRepository["persistManagerTelegramReply"];
+  persistManagerTelegramReply: TelegramInboundRepository["persistManagerTelegramReply"];
   takeoverConversationByPublicId(input: TakeoverConversationByPublicIdInput): ReturnType<
-    IntakeRepository["takeoverConversationByPublicId"]
+    TelegramInboundRepository["takeoverConversationByPublicId"]
   >;
   createManagerTelegramReplyContext(input: CreateManagerTelegramReplyContextInput): ReturnType<
-    IntakeRepository["createManagerTelegramReplyContext"]
+    TelegramInboundRepository["createManagerTelegramReplyContext"]
   >;
 };
 
 export class RepositoryTelegramInboundUseCases implements TelegramInboundUseCases {
-  constructor(private readonly repository: IntakeRepository) {}
+  constructor(private readonly repository: TelegramInboundRepository) {}
 
   acceptInboundMessage(input: AcceptInboundMessageInput) {
     return this.repository.acceptInboundMessage(input);
@@ -49,7 +60,7 @@ export class RepositoryTelegramInboundUseCases implements TelegramInboundUseCase
     return this.repository.clearManagerTelegramReplyContext(input);
   }
 
-  persistManagerTelegramReply(input: Parameters<IntakeRepository["persistManagerTelegramReply"]>[0]) {
+  persistManagerTelegramReply(input: PersistManagerTelegramReplyInput) {
     return this.repository.persistManagerTelegramReply(input);
   }
 

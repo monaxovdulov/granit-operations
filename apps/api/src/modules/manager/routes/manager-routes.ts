@@ -5,7 +5,7 @@ import type { AuthenticatedManager } from "../../auth/repositories/manager-auth-
 import {
   LEAD_STATUSES,
   isLeadStatus
-} from "../../conversations/repositories/intake-repository.js";
+} from "../../conversations/repositories/lead-conversation-types.js";
 import { ManagerForbiddenError } from "../use-cases/manager-actor.js";
 import type { ManagerLeadUseCases } from "../use-cases/manager-lead-use-cases.js";
 

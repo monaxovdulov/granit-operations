@@ -42,47 +42,55 @@ import {
   TelegramOutboundBlockedError,
   isAiState,
   isLeadStatus,
-  type AcceptInboundMessageInput,
-  type AcceptInboundMessageResult,
   type AiState,
-  type ChangeManagerLeadStatusInput,
   type ConversationContentType,
-  type CreateManagerTelegramBindTokenInput,
-  type CreateManagerTelegramBindTokenResult,
-  type BindManagerTelegramChatInput,
-  type BindManagerTelegramChatResult,
   type CustomerChannel,
-  type ClearManagerTelegramReplyContextInput,
-  type CreateManagerTelegramReplyContextInput,
-  type CreateManagerTelegramReplyContextResult,
-  type FindManagerTelegramActorInput,
-  type IntakeRepository,
   type LeadStatus,
-  type ManagerTelegramActor,
-  type ManagerTelegramBindingStatus,
-  type ManagerChannelIdentity,
-  type ManagerConversation,
-  type ManagerLeadDetail,
-  type ManagerLeadListItem,
   type MessageDeliveryStatus,
   type NeedsManagerReason,
-  type NextStepChannel,
-  type PersistManagerTelegramReplyInput,
-  type PersistManagerTelegramReplyResult,
-  type PersistAiReplyWithSendGateInput,
-  type RecordManualContactInput,
-  type SaveAcceptedSiteFormSubmissionInput,
-  type SaveAcceptedSiteFormSubmissionResult,
-  type SaveAcceptedSiteWidgetMessageInput,
-  type SaveAcceptedSiteWidgetMessageResult,
-  type SaveSiteWidgetAiMessageInput,
-  type SaveSiteWidgetAiMessageResult,
-  type SiteWidgetAiMessageLookupResult,
-  type SetNextStepInput,
-  type TakeoverConversationByPublicIdInput,
-  type TakeoverConversationInput,
-  type TakeoverSiteWidgetConversationInput
-} from "./intake-repository.js";
+  type NextStepChannel
+} from "./lead-conversation-types.js";
+import type {
+  AcceptInboundMessageInput,
+  AcceptInboundMessageResult,
+  PersistAiReplyWithSendGateInput,
+  SaveSiteWidgetAiMessageInput,
+  SaveSiteWidgetAiMessageResult,
+  SiteWidgetAiMessageLookupResult
+} from "./conversation-message-repository.js";
+import type { IntakeRepository } from "./intake-repository.js";
+import type {
+  ChangeManagerLeadStatusInput,
+  ManagerChannelIdentity,
+  ManagerConversation,
+  ManagerLeadDetail,
+  ManagerLeadListItem,
+  RecordManualContactInput,
+  SetNextStepInput,
+  TakeoverConversationByPublicIdInput,
+  TakeoverConversationInput,
+  TakeoverSiteWidgetConversationInput
+} from "./manager-lead-repository.js";
+import type {
+  BindManagerTelegramChatInput,
+  BindManagerTelegramChatResult,
+  ClearManagerTelegramReplyContextInput,
+  CreateManagerTelegramBindTokenInput,
+  CreateManagerTelegramBindTokenResult,
+  CreateManagerTelegramReplyContextInput,
+  CreateManagerTelegramReplyContextResult,
+  FindManagerTelegramActorInput,
+  ManagerTelegramActor,
+  ManagerTelegramBindingStatus,
+  PersistManagerTelegramReplyInput,
+  PersistManagerTelegramReplyResult
+} from "./manager-telegram-repository.js";
+import type {
+  SaveAcceptedSiteFormSubmissionInput,
+  SaveAcceptedSiteFormSubmissionResult,
+  SaveAcceptedSiteWidgetMessageInput,
+  SaveAcceptedSiteWidgetMessageResult
+} from "./public-intake-repository.js";
 
 export class PostgresIntakeRepository implements IntakeRepository {
   constructor(private readonly db: OperationsDb) {}

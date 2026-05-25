@@ -11,9 +11,9 @@ import { sha256Hex, stableStringify } from "@granit/shared";
 
 import {
   AgentReplyBlockedError,
-  IdempotencyConflictError,
-  type IntakeRepository
-} from "../../conversations/repositories/intake-repository.js";
+  IdempotencyConflictError
+} from "../../conversations/repositories/lead-conversation-types.js";
+import type { PublicIntakeRepository } from "../../conversations/repositories/public-intake-repository.js";
 import {
   WidgetAiService,
   WIDGET_AI_DISCLOSURE_TEXT,
@@ -38,7 +38,7 @@ export class PublicWidgetIntakeService {
   private readonly aiService: WidgetAiService;
 
   constructor(
-    private readonly repository: IntakeRepository,
+    private readonly repository: PublicIntakeRepository,
     private readonly options: PublicWidgetIntakeServiceOptions = {}
   ) {
     this.aiService = new WidgetAiService({

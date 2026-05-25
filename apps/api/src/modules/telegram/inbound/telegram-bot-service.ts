@@ -7,7 +7,7 @@ import {
   ManagerTelegramReplyRequiresTakeoverError,
   type ConversationContentType,
   type NeedsManagerReason
-} from "../../conversations/repositories/intake-repository.js";
+} from "../../conversations/repositories/lead-conversation-types.js";
 import type { TelegramInboundUseCases } from "./use-cases/telegram-inbound-use-cases.js";
 
 export type TelegramBotServiceOptions = {

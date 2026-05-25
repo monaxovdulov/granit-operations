@@ -9,10 +9,8 @@ import {
 } from "@granit/contracts";
 import { sha256Hex, stableStringify } from "@granit/shared";
 
-import {
-  IdempotencyConflictError,
-  type IntakeRepository
-} from "../../conversations/repositories/intake-repository.js";
+import { IdempotencyConflictError } from "../../conversations/repositories/lead-conversation-types.js";
+import type { PublicIntakeRepository } from "../../conversations/repositories/public-intake-repository.js";
 
 export type PublicIntakeServiceResult = {
   statusCode: number;
@@ -20,7 +18,7 @@ export type PublicIntakeServiceResult = {
 };
 
 export class PublicIntakeService {
-  constructor(private readonly repository: IntakeRepository) {}
+  constructor(private readonly repository: PublicIntakeRepository) {}
 
   async acceptSiteFormSubmission(rawBody: unknown): Promise<PublicIntakeServiceResult> {
     const schemaVersion = readSchemaVersion(rawBody);

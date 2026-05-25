@@ -4,7 +4,7 @@ import type {
   LeadStatus,
   NeedsManagerReason,
   NextStepChannel
-} from "../conversations/repositories/intake-repository.js";
+} from "../conversations/repositories/lead-conversation-types.js";
 
 type TimelineEvent = {
   leadId: string;

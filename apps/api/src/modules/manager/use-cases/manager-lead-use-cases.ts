@@ -1,7 +1,5 @@
-import type {
-  LeadStatus,
-  ManagerLeadRepository,
-} from "../../conversations/repositories/intake-repository.js";
+import type { LeadStatus } from "../../conversations/repositories/lead-conversation-types.js";
+import type { ManagerLeadRepository } from "../../conversations/repositories/manager-lead-repository.js";
 import {
   assertManagerCanMutate,
   managerAuditFields,

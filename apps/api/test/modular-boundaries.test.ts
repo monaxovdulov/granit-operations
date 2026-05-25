@@ -61,6 +61,54 @@ describe("ops-api modular monolith boundaries", () => {
     );
   });
 
+  it("keeps conversation repository contracts split by responsibility", () => {
+    const aggregateRepositorySource = readSource(
+      "modules/conversations/repositories/intake-repository.ts"
+    );
+    const publicIntakeServiceSource = readSource(
+      "modules/intake/use-cases/public-intake-service.ts"
+    );
+    const publicWidgetIntakeServiceSource = readSource(
+      "modules/intake/use-cases/public-widget-intake-service.ts"
+    );
+    const managerLeadUseCasesSource = readSource(
+      "modules/manager/use-cases/manager-lead-use-cases.ts"
+    );
+    const managerTelegramUseCasesSource = readSource(
+      "modules/manager/use-cases/manager-telegram-use-cases.ts"
+    );
+    const telegramInboundUseCasesSource = readSource(
+      "modules/telegram/inbound/use-cases/telegram-inbound-use-cases.ts"
+    );
+    const timelineSource = readSource("modules/timeline/timeline-events.ts");
+    const legacyRepositoryExportSource = readSource("repositories/intake-repository.ts");
+
+    expect(aggregateRepositorySource).toContain("./public-intake-repository.js");
+    expect(aggregateRepositorySource).toContain("./conversation-message-repository.js");
+    expect(aggregateRepositorySource).toContain("./manager-lead-repository.js");
+    expect(aggregateRepositorySource).toContain("./manager-telegram-repository.js");
+    expect(aggregateRepositorySource).toContain("./lead-conversation-types.js");
+    expect(aggregateRepositorySource).toContain("interface IntakeRepository");
+    expect(legacyRepositoryExportSource).toContain(
+      "../modules/conversations/repositories/intake-repository.js"
+    );
+
+    expect(publicIntakeServiceSource).toContain("public-intake-repository.js");
+    expect(publicIntakeServiceSource).not.toContain("repositories/intake-repository.js");
+    expect(publicWidgetIntakeServiceSource).toContain("public-intake-repository.js");
+    expect(publicWidgetIntakeServiceSource).not.toContain("repositories/intake-repository.js");
+    expect(managerLeadUseCasesSource).toContain("manager-lead-repository.js");
+    expect(managerLeadUseCasesSource).not.toContain("repositories/intake-repository.js");
+    expect(managerTelegramUseCasesSource).toContain("manager-telegram-repository.js");
+    expect(managerTelegramUseCasesSource).not.toContain("repositories/intake-repository.js");
+    expect(telegramInboundUseCasesSource).toContain("conversation-message-repository.js");
+    expect(telegramInboundUseCasesSource).toContain("manager-lead-repository.js");
+    expect(telegramInboundUseCasesSource).toContain("manager-telegram-repository.js");
+    expect(telegramInboundUseCasesSource).not.toContain("repositories/intake-repository.js");
+    expect(timelineSource).toContain("lead-conversation-types.js");
+    expect(timelineSource).not.toContain("repositories/intake-repository.js");
+  });
+
   it("keeps Telegram inbound free of delivery provider sends", () => {
     const inboundSource = readTree("modules/telegram/inbound");
 
