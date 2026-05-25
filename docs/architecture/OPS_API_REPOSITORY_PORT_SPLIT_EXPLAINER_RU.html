@@ -1,0 +1,661 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OPS API P1-1: repository contracts split</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f7f8fa;
+        --paper: #ffffff;
+        --ink: #1b1f27;
+        --muted: #626b7a;
+        --line: #d9dee7;
+        --soft: #eef2f7;
+        --blue: #215a8f;
+        --green: #1f6f54;
+        --amber: #8a5a00;
+        --red: #9a3412;
+        --code: #172033;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font: 16px/1.55 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      main {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 32px 20px 56px;
+      }
+
+      header {
+        margin-bottom: 24px;
+        padding-bottom: 18px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      h1,
+      h2,
+      h3 {
+        margin: 0;
+        line-height: 1.2;
+        letter-spacing: 0;
+      }
+
+      h1 {
+        max-width: 900px;
+        font-size: clamp(2rem, 4vw, 3.5rem);
+      }
+
+      h2 {
+        margin-bottom: 14px;
+        font-size: 1.45rem;
+      }
+
+      h3 {
+        margin-bottom: 8px;
+        font-size: 1rem;
+      }
+
+      p {
+        margin: 0 0 12px;
+      }
+
+      a {
+        color: var(--blue);
+        text-decoration-thickness: 1px;
+        text-underline-offset: 3px;
+      }
+
+      code,
+      pre {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      }
+
+      code {
+        color: var(--code);
+        background: var(--soft);
+        border: 1px solid var(--line);
+        border-radius: 5px;
+        padding: 0.08rem 0.28rem;
+        font-size: 0.92em;
+      }
+
+      pre {
+        overflow-x: auto;
+        margin: 12px 0 0;
+        padding: 14px;
+        color: #f4f7fb;
+        background: #172033;
+        border-radius: 8px;
+        font-size: 0.9rem;
+      }
+
+      ul,
+      ol {
+        margin: 0;
+        padding-left: 1.2rem;
+      }
+
+      li {
+        margin: 0 0 8px;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 10px;
+        font-size: 0.95rem;
+      }
+
+      th,
+      td {
+        padding: 10px 12px;
+        vertical-align: top;
+        border-bottom: 1px solid var(--line);
+        text-align: left;
+      }
+
+      th {
+        color: #303846;
+        background: #f2f5f9;
+      }
+
+      .eyebrow {
+        margin-bottom: 10px;
+        color: var(--muted);
+        font-size: 0.95rem;
+      }
+
+      .subtitle {
+        max-width: 900px;
+        margin-top: 14px;
+        color: var(--muted);
+        font-size: 1.1rem;
+      }
+
+      .grid {
+        display: grid;
+        gap: 16px;
+      }
+
+      .grid.two {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .grid.three {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .section {
+        margin-top: 18px;
+        padding: 20px;
+        background: var(--paper);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+      }
+
+      .plain-section {
+        margin-top: 30px;
+      }
+
+      .callout {
+        padding: 14px 16px;
+        border-left: 4px solid var(--blue);
+        background: #edf5ff;
+        border-radius: 6px;
+      }
+
+      .callout.warn {
+        border-left-color: var(--amber);
+        background: #fff7e6;
+      }
+
+      .callout.risk {
+        border-left-color: var(--red);
+        background: #fff1ea;
+      }
+
+      .card {
+        padding: 16px;
+        background: var(--paper);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+      }
+
+      .tag {
+        display: inline-block;
+        margin: 0 6px 6px 0;
+        padding: 3px 8px;
+        border-radius: 999px;
+        color: #243044;
+        background: #e8edf5;
+        font-size: 0.82rem;
+        white-space: nowrap;
+      }
+
+      .tag.good {
+        color: #124c39;
+        background: #dff3eb;
+      }
+
+      .tag.stop {
+        color: #74320b;
+        background: #ffe7d3;
+      }
+
+      .delta {
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        gap: 14px;
+        align-items: stretch;
+      }
+
+      .arrow {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--muted);
+        font-weight: 700;
+      }
+
+      .file-list {
+        columns: 2;
+      }
+
+      .muted {
+        color: var(--muted);
+      }
+
+      .status-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 14px;
+      }
+
+      .flow {
+        display: grid;
+        gap: 10px;
+        margin-top: 12px;
+      }
+
+      .flow-step {
+        display: grid;
+        grid-template-columns: 180px 1fr;
+        gap: 12px;
+        padding: 12px;
+        background: #f7f9fc;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+      }
+
+      .flow-step strong {
+        color: #273348;
+      }
+
+      .proposal {
+        border-top: 4px solid var(--green);
+      }
+
+      .proposal h3 {
+        color: var(--green);
+      }
+
+      .unexpected {
+        border-top: 4px solid var(--amber);
+      }
+
+      @media (max-width: 820px) {
+        main {
+          padding: 22px 14px 40px;
+        }
+
+        .grid.two,
+        .grid.three,
+        .delta {
+          grid-template-columns: 1fr;
+        }
+
+        .arrow {
+          min-height: 20px;
+        }
+
+        .flow-step {
+          grid-template-columns: 1fr;
+        }
+
+        .file-list {
+          columns: 1;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div class="eyebrow">Granit Operations · OPS API · P1-1 · 2026-05-25</div>
+        <h1>Repository contracts split: что поменялось и зачем</h1>
+        <p class="subtitle">
+          Этот документ объясняет slice P1-1 человеческим языком: где была проблема, что теперь стало
+          правдой в системе, какие проверки это подтверждают, чему пока нельзя доверять и как лучше
+          формулировать validation-границы дальше.
+        </p>
+        <div class="status-row">
+          <span class="tag good">public API не менялся</span>
+          <span class="tag good">Postgres behavior не переносился</span>
+          <span class="tag good">IntakeRepository сохранен</span>
+          <span class="tag good">legacy exports сохранены</span>
+          <span class="tag stop">production deploy не выполнялся</span>
+        </div>
+      </header>
+
+      <section class="section">
+        <h2>Короткая ориентация</h2>
+        <div class="grid three">
+          <div>
+            <h3>Что теперь правда</h3>
+            <p>
+              Контракты conversation/intake persistence больше не живут одним большим списком в
+              <code>intake-repository.ts</code>. Они разнесены по узким файлам под уже существующие
+              ответственности.
+            </p>
+          </div>
+          <div>
+            <h3>Зачем проекту</h3>
+            <p>
+              Будущие работы вокруг Telegram, manager workflow и widget AI смогут зависеть от нужного
+              порта, не подтягивая весь aggregate repository contract.
+            </p>
+          </div>
+          <div>
+            <h3>Можно ли доверять</h3>
+            <p>
+              Typecheck и два targeted Vitest проходят. Это доказывает, что TypeScript-контракты и
+              public intake сценарии не сломались, но не является production smoke.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section class="plain-section">
+        <h2>Было → стало</h2>
+        <div class="delta">
+          <div class="card">
+            <h3>Было</h3>
+            <p>
+              Один файл <code>apps/api/src/modules/conversations/repositories/intake-repository.ts</code>
+              одновременно экспортировал:
+            </p>
+            <ul>
+              <li>shared lead/conversation enums and errors;</li>
+              <li>public site form and widget persistence DTO;</li>
+              <li>conversation message persistence DTO;</li>
+              <li>manager lead read/mutation port;</li>
+              <li>manager Telegram binding/reply port;</li>
+              <li>aggregate <code>IntakeRepository</code>.</li>
+            </ul>
+          </div>
+          <div class="arrow">→</div>
+          <div class="card">
+            <h3>Стало</h3>
+            <p>Тот же контрактный смысл разложен по файлам:</p>
+            <ul>
+              <li><code>lead-conversation-types.ts</code> — общие enums/errors;</li>
+              <li><code>public-intake-repository.ts</code> — public intake port;</li>
+              <li><code>conversation-message-repository.ts</code> — inbound/outbound message persistence port;</li>
+              <li><code>manager-lead-repository.ts</code> — manager lead read/mutation port;</li>
+              <li><code>manager-telegram-repository.ts</code> — manager Telegram binding/reply port;</li>
+              <li><code>intake-repository.ts</code> — aggregate compatibility interface and re-export.</li>
+            </ul>
+          </div>
+        </div>
+        <div class="section">
+          <h3>Почему это важно</h3>
+          <p>
+            Это не “архитектура ради архитектуры”. Разделение делает import graph честнее:
+            public intake use case видит public intake port, manager use case видит manager port,
+            timeline builders видят только shared types. Так будущий refactor меньше рискует случайно
+            зацепить lead truth, takeover, delivery evidence или Telegram outbound policy.
+          </p>
+        </div>
+      </section>
+
+      <section class="section">
+        <h2>Как это теперь работает</h2>
+        <div class="flow">
+          <div class="flow-step">
+            <strong>Public site form</strong>
+            <span>
+              <code>PublicIntakeService</code> зависит от <code>PublicIntakeRepository</code>.
+              Он валидирует contract input, считает fingerprint и сохраняет accepted submission через
+              narrow persistence port.
+            </span>
+          </div>
+          <div class="flow-step">
+            <strong>Site widget</strong>
+            <span>
+              <code>PublicWidgetIntakeService</code> тоже зависит от <code>PublicIntakeRepository</code>.
+              AI reply generation и persistence sequencing не менялись.
+            </span>
+          </div>
+          <div class="flow-step">
+            <strong>Telegram inbound</strong>
+            <span>
+              <code>RepositoryTelegramInboundUseCases</code> теперь описывает нужную комбинацию ports:
+              conversation messages, manager Telegram binding/reply и takeover by public conversation id.
+            </span>
+          </div>
+          <div class="flow-step">
+            <strong>Manager panel</strong>
+            <span>
+              Manager lead use cases зависят от <code>ManagerLeadRepository</code>, а Telegram binding
+              use cases — от <code>ManagerTelegramRepository</code>.
+            </span>
+          </div>
+          <div class="flow-step">
+            <strong>Runtime assembly</strong>
+            <span>
+              <code>PostgresIntakeRepository</code> все еще implements <code>IntakeRepository</code>.
+              Это compatibility aggregate для текущего app context и tests, не новый runtime слой.
+            </span>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <h2>Что не менялось</h2>
+        <div class="grid two">
+          <div>
+            <h3>Сохранено намеренно</h3>
+            <ul>
+              <li>public API request/response contracts;</li>
+              <li>DB schema and migrations;</li>
+              <li>env variable names;</li>
+              <li>npm scripts;</li>
+              <li>runtime topology;</li>
+              <li>Postgres as source of truth;</li>
+              <li>Telegram AI outbound block;</li>
+              <li>compatibility exports under <code>apps/api/src/repositories/*</code>.</li>
+            </ul>
+          </div>
+          <div>
+            <h3>Не является результатом slice</h3>
+            <ul>
+              <li>не выделялся новый service;</li>
+              <li>не добавлялся event bus;</li>
+              <li>не добавлялся DI container;</li>
+              <li>не переносилось поведение из <code>PostgresIntakeRepository</code>;</li>
+              <li>не делался production или staging deploy;</li>
+              <li>не проектировался omnichannel CRM, WhatsApp/MAX/call tracking.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="plain-section">
+        <h2>Самое неожиданное</h2>
+        <div class="grid two">
+          <div class="card unexpected">
+            <h3>1. Порты уже были логически разделены, но физически спрятаны</h3>
+            <p>
+              В старом файле уже существовали <code>PublicIntakeRepository</code>,
+              <code>ConversationMessageRepository</code>, <code>ManagerLeadRepository</code> и
+              <code>ManagerTelegramRepository</code>. Неожиданность была в том, что boundary problem
+              почти полностью был file-level: хорошие responsibility names жили внутри одного широкого
+              import target.
+            </p>
+          </div>
+          <div class="card unexpected">
+            <h3>2. Timeline зависел от aggregate ради нескольких shared types</h3>
+            <p>
+              <code>timeline-events.ts</code> не нужен весь repository contract. Ему нужны только
+              enums вроде channel/status/content type. Это был простой, но показательный случай
+              “случайной широкой зависимости”.
+            </p>
+          </div>
+          <div class="card unexpected">
+            <h3>3. Tests intentionally keep legacy compatibility pressure</h3>
+            <p>
+              Public intake tests импортируют через <code>../src/repositories/intake-repository.js</code>.
+              Это не баг: так проверяется, что legacy compatibility export still works during this phase.
+            </p>
+          </div>
+          <div class="card unexpected">
+            <h3>4. Task pack был untracked, а рядом были unrelated dirty docs</h3>
+            <p>
+              Это важно operationally: slice делался поверх уже dirty worktree. Я не трогал unrelated
+              docs и не включал их в смысл P1-1, чтобы не смешивать чужие изменения с refactor evidence.
+            </p>
+          </div>
+          <div class="card unexpected">
+            <h3>5. Термин “frozen validation” в repo docs не найден</h3>
+            <p>
+              В проекте есть validation/failure terminology для public intake, но нет закрепленного
+              термина <code>frozen validation</code>. Значит, его лучше не использовать как будто он уже
+              принят; ниже есть варианты reformulation.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <h2>Evidence: что реально проверено</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Проверка</th>
+              <th>Что доказывает</th>
+              <th>Результат</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>npm run typecheck</code></td>
+              <td>API and manager TypeScript contracts compile after splitting imports and ports.</td>
+              <td>Passed</td>
+            </tr>
+            <tr>
+              <td><code>npx vitest run apps/api/test/modular-boundaries.test.ts</code></td>
+              <td>Boundary guardrail now protects the narrow port layout and legacy export policy.</td>
+              <td>Passed</td>
+            </tr>
+            <tr>
+              <td><code>npx vitest run apps/api/test/public-intake.test.ts</code></td>
+              <td>Public intake behavior and compatibility test fixture still pass.</td>
+              <td>Passed</td>
+            </tr>
+            <tr>
+              <td><code>git diff --check</code></td>
+              <td>No whitespace errors were introduced.</td>
+              <td>Passed</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="section">
+        <h2>Границы доверия</h2>
+        <div class="callout risk">
+          <p>
+            Этот slice повышает clarity of module boundaries, но не доказывает production readiness.
+            Не было deploy, staging smoke, migration run или live traffic validation.
+          </p>
+        </div>
+        <ul>
+          <li>
+            <code>PostgresIntakeRepository</code> все еще толстый implementation. Это осознанно:
+            P1-1 split contracts before behavior movement.
+          </li>
+          <li>
+            Compatibility aggregate still exists. Новому коду лучше импортировать narrow ports, но старые
+            callers не ломаются.
+          </li>
+          <li>
+            Contract split не меняет бизнес-истину: реальные lead/conversation/delivery facts остаются
+            в Postgres, а не в UI state, traces или prompt text.
+          </li>
+        </ul>
+      </section>
+
+      <section class="plain-section">
+        <h2>Proposals: “frozen validation” reformulation</h2>
+        <p class="muted">
+          В текущих docs нет принятого термина <code>frozen validation</code>. Ниже варианты, которые
+          лучше объясняют, что именно нельзя менять без отдельного решения.
+        </p>
+        <div class="grid three">
+          <div class="card proposal">
+            <h3>Option A: “Compatibility-frozen public validation”</h3>
+            <p>
+              Смысл: public validation response shape is frozen for current contract version. Можно
+              рефакторить internals, но нельзя менять внешний формат ошибок без versioned contract change.
+            </p>
+            <pre>Public validation response shape is compatibility-frozen for v1.</pre>
+            <p class="muted">Лучше всего для docs/contracts and public intake tasks.</p>
+          </div>
+          <div class="card proposal">
+            <h3>Option B: “Evidence-gated validation changes”</h3>
+            <p>
+              Смысл: validation logic можно менять, но только с тестами/evidence, которые показывают
+              typed validation, retry/fallback и no false success behavior.
+            </p>
+            <pre>Validation changes are evidence-gated, not casually editable.</pre>
+            <p class="muted">Лучше всего для AGENTS-style guardrails and future task packs.</p>
+          </div>
+          <div class="card proposal">
+            <h3>Option C: “Public contract validation is frozen; internal mapping is not”</h3>
+            <p>
+              Смысл: внешний contract остается стабильным, а внутренние файлы, ports и adapters можно
+              переставлять, если compiled contracts and scenario tests pass.
+            </p>
+            <pre>Freeze the public validation contract, not the internal implementation.</pre>
+            <p class="muted">Лучше всего для refactor slices like P1-1/P2-3.</p>
+          </div>
+        </div>
+        <div class="section">
+          <h3>Recommended wording</h3>
+          <p>
+            Рекомендую использовать комбинированную формулировку:
+          </p>
+          <pre>Public validation contract is compatibility-frozen for v1.
+Internal validation implementation may be refactored only when evidence shows:
+1. typed validation errors still return the same public shape;
+2. unsupported-version behavior is unchanged;
+3. retry/fallback behavior is unchanged;
+4. accepted requests are persisted before success is reported;
+5. no false public success is introduced.</pre>
+          <p>
+            Почему так лучше: она разделяет contract freeze и implementation freedom. Это защищает сайт
+            и пользователей от breaking changes, но не блокирует безопасный backend refactor.
+          </p>
+        </div>
+      </section>
+
+      <section class="section">
+        <h2>План дальше</h2>
+        <ol>
+          <li>
+            <strong>P1-2:</strong> вынести manager Telegram persistence behavior из
+            <code>PostgresIntakeRepository</code> в отдельный implementation module, сохранив facade/aggregate
+            там, где он нужен app context.
+          </li>
+          <li>
+            <strong>После P1-2:</strong> проверить, что Telegram inbound still has no provider send path,
+            delivery still does not depend on webhook/inbound, and Postgres remains source of truth.
+          </li>
+          <li>
+            <strong>Для validation wording:</strong> добавить выбранную формулировку в ближайший relevant
+            task pack или contracts doc, но не смешивать это с behavior refactor без отдельной acceptance
+            criteria.
+          </li>
+        </ol>
+      </section>
+
+      <section class="section">
+        <h2>Ссылки на source of truth</h2>
+        <ul class="file-list">
+          <li><a href="../adr/ADR-004-CONVERSATION_REPOSITORY_PORT_SPLIT_RU.md">ADR-004 repository port split</a></li>
+          <li><a href="../adr/README.md">ADR index</a></li>
+          <li><a href="../tasks/OPS_API_THICK_MODULE_REFACTOR_NEXT_TASKS_RU.md">OPS API refactor task pack</a></li>
+          <li><a href="../../apps/api/test/modular-boundaries.test.ts">modular-boundaries.test.ts</a></li>
+          <li><a href="../../apps/api/src/modules/conversations/repositories/intake-repository.ts">aggregate intake-repository.ts</a></li>
+          <li><a href="../../apps/api/src/modules/conversations/repositories/public-intake-repository.ts">public-intake-repository.ts</a></li>
+          <li><a href="../../apps/api/src/modules/conversations/repositories/conversation-message-repository.ts">conversation-message-repository.ts</a></li>
+          <li><a href="../../apps/api/src/modules/conversations/repositories/manager-lead-repository.ts">manager-lead-repository.ts</a></li>
+          <li><a href="../../apps/api/src/modules/conversations/repositories/manager-telegram-repository.ts">manager-telegram-repository.ts</a></li>
+          <li><a href="../../apps/api/src/modules/conversations/repositories/lead-conversation-types.ts">lead-conversation-types.ts</a></li>
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>
