@@ -118,6 +118,24 @@ describe("ops-api modular monolith boundaries", () => {
     expect(inboundSource).not.toContain("../../delivery");
   });
 
+  it("keeps manager Telegram persistence in an explicit repository module", () => {
+    const intakeRepositorySource = readSource(
+      "modules/conversations/repositories/postgres-intake-repository.ts"
+    );
+    const managerTelegramRepositorySource = readSource(
+      "modules/conversations/repositories/postgres-manager-telegram-repository.ts"
+    );
+
+    expect(intakeRepositorySource).toContain("PostgresManagerTelegramRepository");
+    expect(intakeRepositorySource).not.toContain("managerTelegramBindTokens");
+    expect(intakeRepositorySource).not.toContain("managerTelegramReplyContexts");
+    expect(managerTelegramRepositorySource).toContain("implements ManagerTelegramRepository");
+    expect(managerTelegramRepositorySource).toContain("managerTelegramBindTokens");
+    expect(managerTelegramRepositorySource).toContain("managerTelegramReplyContexts");
+    expect(managerTelegramRepositorySource).toContain("messageDeliveries");
+    expect(managerTelegramRepositorySource).toContain("managerMessageQueuedTimelineEvent");
+  });
+
   it("keeps Telegram delivery independent from webhook handling", () => {
     const deliverySource = readTree("modules/delivery");
 
