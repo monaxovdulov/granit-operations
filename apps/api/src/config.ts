@@ -1,4 +1,4 @@
-import type { ManagerAuthConfig } from "./auth/manager-auth.js";
+import type { ManagerAuthConfig } from "./modules/auth/manager-auth.js";
 
 export type ApiConfig = {
   host: string;

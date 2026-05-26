@@ -1,9 +1,11 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
+import * as ts from "typescript";
 
 import { describe, expect, it } from "vitest";
 
 const apiSrc = path.join(process.cwd(), "apps/api/src");
+const compatibilityExportDirs = new Set(["auth", "repositories", "routes", "services"]);
 
 describe("ops-api modular monolith boundaries", () => {
   it("keeps runtime assembly in one app context and out of legacy route/service folders", () => {
@@ -214,6 +216,38 @@ describe("ops-api modular monolith boundaries", () => {
     expect(telegramAdapterSource).toMatch(/\bfetch\(/);
     expect(telegramAdapterSource).toContain("TelegramBotApiDeliveryProvider");
   });
+
+  it("keeps compatibility exports available but out of production imports", () => {
+    const compatibilityFiles = Array.from(compatibilityExportDirs).flatMap((dir) =>
+      listFiles(path.join(apiSrc, dir)).filter((filePath) => filePath.endsWith(".ts"))
+    );
+    const productionImportsFromCompatibilityPaths: string[] = [];
+
+    for (const filePath of compatibilityFiles) {
+      const relativePath = path.relative(apiSrc, filePath);
+      const source = readFileSync(filePath, "utf8");
+
+      expect(source, relativePath).toContain('export * from "../modules/');
+    }
+
+    for (const filePath of listFiles(apiSrc)) {
+      if (!filePath.endsWith(".ts") || isCompatibilityExportFile(filePath)) {
+        continue;
+      }
+
+      const relativePath = path.relative(apiSrc, filePath);
+      const source = readFileSync(filePath, "utf8");
+      const sourceFile = ts.createSourceFile(filePath, source, ts.ScriptTarget.Latest, true);
+
+      for (const specifier of collectModuleSpecifiers(sourceFile)) {
+        if (resolvesToCompatibilityExport(filePath, specifier)) {
+          productionImportsFromCompatibilityPaths.push(`${relativePath} -> ${specifier}`);
+        }
+      }
+    }
+
+    expect(productionImportsFromCompatibilityPaths).toEqual([]);
+  });
 });
 
 function readSource(relativePath: string) {
@@ -244,4 +278,53 @@ function listFiles(root: string): string[] {
 
 function isRouteFile(filePath: string): boolean {
   return path.relative(apiSrc, filePath).split(path.sep).includes("routes");
+}
+
+function isCompatibilityExportFile(filePath: string): boolean {
+  return compatibilityExportDirs.has(path.relative(apiSrc, filePath).split(path.sep)[0] ?? "");
+}
+
+function resolvesToCompatibilityExport(fromFilePath: string, specifier: string): boolean {
+  if (!specifier.startsWith(".")) {
+    return false;
+  }
+
+  const resolvedPath = path.normalize(path.join(path.dirname(fromFilePath), specifier));
+  const relativePath = path.relative(apiSrc, resolvedPath);
+
+  if (relativePath.startsWith("..")) {
+    return false;
+  }
+
+  return compatibilityExportDirs.has(relativePath.split(path.sep)[0] ?? "");
+}
+
+function collectModuleSpecifiers(sourceFile: ts.SourceFile): string[] {
+  const specifiers: string[] = [];
+
+  sourceFile.forEachChild(function visit(node) {
+    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
+      const moduleSpecifier = node.moduleSpecifier;
+
+      if (moduleSpecifier && ts.isStringLiteral(moduleSpecifier)) {
+        specifiers.push(moduleSpecifier.text);
+      }
+    }
+
+    if (
+      ts.isCallExpression(node) &&
+      node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+      node.arguments.length === 1
+    ) {
+      const [specifier] = node.arguments;
+
+      if (specifier && ts.isStringLiteral(specifier)) {
+        specifiers.push(specifier.text);
+      }
+    }
+
+    ts.forEachChild(node, visit);
+  });
+
+  return specifiers;
 }
