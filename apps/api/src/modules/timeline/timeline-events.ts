@@ -1,10 +1,21 @@
 import type {
-  ConversationContentType,
-  CustomerChannel,
-  LeadStatus,
-  NeedsManagerReason,
-  NextStepChannel
-} from "../conversations/repositories/lead-conversation-types.js";
+  AiMessageSentTimelineInput,
+  ConversationMessageReceivedTimelineInput,
+  DeliveryFailureTimelineInput,
+  DeliverySentTimelineInput,
+  DeliveryUncertainResolutionTimelineInput,
+  DeliveryUncertainTimelineInput,
+  InboundLeadCreatedTimelineInput,
+  LeadStatusChangedTimelineInput,
+  ManagerMessageQueuedTimelineInput,
+  ManagerNotificationEnqueuedTimelineInput,
+  ManagerTakeoverTimelineInput,
+  ManualContactRecordedTimelineInput,
+  NextStepUpdatedTimelineInput,
+  SiteFormLeadCreatedTimelineInput
+} from "./timeline-event-inputs.js";
+
+export type { DeliveryFailureTimelineInput } from "./timeline-event-inputs.js";
 
 type TimelineEvent = {
   leadId: string;
@@ -12,17 +23,6 @@ type TimelineEvent = {
   summary: string;
   metadata: Record<string, unknown>;
   createdAt?: Date;
-};
-
-export type DeliveryFailureTimelineInput = {
-  deliveryId: string;
-  leadId: string;
-  publicConversationId: string;
-  publicMessageId: string;
-  status: "retrying" | "failed" | "blocked_no_destination" | "blocked" | "uncertain";
-  attemptCount: number;
-  lastError: string;
-  failedAt: Date;
 };
 
 export const TIMELINE_EVENT_TYPES = {
@@ -47,12 +47,9 @@ export const TIMELINE_EVENT_TYPES = {
 
 export type TimelineEventType = (typeof TIMELINE_EVENT_TYPES)[keyof typeof TIMELINE_EVENT_TYPES];
 
-export function siteFormLeadCreatedTimelineEvent(input: {
-  leadId: string;
-  publicSubmissionId: string;
-  sourcePageUrl: string;
-  sourceFormKind: string;
-}): TimelineEvent {
+export function siteFormLeadCreatedTimelineEvent(
+  input: SiteFormLeadCreatedTimelineInput
+): TimelineEvent {
   return {
     leadId: input.leadId,
     eventType: TIMELINE_EVENT_TYPES.leadCreatedFromSiteForm,
@@ -65,12 +62,9 @@ export function siteFormLeadCreatedTimelineEvent(input: {
   };
 }
 
-export function inboundLeadCreatedTimelineEvent(input: {
-  leadId: string;
-  channel: CustomerChannel;
-  metadata: Record<string, unknown>;
-  createdAt: Date;
-}): TimelineEvent {
+export function inboundLeadCreatedTimelineEvent(
+  input: InboundLeadCreatedTimelineInput
+): TimelineEvent {
   return {
     leadId: input.leadId,
     eventType:
@@ -86,21 +80,9 @@ export function inboundLeadCreatedTimelineEvent(input: {
   };
 }
 
-export function conversationMessageReceivedTimelineEvent(input: {
-  leadId: string;
-  channel: CustomerChannel;
-  publicMessageId: string;
-  publicConversationId: string;
-  channelIdentityId: string;
-  contentType: ConversationContentType;
-  automationStatus: "enabled" | "disabled";
-  publicSessionId?: string;
-  sourcePageUrl?: string;
-  widgetInstanceId?: string;
-  providerMessageId?: string;
-  providerUpdateId?: string;
-  createdAt: Date;
-}): TimelineEvent {
+export function conversationMessageReceivedTimelineEvent(
+  input: ConversationMessageReceivedTimelineInput
+): TimelineEvent {
   return {
     leadId: input.leadId,
     eventType: TIMELINE_EVENT_TYPES.conversationMessageReceived,
@@ -125,15 +107,7 @@ export function conversationMessageReceivedTimelineEvent(input: {
   };
 }
 
-export function aiMessageSentTimelineEvent(input: {
-  leadId: string;
-  channel: CustomerChannel;
-  publicMessageId: string;
-  inboundPublicMessageId: string;
-  publicConversationId: string;
-  metadata: Record<string, unknown>;
-  createdAt: Date;
-}): TimelineEvent {
+export function aiMessageSentTimelineEvent(input: AiMessageSentTimelineInput): TimelineEvent {
   return {
     leadId: input.leadId,
     eventType: TIMELINE_EVENT_TYPES.conversationAiMessageSent,
@@ -152,15 +126,9 @@ export function aiMessageSentTimelineEvent(input: {
   };
 }
 
-export function leadStatusChangedTimelineEvent(input: {
-  leadId: string;
-  fromStatus: LeadStatus;
-  toStatus: LeadStatus;
-  changedByManagerId: string;
-  changedByManagerEmail: string;
-  changedByManagerRole: string;
-  createdAt: Date;
-}): TimelineEvent {
+export function leadStatusChangedTimelineEvent(
+  input: LeadStatusChangedTimelineInput
+): TimelineEvent {
   return {
     leadId: input.leadId,
     eventType: TIMELINE_EVENT_TYPES.leadStatusChanged,
@@ -176,16 +144,9 @@ export function leadStatusChangedTimelineEvent(input: {
   };
 }
 
-export function nextStepUpdatedTimelineEvent(input: {
-  leadId: string;
-  nextStepAt: string;
-  nextStepSummary?: string;
-  nextStepChannel?: NextStepChannel;
-  changedByManagerId: string;
-  changedByManagerEmail: string;
-  changedByManagerRole: string;
-  createdAt: Date;
-}): TimelineEvent {
+export function nextStepUpdatedTimelineEvent(
+  input: NextStepUpdatedTimelineInput
+): TimelineEvent {
   return {
     leadId: input.leadId,
     eventType: TIMELINE_EVENT_TYPES.leadNextStepUpdated,
@@ -202,18 +163,9 @@ export function nextStepUpdatedTimelineEvent(input: {
   };
 }
 
-export function manualContactRecordedTimelineEvent(input: {
-  leadId: string;
-  contactChannel: "phone" | "whatsapp";
-  contactedAt: string;
-  summary: string;
-  nextStepAt?: string;
-  nextStepSummary?: string;
-  changedByManagerId: string;
-  changedByManagerEmail: string;
-  changedByManagerRole: string;
-  createdAt: Date;
-}): TimelineEvent {
+export function manualContactRecordedTimelineEvent(
+  input: ManualContactRecordedTimelineInput
+): TimelineEvent {
   return {
     leadId: input.leadId,
     eventType: TIMELINE_EVENT_TYPES.leadManualContactRecorded,
@@ -232,17 +184,7 @@ export function manualContactRecordedTimelineEvent(input: {
   };
 }
 
-export function managerTakeoverTimelineEvent(input: {
-  leadId: string;
-  publicConversationId: string;
-  channel: CustomerChannel;
-  previousAgentAllowedToReply: boolean;
-  previousAiState: string;
-  changedByManagerId: string;
-  changedByManagerEmail: string;
-  changedByManagerRole: string;
-  createdAt: Date;
-}): TimelineEvent {
+export function managerTakeoverTimelineEvent(input: ManagerTakeoverTimelineInput): TimelineEvent {
   return {
     leadId: input.leadId,
     eventType: TIMELINE_EVENT_TYPES.conversationManagerTakeover,
@@ -260,15 +202,9 @@ export function managerTakeoverTimelineEvent(input: {
   };
 }
 
-export function managerMessageQueuedTimelineEvent(input: {
-  leadId: string;
-  publicConversationId: string;
-  publicMessageId: string;
-  changedByManagerId: string;
-  changedByManagerEmail: string;
-  changedByManagerRole: string;
-  createdAt: Date;
-}): TimelineEvent {
+export function managerMessageQueuedTimelineEvent(
+  input: ManagerMessageQueuedTimelineInput
+): TimelineEvent {
   return {
     leadId: input.leadId,
     eventType: TIMELINE_EVENT_TYPES.conversationManagerMessageQueued,
@@ -286,17 +222,9 @@ export function managerMessageQueuedTimelineEvent(input: {
   };
 }
 
-export function managerNotificationEnqueuedTimelineEvent(input: {
-  leadId: string;
-  notificationIds?: string[];
-  notificationId?: string | null;
-  publicConversationId: string;
-  publicMessageId: string;
-  status: "pending" | "blocked_no_destination";
-  destinationCount?: number;
-  needsManagerReason: NeedsManagerReason;
-  createdAt: Date;
-}): TimelineEvent {
+export function managerNotificationEnqueuedTimelineEvent(
+  input: ManagerNotificationEnqueuedTimelineInput
+): TimelineEvent {
   return {
     leadId: input.leadId,
     eventType: TIMELINE_EVENT_TYPES.managerNotificationEnqueued,
@@ -318,15 +246,7 @@ export function managerNotificationEnqueuedTimelineEvent(input: {
   };
 }
 
-export function deliverySentTimelineEvent(input: {
-  leadId: string;
-  deliveryId: string;
-  publicConversationId: string;
-  publicMessageId: string;
-  attemptCount: number;
-  providerMessageId: string;
-  createdAt: Date;
-}): TimelineEvent {
+export function deliverySentTimelineEvent(input: DeliverySentTimelineInput): TimelineEvent {
   return {
     leadId: input.leadId,
     eventType: TIMELINE_EVENT_TYPES.conversationDeliverySent,
@@ -360,15 +280,9 @@ export function deliveryFailureTimelineEvent(input: DeliveryFailureTimelineInput
   };
 }
 
-export function deliveryUncertainTimelineEvent(input: {
-  leadId: string;
-  deliveryId: string;
-  publicConversationId: string;
-  publicMessageId: string;
-  attemptCount: number;
-  lastError: string;
-  createdAt: Date;
-}): TimelineEvent {
+export function deliveryUncertainTimelineEvent(
+  input: DeliveryUncertainTimelineInput
+): TimelineEvent {
   return {
     leadId: input.leadId,
     eventType: TIMELINE_EVENT_TYPES.conversationDeliveryUncertain,
@@ -385,16 +299,9 @@ export function deliveryUncertainTimelineEvent(input: {
   };
 }
 
-export function deliveryUncertainResolutionTimelineEvent(input: {
-  leadId: string;
-  deliveryId: string;
-  publicConversationId: string;
-  publicMessageId: string;
-  resolution: "confirmed_sent" | "confirmed_not_sent" | "requeued" | "ignored";
-  resolvedByManagerEmail?: string;
-  evidenceNote?: string;
-  createdAt: Date;
-}): TimelineEvent {
+export function deliveryUncertainResolutionTimelineEvent(
+  input: DeliveryUncertainResolutionTimelineInput
+): TimelineEvent {
   return {
     leadId: input.leadId,
     eventType: TIMELINE_EVENT_TYPES.conversationDeliveryUncertainResolution,

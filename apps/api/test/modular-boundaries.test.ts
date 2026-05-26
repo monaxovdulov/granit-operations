@@ -80,7 +80,6 @@ describe("ops-api modular monolith boundaries", () => {
     const telegramInboundUseCasesSource = readSource(
       "modules/telegram/inbound/use-cases/telegram-inbound-use-cases.ts"
     );
-    const timelineSource = readSource("modules/timeline/timeline-events.ts");
     const legacyRepositoryExportSource = readSource("repositories/intake-repository.ts");
 
     expect(aggregateRepositorySource).toContain("./public-intake-repository.js");
@@ -105,8 +104,25 @@ describe("ops-api modular monolith boundaries", () => {
     expect(telegramInboundUseCasesSource).toContain("manager-lead-repository.js");
     expect(telegramInboundUseCasesSource).toContain("manager-telegram-repository.js");
     expect(telegramInboundUseCasesSource).not.toContain("repositories/intake-repository.js");
-    expect(timelineSource).toContain("lead-conversation-types.js");
-    expect(timelineSource).not.toContain("repositories/intake-repository.js");
+  });
+
+  it("keeps timeline event inputs neutral and event builders centralized", () => {
+    const timelineSource = readSource("modules/timeline/timeline-events.ts");
+    const timelineInputSource = readSource("modules/timeline/timeline-event-inputs.ts");
+    const timelineTree = readTree("modules/timeline");
+
+    expect(timelineSource).toContain("TIMELINE_EVENT_TYPES");
+    expect(timelineSource).toContain("managerMessageQueuedTimelineEvent");
+    expect(timelineSource).toContain("managerNotificationEnqueuedTimelineEvent");
+    expect(timelineSource).toContain("deliveryUncertainTimelineEvent");
+    expect(timelineSource).toContain("./timeline-event-inputs.js");
+    expect(timelineInputSource).toContain("TimelineCustomerChannel");
+    expect(timelineInputSource).toContain("DeliveryFailureTimelineInput");
+    expect(timelineTree).not.toContain("conversations/repositories");
+    expect(timelineTree).not.toContain("repositories/intake-repository.js");
+    expect(timelineTree).not.toContain("lead-conversation-types.js");
+    expect(timelineTree).not.toMatch(/from\s+["'].*\/services\//);
+    expect(timelineTree).not.toContain("telegram-delivery-service.js");
   });
 
   it("keeps Telegram inbound free of delivery provider sends", () => {
