@@ -44,14 +44,35 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
-import { ApiRequestError, AuthRequiredError, managerApi } from "./api";
+import { AuthRequiredError, managerApi } from "./api";
 import {
-  LEAD_STATUS_VALUES,
+  LEAD_STATUS_OPTIONS,
+  contactLabel,
+  conversationChannelLabel,
+  conversationMessageBody,
+  conversationMessageSenderLabel,
+  deliveryStatusColor,
+  deliveryStatusLabel,
+  deliveryTooltip,
+  displayContactName,
+  errorMessage,
+  formatDate,
+  formatLeadCount,
+  formatMessageCount,
+  formKindLabel,
+  roleLabel,
+  sourceChannelLabel,
+  statusBadgeColor,
+  statusLabel,
+  timelineEventLabel,
+  timelineIconColor,
+  timelineSummaryLabel
+} from "./display";
+import {
   isLeadStatus,
   type LeadStatus,
   type ManagerLeadDetail,
   type ManagerLeadListItem,
-  type MessageDeliveryStatus,
   type ManagerTelegramBindingStatus,
   type ManagerUser
 } from "./types";
@@ -102,16 +123,6 @@ const theme = createTheme({
       'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
   }
 });
-
-const dateFormatter = new Intl.DateTimeFormat("ru-RU", {
-  dateStyle: "short",
-  timeStyle: "short"
-});
-
-const LEAD_STATUS_OPTIONS = LEAD_STATUS_VALUES.map((status) => ({
-  value: status,
-  label: statusLabel(status)
-}));
 
 const COLLAPSED_DIALOG_MESSAGE_LIMIT = 4;
 
@@ -1102,16 +1113,6 @@ function FullPageLoading() {
   );
 }
 
-function formatDate(value: string) {
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return dateFormatter.format(date);
-}
-
 function replaceLeadListItem(
   leads: ManagerLeadListItem[],
   updatedLead: ManagerLeadDetail
@@ -1152,308 +1153,4 @@ function sortLeadListItems(leads: ManagerLeadListItem[]) {
       right.createdAt.localeCompare(left.createdAt) ||
       right.leadId.localeCompare(left.leadId)
   );
-}
-
-function errorMessage(error: unknown) {
-  if (error instanceof AuthRequiredError) {
-    return "Нужно войти снова";
-  }
-
-  if (error instanceof ApiRequestError) {
-    if (error.status === 404) {
-      return "Заявка не найдена";
-    }
-
-    if (error.status === 401 || error.status === 403) {
-      return "Нужно войти снова";
-    }
-
-    if (error.status >= 500) {
-      return "Сервис временно недоступен";
-    }
-
-    return "Не удалось загрузить данные";
-  }
-
-  return "Не удалось выполнить запрос";
-}
-
-function roleLabel(role: ManagerUser["role"]) {
-  const labels: Record<ManagerUser["role"], string> = {
-    owner: "Владелец",
-    manager: "Менеджер",
-    viewer: "Просмотр"
-  };
-
-  return labels[role];
-}
-
-function statusLabel(status: ManagerLeadListItem["status"]) {
-  const labels: Record<ManagerLeadListItem["status"], string> = {
-    new: "Новая",
-    in_progress: "В работе",
-    waiting_response: "Ждет ответа",
-    closed: "Закрыта",
-    duplicate: "Дубль",
-    spam: "Спам"
-  };
-
-  return labels[status];
-}
-
-function statusBadgeColor(status: ManagerLeadListItem["status"]) {
-  const colors: Record<ManagerLeadListItem["status"], string> = {
-    new: "green",
-    in_progress: "blue",
-    waiting_response: "yellow",
-    closed: "gray",
-    duplicate: "orange",
-    spam: "red"
-  };
-
-  return colors[status];
-}
-
-function sourceChannelLabel(channel: ManagerLeadListItem["source"]["channel"]) {
-  const labels: Record<ManagerLeadListItem["source"]["channel"], string> = {
-    site_form: "Форма сайта",
-    site_widget: "Виджет сайта",
-    telegram: "Telegram"
-  };
-
-  return labels[channel];
-}
-
-function conversationChannelLabel(channel: ManagerLeadDetail["conversations"][number]["channel"]) {
-  const labels: Record<ManagerLeadDetail["conversations"][number]["channel"], string> = {
-    site_widget: "Виджет сайта",
-    telegram: "Telegram"
-  };
-
-  return labels[channel];
-}
-
-function formKindLabel(value?: string) {
-  const labels: Record<string, string> = {
-    catalog_request: "Запрос из каталога",
-    contact: "Контактная форма",
-    site_widget: "Виджет сайта"
-  };
-
-  return value ? (labels[value] ?? "Форма сайта") : "Не указана";
-}
-
-function timelineEventLabel(eventType: string) {
-  const labels: Record<string, string> = {
-    "lead.created_from_site_form": "Заявка создана",
-    "lead.created_from_site_widget": "Заявка из виджета",
-    "lead.created_from_telegram": "Заявка из Telegram",
-    "conversation.message_received": "Сообщение получено",
-    "conversation.ai_message_sent": "AI-ответ сохранен",
-    "conversation.manager_takeover": "AI отключен менеджером",
-    "conversation.manager_message_queued": "Ответ ожидает отправки",
-    "conversation.delivery_sent": "Сообщение доставлено",
-    "conversation.delivery_retrying": "Повтор доставки",
-    "conversation.delivery_failed": "Ошибка доставки",
-    "conversation.delivery_blocked": "Доставка заблокирована",
-    "conversation.delivery_uncertain": "Статус доставки неясен",
-    "manager.notification_enqueued": "Уведомление менеджеру",
-    "lead.status_changed": "Статус изменен"
-  };
-
-  return labels[eventType] ?? "Событие заявки";
-}
-
-function timelineSummaryLabel(event: ManagerLeadDetail["timeline"][number]) {
-  if (event.eventType === "lead.status_changed") {
-    const fromStatus = metadataLeadStatus(event.metadata.from_status);
-    const toStatus = metadataLeadStatus(event.metadata.to_status);
-
-    if (fromStatus && toStatus) {
-      return `Статус изменен: ${statusLabel(fromStatus)} -> ${statusLabel(toStatus)}`;
-    }
-
-    if (toStatus) {
-      return `Статус изменен на ${statusLabel(toStatus)}`;
-    }
-  }
-
-  const labels: Record<string, string> = {
-    "lead.created_from_site_form": "Заявка создана из формы на сайте",
-    "lead.created_from_site_widget": "Заявка создана из виджета сайта",
-    "lead.created_from_telegram": "Заявка создана из Telegram",
-    "conversation.message_received": "Получено сообщение клиента",
-    "conversation.ai_message_sent": "AI-ответ сохранен в диалоге",
-    "conversation.manager_takeover": "Менеджер взял диалог, AI отключен",
-    "conversation.manager_message_queued": "Ответ менеджера ждет отправки",
-    "conversation.delivery_sent": "Сообщение доставлено в Telegram",
-    "conversation.delivery_retrying": "Доставка не прошла, будет повтор",
-    "conversation.delivery_failed": "Доставка в Telegram завершилась ошибкой",
-    "conversation.delivery_blocked": "Доставка в Telegram заблокирована",
-    "conversation.delivery_uncertain": "Результат доставки в Telegram неизвестен",
-    "manager.notification_enqueued": "Уведомление менеджеру поставлено в очередь"
-  };
-
-  return labels[event.eventType] ?? "Событие заявки";
-}
-
-function timelineIconColor(event: ManagerLeadDetail["timeline"][number]) {
-  if (event.eventType === "lead.status_changed") {
-    return "blue";
-  }
-
-  if (event.eventType === "conversation.message_received") {
-    return "green";
-  }
-
-  if (event.eventType === "conversation.ai_message_sent") {
-    return "blue";
-  }
-
-  if (event.eventType === "conversation.manager_takeover") {
-    return "red";
-  }
-
-  if (event.eventType.startsWith("conversation.delivery_")) {
-    if (event.eventType === "conversation.delivery_uncertain") {
-      return "yellow";
-    }
-
-    return event.eventType === "conversation.delivery_sent" ? "green" : "red";
-  }
-
-  return "green";
-}
-
-function conversationMessageSenderLabel(
-  senderRole: ManagerLeadDetail["conversations"][number]["messages"][number]["senderRole"]
-) {
-  if (senderRole === "ai_assistant") {
-    return "AI-помощник";
-  }
-
-  return senderRole === "manager" ? "Менеджер" : "Посетитель";
-}
-
-function conversationMessageBody(
-  message: ManagerLeadDetail["conversations"][number]["messages"][number]
-) {
-  if (message.contentType === "text") {
-    return message.body;
-  }
-
-  const labels: Record<typeof message.contentType, string> = {
-    voice: "Голосовое сообщение",
-    sticker: "Стикер",
-    video_note: "Видеосообщение",
-    photo: "Фото",
-    document: "Документ"
-  };
-
-  return message.caption ? `${labels[message.contentType]}: ${message.caption}` : labels[message.contentType];
-}
-
-function deliveryStatusLabel(status: MessageDeliveryStatus) {
-  const labels: Record<MessageDeliveryStatus, string> = {
-    pending: "Ждет отправки",
-    processing: "Отправляется",
-    retrying: "Повтор",
-    sent: "Доставлено",
-    failed: "Ошибка",
-    blocked_no_destination: "Нет получателя",
-    blocked: "Заблокировано",
-    uncertain: "Неясно"
-  };
-
-  return labels[status];
-}
-
-function deliveryStatusColor(status: MessageDeliveryStatus) {
-  const colors: Record<MessageDeliveryStatus, string> = {
-    pending: "gray",
-    processing: "blue",
-    retrying: "yellow",
-    sent: "green",
-    failed: "red",
-    blocked_no_destination: "orange",
-    blocked: "orange",
-    uncertain: "grape"
-  };
-
-  return colors[status];
-}
-
-function deliveryTooltip(
-  delivery: NonNullable<
-    ManagerLeadDetail["conversations"][number]["messages"][number]["delivery"]
-  >
-) {
-  const parts = [
-    `Статус: ${deliveryStatusLabel(delivery.status)}`,
-    `Попыток: ${delivery.attemptCount}`,
-    `Обновлено: ${formatDate(delivery.updatedAt)}`
-  ];
-
-  if (delivery.lastError) {
-    parts.push(`Ошибка: ${delivery.lastError}`);
-  }
-
-  if (delivery.providerMessageId) {
-    parts.push(`ID сообщения Telegram: ${delivery.providerMessageId}`);
-  }
-
-  return parts.join("\n");
-}
-
-function metadataLeadStatus(value: unknown): LeadStatus | null {
-  return isLeadStatus(value) ? value : null;
-}
-
-function formatLeadCount(count: number) {
-  const mod10 = count % 10;
-  const mod100 = count % 100;
-  const word =
-    mod10 === 1 && mod100 !== 11
-      ? "заявка"
-      : mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)
-        ? "заявки"
-        : "заявок";
-
-  return `${count} ${word}`;
-}
-
-function formatMessageCount(count: number) {
-  const mod10 = count % 10;
-  const mod100 = count % 100;
-  const word =
-    mod10 === 1 && mod100 !== 11
-      ? "сообщение"
-      : mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)
-        ? "сообщения"
-        : "сообщений";
-
-  return `${count} ${word}`;
-}
-
-function contactLabel(value: ManagerLeadListItem["contact"]["preferredContact"]) {
-  const labels: Record<NonNullable<ManagerLeadListItem["contact"]["preferredContact"]>, string> = {
-    phone: "телефон",
-    whatsapp: "WhatsApp",
-    telegram: "Telegram",
-    email: "эл. почта"
-  };
-
-  return value ? labels[value] : undefined;
-}
-
-function displayContactName(lead: ManagerLeadListItem) {
-  if (lead.source.channel === "site_widget" && lead.contact.name === "Site visitor") {
-    return "Посетитель сайта";
-  }
-
-  if (lead.source.channel === "telegram" && lead.contact.name === "Telegram") {
-    return "Клиент Telegram";
-  }
-
-  return lead.contact.name;
 }
