@@ -125,6 +125,28 @@ describe("ops-api modular monolith boundaries", () => {
     expect(timelineTree).not.toContain("telegram-delivery-service.js");
   });
 
+  it("keeps public widget intake behind a narrow AI reply generator boundary", () => {
+    const appContextSource = readSource("app-context.ts");
+    const publicWidgetIntakeServiceSource = readSource(
+      "modules/intake/use-cases/public-widget-intake-service.ts"
+    );
+    const widgetAiReplyGeneratorSource = readSource(
+      "modules/intake/ports/public-widget-ai-reply-generator.ts"
+    );
+    const widgetAiServiceSource = readSource("modules/ai/services/widget-ai-service.ts");
+
+    expect(widgetAiReplyGeneratorSource).toContain("interface PublicWidgetAiReplyGenerator");
+    expect(publicWidgetIntakeServiceSource).toContain(
+      "../ports/public-widget-ai-reply-generator.js"
+    );
+    expect(publicWidgetIntakeServiceSource).not.toMatch(
+      /\b(WidgetAiService|WidgetAiProvider|OpenAiWidgetAssistantProvider|provider|modelName)\b/
+    );
+    expect(appContextSource).toContain("new WidgetAiService");
+    expect(appContextSource).toContain("replyGenerator");
+    expect(widgetAiServiceSource).toContain("implements PublicWidgetAiReplyGenerator");
+  });
+
   it("keeps Telegram inbound free of delivery provider sends", () => {
     const inboundSource = readTree("modules/telegram/inbound");
 

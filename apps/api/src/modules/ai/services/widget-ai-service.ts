@@ -1,8 +1,18 @@
 import type { SiteWidgetMessageRequest } from "@granit/contracts";
 
-export const WIDGET_AI_DISCLOSURE_VERSION = "granit_widget_ai_disclosure.s05.v1";
-export const WIDGET_AI_DISCLOSURE_TEXT =
-  "Вам помогает AI-помощник компании.\nОн может ответить на общие вопросы и собрать детали заявки.\nВажные условия, цену и сроки подтвердит менеджер.";
+import {
+  WIDGET_AI_DISCLOSURE_VERSION,
+  type PublicWidgetAiReplyGenerator,
+  type PublicWidgetAiReplyResult
+} from "../../intake/ports/public-widget-ai-reply-generator.js";
+
+export {
+  WIDGET_AI_DISCLOSURE_TEXT,
+  WIDGET_AI_DISCLOSURE_VERSION,
+  type PublicWidgetAiReplyGenerator,
+  type PublicWidgetAiReplyResult
+} from "../../intake/ports/public-widget-ai-reply-generator.js";
+
 export const WIDGET_AI_POLICY_VERSION = "granit_widget_ai_policy.s05.v1";
 export const WIDGET_AI_PROMPT_VERSION = "granit_widget_ai_prompt.s05.v1";
 
@@ -30,29 +40,14 @@ export interface WidgetAiProvider {
   generateReply(input: WidgetAiProviderInput): Promise<WidgetAiProviderResult>;
 }
 
-export type WidgetAiReplyResult =
-  | {
-      status: "replied";
-      text: string;
-      agentAllowedToReplyAfterSend?: boolean;
-      metadata: Record<string, unknown>;
-    }
-  | {
-      status: "unavailable";
-      reason:
-        | "missing_openai_config"
-        | "model_error"
-        | "empty_model_response"
-        | "unsafe_model_response";
-      metadata: Record<string, unknown>;
-    };
+export type WidgetAiReplyResult = PublicWidgetAiReplyResult;
 
 export type WidgetAiServiceOptions = {
   provider?: WidgetAiProvider;
   modelName?: string;
 };
 
-export class WidgetAiService {
+export class WidgetAiService implements PublicWidgetAiReplyGenerator {
   constructor(private readonly options: WidgetAiServiceOptions = {}) {}
 
   async generateReply(request: SiteWidgetMessageRequest): Promise<WidgetAiReplyResult> {

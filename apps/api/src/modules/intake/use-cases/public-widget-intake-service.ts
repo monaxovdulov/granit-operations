@@ -15,11 +15,11 @@ import {
 } from "../../conversations/repositories/lead-conversation-types.js";
 import type { PublicIntakeRepository } from "../../conversations/repositories/public-intake-repository.js";
 import {
-  WidgetAiService,
   WIDGET_AI_DISCLOSURE_TEXT,
   WIDGET_AI_DISCLOSURE_VERSION,
-  type WidgetAiProvider
-} from "../../ai/services/widget-ai-service.js";
+  type PublicWidgetAiReplyGenerator,
+  type PublicWidgetAiUnavailableReason
+} from "../ports/public-widget-ai-reply-generator.js";
 
 export type PublicWidgetIntakeServiceResult = {
   statusCode: number;
@@ -29,23 +29,15 @@ export type PublicWidgetIntakeServiceResult = {
 export type PublicWidgetIntakeServiceOptions = {
   ai?: {
     enabled: boolean;
-    provider?: WidgetAiProvider;
-    modelName?: string;
+    replyGenerator?: PublicWidgetAiReplyGenerator;
   };
 };
 
 export class PublicWidgetIntakeService {
-  private readonly aiService: WidgetAiService;
-
   constructor(
     private readonly repository: PublicIntakeRepository,
     private readonly options: PublicWidgetIntakeServiceOptions = {}
-  ) {
-    this.aiService = new WidgetAiService({
-      provider: options.ai?.provider,
-      modelName: options.ai?.modelName
-    });
-  }
+  ) {}
 
   async acceptSiteWidgetMessage(rawBody: unknown): Promise<PublicWidgetIntakeServiceResult> {
     const schemaVersion = readSchemaVersion(rawBody);
@@ -83,7 +75,8 @@ export class PublicWidgetIntakeService {
 
     const requestFingerprint = sha256Hex(stableStringify(parsed.data));
     const publicSessionId = parsed.data.public_session_id ?? randomUUID();
-    const aiCanRun = this.options.ai?.enabled === true && Boolean(this.options.ai.provider);
+    const aiReplyGenerator = this.options.ai?.replyGenerator;
+    const aiCanRun = this.options.ai?.enabled === true && Boolean(aiReplyGenerator);
 
     try {
       const saved = await this.repository.saveAcceptedSiteWidgetMessage({
@@ -98,7 +91,7 @@ export class PublicWidgetIntakeService {
         return disabledSuccess(saved.replayed, saved.publicSessionId, saved.publicMessageId);
       }
 
-      if (!this.options.ai.provider) {
+      if (!aiReplyGenerator) {
         return fallbackSuccess(
           saved.replayed,
           saved.publicSessionId,
@@ -126,7 +119,7 @@ export class PublicWidgetIntakeService {
         );
       }
 
-      const aiReply = await this.aiService.generateReply(parsed.data);
+      const aiReply = await aiReplyGenerator.generateReply(parsed.data);
 
       if (aiReply.status === "unavailable") {
         return fallbackSuccess(
@@ -237,13 +230,7 @@ function fallbackSuccess(
   replayed: boolean,
   publicSessionId: string,
   publicMessageId: string,
-  reason:
-    | "missing_openai_config"
-    | "model_error"
-    | "empty_model_response"
-    | "unsafe_model_response"
-    | "agent_reply_blocked"
-    | "ai_persistence_unconfirmed"
+  reason: PublicWidgetFallbackReason
 ): PublicWidgetIntakeServiceResult {
   return {
     statusCode: 202,
@@ -264,6 +251,11 @@ function fallbackSuccess(
     }
   };
 }
+
+type PublicWidgetFallbackReason =
+  | PublicWidgetAiUnavailableReason
+  | "agent_reply_blocked"
+  | "ai_persistence_unconfirmed";
 
 function aiReplySuccess(
   replayed: boolean,

@@ -36,3 +36,4 @@ Current ADRs:
 - `ADR-005-MANAGER_TELEGRAM_PERSISTENCE_BOUNDARY_RU.md` - manager Telegram bind-token, binding, reply-context and manager reply persistence live in an explicit Postgres repository while `PostgresIntakeRepository` remains a compatibility facade.
 - `ADR-006-TELEGRAM_INBOUND_MAPPER_BOUNDARY_RU.md` - Telegram inbound raw update parsing, command/callback parsing, content mapping and classification live in a pure mapper while `TelegramBotService` remains the webhook adapter/orchestrator.
 - `ADR-007-TIMELINE_EVENT_INPUT_BOUNDARY_RU.md` - timeline event input DTOs are owned by `modules/timeline`, while centralized builders keep event names and metadata shapes stable.
+- `ADR-008-PUBLIC_WIDGET_AI_REPLY_GENERATOR_BOUNDARY_RU.md` - public widget intake depends on a narrow AI reply generator port while `app-context.ts` assembles `WidgetAiService` from provider/model options.

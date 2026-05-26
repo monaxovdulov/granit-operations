@@ -1,6 +1,6 @@
 import Fastify from "fastify";
 
-import { buildAppContext } from "./app-context.js";
+import { buildAppContext, type WidgetAiAssemblyOptions } from "./app-context.js";
 import type { ManagerAuthOptions } from "./modules/auth/manager-auth.js";
 import type { IntakeRepository } from "./modules/conversations/repositories/intake-repository.js";
 import { registerManagerAuthRoutes } from "./modules/auth/routes/manager-auth-routes.js";
@@ -11,12 +11,11 @@ import {
 import { registerManagerRoutes } from "./modules/manager/routes/manager-routes.js";
 import { registerPublicIntakeRoutes } from "./modules/intake/routes/public-intake-routes.js";
 import { registerTelegramRoutes } from "./modules/telegram/inbound/routes/telegram-routes.js";
-import type { PublicWidgetIntakeServiceOptions } from "./modules/intake/use-cases/public-widget-intake-service.js";
 import type { TelegramBotServiceOptions } from "./modules/telegram/inbound/telegram-bot-service.js";
 
 export type BuildApiOptions = {
   repository: IntakeRepository;
-  widgetAi?: PublicWidgetIntakeServiceOptions["ai"];
+  widgetAi?: WidgetAiAssemblyOptions;
   managerAuth?: ManagerAuthOptions;
   managerShell?: ManagerShellOptions;
   telegramBot?: TelegramBotServiceOptions;
