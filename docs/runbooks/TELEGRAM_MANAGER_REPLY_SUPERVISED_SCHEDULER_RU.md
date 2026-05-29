@@ -239,6 +239,17 @@ ORDER BY created_at DESC
 LIMIT 5;
 ```
 
+Owner-readable evidence for each resolved `uncertain` delivery must include:
+
+- sanitized `delivery_id`, `public_conversation_id`, `public_message_id`, `attempt_count`, and `updated_at`;
+- the selected decision from the allowed set in the timeline template;
+- receipt check result, operator name/role, owner decision reference when required, and duplicate-risk outcome;
+- `timeline_event_id` for `conversation.delivery_uncertain_resolution`;
+- statement that the original `message_deliveries.status='uncertain'` row was preserved;
+- statement that no blind auto-retry/reset, direct Bot API resend, fake provider receipt, notification sender work, Telegram AI outbound, staging deploy, or production deploy was performed as part of the resolution.
+
+Do not include raw private chat ids, secret values, provider tokens, or unnecessary customer PII in the evidence note.
+
 Prohibited actions:
 
 - delete `message_deliveries`, `conversation_messages`, or timeline rows to hide `uncertain`;

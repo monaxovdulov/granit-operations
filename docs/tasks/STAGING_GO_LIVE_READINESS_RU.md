@@ -1,6 +1,6 @@
 # Task: STAGING-GO-LIVE-READINESS - Боевое включение на staging
 
-Status: in_progress; backup/restore proof deferred by owner on 2026-05-29 because there are currently no customers; production/staging customer traffic remains blocked
+Status: in_progress; backup/restore proof deferred by owner on 2026-05-29 because there are currently no customers; task 2 rollback documented; task 3 manual `uncertain` runbook documented; task 4 readiness bundle drafted in this document; awaiting owner staging sign-off; production/staging customer traffic remains blocked
 Created: 2026-05-29
 Repo: `granit-operations`
 Slice: staging go-live readiness after Telegram manager reply worker and AI-S07
@@ -13,6 +13,10 @@ Owner/agent: owner decision + Codex implementation later
 Под "боевым включением на staging" понимается production-like staging path: staging использует реальные app-owned сценарии сохранения заявок, диалогов, manager takeover, manager-authored Telegram delivery и operator runbooks, но без production traffic и без production approval.
 
 Update 2026-05-29: владелец подтвердил, что клиентов сейчас нет, поэтому live backup/restore proof для staging DB можно отложить. Это снижает срочность task 1, но не является evidence, не разрешает production и не разрешает включать реальные customer-facing staging paths без возврата к backup/restore proof.
+
+Progress update 2026-05-29: task 2 partial Telegram delivery rollback is documented in `docs/BACKUP_RESTORE_ROLLBACK.md`. Task 3 manual `message_deliveries.status='uncertain'` handling is documented in `docs/runbooks/TELEGRAM_MANAGER_REPLY_SUPERVISED_SCHEDULER_RU.md`.
+
+Progress update 2026-05-29: task 4 readiness bundle is drafted below as a docs-only owner sign-off gate. No SSH, staging runtime, DB, sender, AI handoff, Mastra, notification sender, Telegram AI outbound, deploy, migration, or secret operation is part of this task.
 
 Это не разрешает:
 
@@ -50,6 +54,8 @@ Current deferral:
 
 ### 2. Rollback после частичной Telegram delivery
 
+Status: documented in `docs/BACKUP_RESTORE_ROLLBACK.md`; not backup/restore proof and not production approval.
+
 Бизнес-смысл: Telegram send нельзя "откатить" как код. Если часть сообщений уже ушла клиенту, система не должна потерять факт отправки или отправить дубль.
 
 Сделать:
@@ -66,6 +72,8 @@ Acceptance:
 - после rollback не появляется автоматический дубль клиенту.
 
 ### 3. Manual `uncertain` delivery runbook
+
+Status: documented in `docs/runbooks/TELEGRAM_MANAGER_REPLY_SUPERVISED_SCHEDULER_RU.md`; not production approval.
 
 Бизнес-смысл: если система не уверена, принял ли Telegram сообщение, оператор должен проверить факт вручную и записать решение.
 
@@ -85,6 +93,8 @@ Acceptance:
 
 ### 4. Staging go-live readiness bundle
 
+Status: drafted in this document; awaiting explicit owner staging sign-off; no runtime enablement performed.
+
 Бизнес-смысл: владелец должен одним документом понять, что включается на staging, какие риски остаются, как выключить и кто отвечает.
 
 Сделать:
@@ -101,6 +111,171 @@ Acceptance:
 - документ разделяет staging go-live и production approval;
 - владелец видит, что именно включается и что остается заблокировано;
 - backup/restore/rollback and `uncertain` evidence linked before sign-off.
+
+#### Owner Summary
+
+This bundle is a staging readiness gate, not an execution log.
+
+It allows the owner to decide whether the next task may start supervised staging enablement for the already-proven manager-authored Telegram reply path:
+
+```text
+manager reply -> Postgres conversation_message -> message_deliveries -> supervised one-shot -> Telegram Bot API -> sent/retrying/failed/blocked/uncertain
+```
+
+It does not approve production, customer-facing staging traffic with real customers, Telegram AI outbound, notification sender work, AI handoff expansion, Mastra, DB changes, secrets changes, or direct provider sends from webhook/API request handlers.
+
+Backup/restore proof remains deferred only under the current owner assumption that there are no customers in this staging Telegram path. If real customers or production-like customer traffic are introduced, task 1 must be completed before sign-off is used.
+
+#### Evidence Map
+
+Core staging path:
+
+| Area | Current evidence | Owner-readable meaning |
+|---|---|---|
+| Public site form intake | `docs/release/evidence/S01_PUBLIC_INTAKE_PROVIDER_RU.md` | Site form can persist a lead before returning public success; manager can see it. |
+| Manager auth/session | `docs/release/evidence/S02_MANAGER_AUTH_YANDEX_RU.md` | Manager data is behind Yandex ID plus operations allowlist/session checks. |
+| Manager UI | `docs/release/evidence/S03_MANAGER_UI_MANTINE_RU.md` | Protected manager UI shell and APIs were checked on staging. |
+| Manager lifecycle/history | `docs/release/evidence/S03_MIN_LIFECYCLE_RU.md` | Minimal statuses and timeline history work through protected manager API. |
+| Website widget persistence | `docs/release/evidence/S04_WIDGET_PERSISTENCE_RU.md` | Widget messages persist before public success and are manager-visible. |
+| Website safe AI / takeover | `docs/release/evidence/S05_WEBSITE_SAFE_AI_RU.md`, `docs/release/evidence/S06_MANAGER_TAKEOVER_RU.md` | Website AI is guarded by policy, disabled default/config gates, and manager takeover stop-AI behavior. |
+| Channel-neutral conversation foundation | `docs/release/evidence/P0_CHANNEL_NEUTRAL_CONVERSATION_FOUNDATION_RU.md` | Widget and Telegram share app-owned conversation/message/takeover state. |
+
+Telegram manager-reply safety:
+
+| Area | Current evidence | Owner-readable meaning |
+|---|---|---|
+| Telegram inbound + mini-panel | `docs/release/evidence/TELEGRAM_INBOUND_MANAGER_MINI_PANEL_RU.md` | Telegram inbound, manager binding, takeover, and pending manager replies were reviewed; webhook does not send provider messages. |
+| Manual delivery sender | `docs/release/evidence/TELEGRAM_OUTBOUND_DELIVERY_SENDER_RU.md` | Separate sender delivers already-persisted manager replies and records delivery status. |
+| Explicit worker | `docs/release/evidence/TELEGRAM_MANAGER_REPLY_WORKER_RU.md` | Controlled staging worker smoke passed for manager-authored replies only. |
+| Supervised scheduler | `docs/release/evidence/TELEGRAM_MANAGER_REPLY_WORKER_SUPERVISED_SCHEDULER_RU.md` | User systemd timer + one-shot + advisory lock smoke passed; not production approval. |
+| Partial delivery rollback | `docs/BACKUP_RESTORE_ROLLBACK.md` | `sent`/`uncertain` rows are preserved as evidence; Telegram sends are not treated as reversible. |
+| Manual `uncertain` policy | `docs/runbooks/TELEGRAM_MANAGER_REPLY_SUPERVISED_SCHEDULER_RU.md` | `uncertain` is handled by operator decision and timeline evidence, not blind retry/reset. |
+
+Decision records:
+
+| ADR | Decision |
+|---|---|
+| `docs/adr/ADR-001-STAGING_MANAGER_DOMAIN_RU.md` | `manager.botops.ru` is the accepted staging manager domain. |
+| `docs/adr/ADR-002-TELEGRAM-MANAGER-REPLY-WORKER_RU.md` | Explicit worker is accepted for controlled staging use, not production. |
+| `docs/adr/ADR-003-TELEGRAM-MANAGER-REPLY-SUPERVISED-SCHEDULER_RU.md` | Production-candidate shape is supervised one-shot scheduler + Postgres advisory lock; still not production approval. |
+
+#### Staging Paths In This Bundle
+
+Paths that have supporting evidence and may be part of the staging picture after owner sign-off:
+
+| Path | Readiness status | Enablement rule |
+|---|---|---|
+| Public site form intake `site_form.v1` | Accepted staging evidence exists. | Keep within the already documented public contract; no contract change in this task. |
+| Protected manager login/UI/status history | Accepted staging evidence exists. | Keep manager data behind session/allowlist; keep staging noindex behavior. |
+| Website widget persistence | Staging evidence exists. | Persist first; public response must remain safe and non-internal. |
+| Website safe AI replies | Evidence exists, default/config gated. | Do not change AI config in this task; no production AI approval. |
+| Manager takeover / stop-AI gate | Evidence exists. | Keep manager takeover as app-owned state; no text-only handoff. |
+| Telegram inbound and manager mini-panel | Prep evidence exists; Telegram path uses app-owned state. | Webhook must not call Telegram `sendMessage`; no notification sender in this path. |
+| Manager-authored Telegram reply delivery | Sender/worker/scheduler evidence exists. | Only already-persisted manager replies may be delivered; task 5 must enable supervised staging explicitly after sign-off. |
+
+Explicitly disabled or blocked:
+
+- production deploy or production traffic;
+- customer-facing staging traffic with real customers until backup/restore proof is completed;
+- Telegram AI outbound;
+- notification sender for `manager_notification_outbox`;
+- AI handoff expansion or manager-visible handoff redesign;
+- Mastra runtime, Mastra Studio, traces/evals rollout;
+- direct Telegram Bot API calls from webhook, manager API request handlers, shell resend workarounds, or AI code;
+- new DB schema/migration/env/secret changes inside this readiness task;
+- public contract changes;
+- raw logs, DB URLs, tokens, private chat ids, customer PII, or secret values in evidence.
+
+#### Env Inventory Without Values
+
+Owner/operator must verify names only. Do not paste values into docs, chat, logs, issues, or evidence.
+
+Core API/manager:
+
+- `DATABASE_URL`
+- `SESSION_SECRET`
+- `YANDEX_OAUTH_CLIENT_ID`
+- `YANDEX_OAUTH_CLIENT_SECRET`
+- `YANDEX_OAUTH_REDIRECT_URI`
+- `MANAGER_AUTH_ALLOWED_ORIGINS`
+
+Public intake/widget:
+
+- `PUBLIC_INTAKE_ALLOWED_ORIGINS`
+- `PUBLIC_INTAKE_CONTRACT_VERSION`
+- `AI_WIDGET_ENABLED`
+- `OPENAI_API_KEY`
+- `OPENAI_MODEL`
+
+Telegram inbound/delivery:
+
+- `TELEGRAM_BOT_ENABLED`
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_BOT_PROVIDER_ACCOUNT_ID`
+- `TELEGRAM_WEBHOOK_SECRET`
+- `PUBLIC_MANAGER_BASE_URL`
+- `TELEGRAM_DELIVERY_BATCH_SIZE`
+- `TELEGRAM_DELIVERY_MAX_ATTEMPTS`
+- `TELEGRAM_DELIVERY_RETRY_BACKOFF_MS`
+- `TELEGRAM_DELIVERY_PROVIDER_TIMEOUT_MS`
+- `TELEGRAM_DELIVERY_PROCESSING_STALE_MS`
+
+Explicitly not enabled by this bundle:
+
+- `URGENT_NOTIFICATION_DESTINATION` remains blocked until notification sender scope is approved.
+- `BACKUP_STORAGE_URL` remains future/deferred until backup/restore proof is actually implemented and evidenced.
+
+#### Stop / Rollback Summary
+
+Canonical procedure is in `docs/BACKUP_RESTORE_ROLLBACK.md` and `docs/runbooks/TELEGRAM_MANAGER_REPLY_SUPERVISED_SCHEDULER_RU.md`.
+
+Owner-readable stop order:
+
+1. Stop Telegram delivery scheduler timer first.
+2. Stop active one-shot service second if it is running.
+3. Confirm no new scheduler runs will start.
+4. Capture sanitized delivery counts, not secrets or private chat ids.
+5. Roll back code to the previous approved API revision/image only after the delivery scheduler is stopped.
+6. Preserve `message_deliveries`, `conversation_messages`, `conversations`, `channel_identities`, `leads`, and `lead_timeline_events`.
+7. Do not rewrite `sent` rows; they prove Telegram accepted the send.
+8. Do not reset `uncertain` rows; use the manual `uncertain` runbook and record owner-visible timeline evidence.
+9. Confirm no duplicate send happened after restart/rollback.
+10. Record a short owner-readable evidence note with sanitized counts, decision, and remaining risk.
+
+If public intake or widget intake fails, public UI must show retry/fallback contact guidance instead of success until persistence is proven again.
+
+#### Known Limitations
+
+- Backup/restore proof is deferred, not passed.
+- This bundle is not production approval and does not satisfy production G01-G17 gates.
+- Monitoring/watch policy for production approval is still incomplete.
+- Existing `uncertain` rows, if any, require the runbook decision path before they can be considered resolved.
+- Telegram media processing, notification sender, Telegram AI outbound, AI handoff expansion, Mastra, and production AI remain outside this staging bundle.
+- A dirty working tree is a release blocker; docs-only readiness changes must be reviewed separately from runtime changes.
+- Customer-facing staging with real customers requires returning to backup/restore proof before relying on this sign-off.
+
+#### Staging Sign-Off
+
+This section is intentionally blank until the owner signs it.
+
+Before sign-off, owner must confirm:
+
+- task 2 rollback procedure is understood and acceptable for partial Telegram delivery;
+- task 3 `uncertain` runbook is understood and acceptable for unknown Telegram delivery results;
+- backup/restore proof is either completed or explicitly deferred because there are still no customers in this staging Telegram path;
+- task 5 may start only the supervised staging enablement for manager-authored Telegram replies;
+- notification sender, AI handoff expansion, Mastra, Telegram AI outbound, production deploy, DB changes, secret changes, and public contract changes remain blocked.
+
+Sign-off record:
+
+```text
+Owner:
+Date:
+Decision: pending
+Approved scope: supervised staging enablement for manager-authored Telegram replies only
+Backup/restore proof: deferred only while no customers / completed in evidence: <link>
+Notes:
+```
 
 ### 5. Supervised staging enablement
 
@@ -172,12 +347,13 @@ Acceptance:
 
 - `docs/tasks/STAGING_GO_LIVE_READINESS_RU.md`
 - `docs/BACKUP_RESTORE_ROLLBACK.md`
+- `docs/runbooks/TELEGRAM_MANAGER_REPLY_SUPERVISED_SCHEDULER_RU.md`
 
 ## Checks Run
 
 | Command/check | Result | Notes |
 |---|---|---|
-| `git diff --check` | passed | Documentation-only defer/rollback update |
+| `git diff --check` | passed | Documentation-only readiness bundle update |
 
 ## Evidence Links
 
@@ -186,13 +362,15 @@ Acceptance:
 - `docs/release/evidence/TELEGRAM_MANAGER_REPLY_WORKER_SUPERVISED_SCHEDULER_RU.md`
 - `docs/architecture/TELEGRAM_MANAGER_BOUNDARIES_RU.md`
 - `docs/BACKUP_RESTORE_ROLLBACK.md`
+- `docs/runbooks/TELEGRAM_MANAGER_REPLY_SUPERVISED_SCHEDULER_RU.md`
 
 ## Blockers
 
 - Staging go-live with customer-facing traffic remains blocked until backup/restore proof, partial-send rollback procedure, `uncertain` runbook and readiness bundle are accepted.
+- Task 4 readiness bundle is drafted, but owner sign-off is still pending.
 - Backup/restore proof is explicitly deferred only while there are no customers and no production approval.
 - Production remains blocked after staging go-live until separate production gates, backup/restore/rollback evidence and explicit owner sign-off.
 
 ## Next Action
 
-Continue with docs-only task 2/3: partial Telegram delivery rollback procedure and manual `uncertain` handling. Return to task 1 before real customers, production-like staging sign-off, or production approval. Do not start notification sender, AI handoff expansion, Mastra or Telegram AI outbound before the staging safety path is accepted.
+Review this task 4 readiness bundle with the owner. After explicit owner sign-off, continue to task 5 supervised staging enablement only for manager-authored Telegram replies. Return to task 1 before real customers, production-like customer traffic, or production approval. Do not start notification sender, AI handoff expansion, Mastra or Telegram AI outbound before the staging safety path is accepted.
