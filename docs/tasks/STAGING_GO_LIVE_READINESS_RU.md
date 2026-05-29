@@ -1,6 +1,6 @@
 # Task: STAGING-GO-LIVE-READINESS - Боевое включение на staging
 
-Status: in_progress; backup/restore proof deferred by owner on 2026-05-29 because there are currently no customers; task 2 rollback documented; task 3 manual `uncertain` runbook documented; task 4 readiness bundle drafted in this document; awaiting owner staging sign-off; production/staging customer traffic remains blocked
+Status: in_progress; backup/restore proof deferred by owner on 2026-05-29 because there are currently no customers; task 2 rollback documented; task 3 manual `uncertain` runbook documented; task 4 readiness bundle signed off by owner for task 5 only; task 5 supervised staging enablement is authorized but blocked in this session by missing staging SSH public-key access; server-agent handoff created; production and real-customer staging traffic remain blocked
 Created: 2026-05-29
 Repo: `granit-operations`
 Slice: staging go-live readiness after Telegram manager reply worker and AI-S07
@@ -17,6 +17,10 @@ Update 2026-05-29: владелец подтвердил, что клиенто�
 Progress update 2026-05-29: task 2 partial Telegram delivery rollback is documented in `docs/BACKUP_RESTORE_ROLLBACK.md`. Task 3 manual `message_deliveries.status='uncertain'` handling is documented in `docs/runbooks/TELEGRAM_MANAGER_REPLY_SUPERVISED_SCHEDULER_RU.md`.
 
 Progress update 2026-05-29: task 4 readiness bundle is drafted below as a docs-only owner sign-off gate. No SSH, staging runtime, DB, sender, AI handoff, Mastra, notification sender, Telegram AI outbound, deploy, migration, or secret operation is part of this task.
+
+Owner sign-off update 2026-05-29: owner approved moving to task 5 after clarifying that the allowed flow is only `Telegram customer -> Telegram bot -> manager reply -> Telegram bot -> same Telegram customer`. This is not approval for `website/widget customer -> Telegram reply`, manager Telegram notifications, production, AI-authored Telegram outbound, notification sender, AI handoff expansion, Mastra, DB changes, secret changes, or public contract changes.
+
+Task 5 attempt update 2026-05-29: this session verified the repo-local scheduler templates and focused delivery tests, but could not perform staging runtime enablement because `devuser@giorno.aeza.network` rejected the available local SSH keys with `Permission denied (publickey)`. The host key was not previously present locally and was accepted with `StrictHostKeyChecking=accept-new`. No staging runtime, DB, env, secret, sender, notification, AI, Mastra, deploy, migration, public contract, production, or real-customer traffic change was performed. Server-agent handoff: `https://github.com/monaxovdulov/ai-homebase/issues/40`.
 
 Это не разрешает:
 
@@ -93,7 +97,7 @@ Acceptance:
 
 ### 4. Staging go-live readiness bundle
 
-Status: drafted in this document; awaiting explicit owner staging sign-off; no runtime enablement performed.
+Status: signed off by owner on 2026-05-29 for task 5 only; no runtime enablement performed in this docs task.
 
 Бизнес-смысл: владелец должен одним документом понять, что включается на staging, какие риски остаются, как выключить и кто отвечает.
 
@@ -256,7 +260,7 @@ If public intake or widget intake fails, public UI must show retry/fallback cont
 
 #### Staging Sign-Off
 
-This section is intentionally blank until the owner signs it.
+Owner sign-off was captured in chat on 2026-05-29 after scope clarification.
 
 Before sign-off, owner must confirm:
 
@@ -269,15 +273,19 @@ Before sign-off, owner must confirm:
 Sign-off record:
 
 ```text
-Owner:
-Date:
-Decision: pending
+Owner: project owner, confirmed in chat
+Date: 2026-05-29
+Decision: approved for next task only
 Approved scope: supervised staging enablement for manager-authored Telegram replies only
-Backup/restore proof: deferred only while no customers / completed in evidence: <link>
-Notes:
+Allowed customer flow: Telegram customer -> Telegram bot -> manager reply -> Telegram bot -> same Telegram customer
+Not approved: website/widget customer -> Telegram reply, manager Telegram notifications, production, real-customer staging traffic, Telegram AI outbound, notification sender, AI handoff expansion, Mastra, DB changes, secret changes, public contract changes
+Backup/restore proof: deferred only while there are no customers in this staging Telegram path
+Notes: task 5 may verify/start supervised scheduler only for already-persisted manager-authored Telegram replies; this sign-off is not production approval.
 ```
 
 ### 5. Supervised staging enablement
+
+Status: authorized by owner for the narrow manager-authored Telegram reply path, but blocked in this session by missing SSH public-key access to `devuser@giorno.aeza.network`; server-agent handoff pending in `https://github.com/monaxovdulov/ai-homebase/issues/40`. No staging runtime enablement was performed from this session.
 
 Бизнес-смысл: после доказанных safety procedures staging должен работать не как ручной эксперимент, а как управляемый staging runtime.
 
@@ -354,6 +362,10 @@ Acceptance:
 | Command/check | Result | Notes |
 |---|---|---|
 | `git diff --check` | passed | Documentation-only readiness bundle update |
+| `git diff --check` | passed | Documentation-only owner sign-off update |
+| `systemd-analyze verify deploy/systemd/granit-telegram-delivery-once.service deploy/systemd/granit-telegram-delivery-once.timer` | passed | Repo-local scheduler unit/timer syntax before task 5 handoff |
+| `npm test -- apps/api/test/telegram-delivery-service.test.ts apps/api/test/telegram-delivery-worker.test.ts` | passed, 12 tests | Focused Telegram delivery service/worker tests before task 5 handoff |
+| `git diff --check` | passed | Task 5 attempt / handoff documentation update |
 
 ## Evidence Links
 
@@ -363,14 +375,16 @@ Acceptance:
 - `docs/architecture/TELEGRAM_MANAGER_BOUNDARIES_RU.md`
 - `docs/BACKUP_RESTORE_ROLLBACK.md`
 - `docs/runbooks/TELEGRAM_MANAGER_REPLY_SUPERVISED_SCHEDULER_RU.md`
+- `https://github.com/monaxovdulov/ai-homebase/issues/40`
 
 ## Blockers
 
 - Staging go-live with customer-facing traffic remains blocked until backup/restore proof, partial-send rollback procedure, `uncertain` runbook and readiness bundle are accepted.
-- Task 4 readiness bundle is drafted, but owner sign-off is still pending.
+- Task 4 readiness bundle is signed off only for task 5 supervised staging enablement of manager-authored Telegram replies.
+- Task 5 runtime enablement is blocked in this session because the available local SSH keys are not authorized for `devuser@giorno.aeza.network`; server-agent handoff is queued in `https://github.com/monaxovdulov/ai-homebase/issues/40`.
 - Backup/restore proof is explicitly deferred only while there are no customers and no production approval.
 - Production remains blocked after staging go-live until separate production gates, backup/restore/rollback evidence and explicit owner sign-off.
 
 ## Next Action
 
-Review this task 4 readiness bundle with the owner. After explicit owner sign-off, continue to task 5 supervised staging enablement only for manager-authored Telegram replies. Return to task 1 before real customers, production-like customer traffic, or production approval. Do not start notification sender, AI handoff expansion, Mastra or Telegram AI outbound before the staging safety path is accepted.
+Continue task 5 from an environment with authorized staging SSH access, using the server-agent handoff in `https://github.com/monaxovdulov/ai-homebase/issues/40`, only for manager-authored Telegram replies in the Telegram-bot customer channel. Return to task 1 before real customers, production-like customer traffic, or production approval. Do not start notification sender, AI handoff expansion, Mastra or Telegram AI outbound before the staging safety path is accepted.
