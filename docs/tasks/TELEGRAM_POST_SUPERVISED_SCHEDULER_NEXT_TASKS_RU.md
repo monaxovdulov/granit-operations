@@ -1,6 +1,6 @@
 # Task: TELEGRAM-POST-SUPERVISED-SCHEDULER-NEXT-TASKS - Следующие Telegram/production-readiness задачи
 
-Status: planned; task 1 accepted after supervised staging smoke
+Status: planned; task 1 accepted after supervised staging smoke; task 2 policy/runbook defined
 Created: 2026-05-22
 Repo: `granit-operations`
 Slice: Telegram operations after supervised scheduler merge
@@ -48,6 +48,8 @@ Acceptance:
 
 ### 2. Manual policy/runbook для `uncertain`
 
+Status: defined on 2026-05-22 as DB/timeline manual resolution without UI; not production approval.
+
 Сделать операторскую процедуру для неясных доставок:
 
 - как увидеть `uncertain` в DB/manager UI;
@@ -56,11 +58,24 @@ Acceptance:
 - как записывать решение в evidence/timeline;
 - что запрещено делать с `uncertain`.
 
+Chosen minimum:
+
+- no new UI action;
+- no admin CLI/script yet;
+- no migration and no delivery-code change;
+- record the operator decision as `lead_timeline_events.event_type='conversation.delivery_uncertain_resolution'`;
+- keep the original `message_deliveries.status='uncertain'` row as delivery evidence.
+
 Acceptance:
 
 - `uncertain` не reset-ится blindly в `pending`;
 - процедура предотвращает случайный дубль клиенту;
-- runbook понятен без чтения кода.
+- runbook понятен без чтения кода;
+- DB query для поиска `uncertain` и SQL-шаблон timeline resolution documented;
+- decision tree покрывает `no-op`, manual resend, owner decision and prohibited actions;
+- Telegram AI outbound remains blocked;
+- `manager_notification_outbox` sender remains out of scope;
+- no production deploy or approval.
 
 ### 3. `manager_notification_outbox` sender
 
@@ -158,6 +173,8 @@ Acceptance:
 
 ## Files Touched
 
+- `docs/runbooks/TELEGRAM_MANAGER_REPLY_SUPERVISED_SCHEDULER_RU.md`
+- `docs/release/evidence/TELEGRAM_MANAGER_REPLY_WORKER_SUPERVISED_SCHEDULER_RU.md`
 - `docs/tasks/TELEGRAM_POST_SUPERVISED_SCHEDULER_NEXT_TASKS_RU.md`
 - `docs/tasks/README.md`
 
@@ -165,7 +182,7 @@ Acceptance:
 
 | Command/check | Result | Notes |
 |---|---|---|
-| `git diff --check` | passed | Documentation-only task pack |
+| `git diff --check` | passed | Documentation-only task pack and `uncertain` policy update |
 
 ## Evidence Links
 
@@ -178,11 +195,11 @@ Acceptance:
 ## Blockers
 
 - Production system-level timer install/sign-off remains separate from the rootless staging timer smoke.
-- `uncertain` manual policy needs owner-visible decision before production use.
+- Existing `uncertain` rows, if any, must be resolved with the documented owner-visible timeline policy before production approval.
 - Notification sender is a separate implementation and evidence slice.
 - Backup/restore/rollback proof is still required before production.
 - AI handoff policy must be decided before any AI outbound expansion.
 
 ## Next Action
 
-Continue with task 2: define the manual policy/runbook for `uncertain` rows before any production approval or notification sender work.
+Before any production approval, apply the documented `uncertain` policy to existing rows if they appear, then continue only with separate production-readiness slices such as backup/restore/rollback evidence.

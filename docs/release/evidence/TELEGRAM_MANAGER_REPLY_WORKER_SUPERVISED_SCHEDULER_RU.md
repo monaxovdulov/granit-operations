@@ -132,6 +132,23 @@ Final staging runtime state:
 - This does not change AI business logic.
 - This is not production approval.
 
+## Post-Smoke Uncertain Policy
+
+Date: 2026-05-22
+
+The manual handling gap for `message_deliveries.status='uncertain'` is now documented in the supervised scheduler runbook as DB/timeline manual resolution without a new UI action, without an admin script, and without delivery-code changes.
+
+Policy summary:
+
+- `uncertain` remains excluded from automatic retry.
+- Operators must verify manager UI/timeline context, sanitized DB state, Telegram receipt when available, and journal evidence around the attempt.
+- `no-op` is allowed when the Telegram receipt is confirmed or when the owner declines duplicate risk.
+- Manual resend requires owner decision and accepted duplicate risk; the preferred path is a new manager-authored reply through the existing manager reply flow.
+- The original `uncertain` row stays as evidence; the operator decision is recorded as a separate `conversation.delivery_uncertain_resolution` timeline event and an evidence note.
+- Prohibited actions include blind status reset, direct Bot API resend, fake provider receipts, Telegram AI outbound, `manager_notification_outbox` sender work, and production deploy.
+
+This closes the owner-readable/manual policy gap for supervised scheduler operation. It is still not production approval.
+
 ## Staging / Production Gate
 
-Repo-local implementation and supervised staging smoke are complete. Before owner production approval, still capture separate production release evidence for backup/restore, rollback, monitoring/watch policy, and explicit owner sign-off.
+Repo-local implementation, supervised staging smoke, and `uncertain` manual policy documentation are complete. Before owner production approval, still capture separate production release evidence for backup/restore, rollback, monitoring/watch policy, and explicit owner sign-off.
