@@ -139,6 +139,27 @@ export type ManagerNotificationEnqueuedTimelineInput = {
   createdAt: Date;
 };
 
+export type ManagerNotificationSentTimelineInput = {
+  leadId: string;
+  notificationId: string;
+  publicConversationId?: string;
+  publicMessageId?: string;
+  providerMessageId: string;
+  attemptCount: number;
+  sentAt: Date;
+};
+
+export type ManagerNotificationFailureTimelineInput = {
+  leadId: string;
+  notificationId: string;
+  publicConversationId?: string;
+  publicMessageId?: string;
+  status: "retrying" | "failed" | "blocked_no_destination";
+  attemptCount: number;
+  lastError: string;
+  failedAt: Date;
+};
+
 export type DeliverySentTimelineInput = {
   leadId: string;
   deliveryId: string;

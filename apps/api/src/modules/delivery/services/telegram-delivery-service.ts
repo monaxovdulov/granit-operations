@@ -70,6 +70,17 @@ export type TelegramDeliveryRepository = {
 export type TelegramSendMessagePayload = {
   chat_id: string;
   text: string;
+  reply_markup?: TelegramReplyMarkup;
+};
+
+export type TelegramInlineKeyboardButton = {
+  text: string;
+  callback_data?: string;
+  url?: string;
+};
+
+export type TelegramReplyMarkup = {
+  inline_keyboard: TelegramInlineKeyboardButton[][];
 };
 
 export type TelegramSendMessageResult = {

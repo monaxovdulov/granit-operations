@@ -9,6 +9,8 @@ import type {
   LeadStatusChangedTimelineInput,
   ManagerMessageQueuedTimelineInput,
   ManagerNotificationEnqueuedTimelineInput,
+  ManagerNotificationFailureTimelineInput,
+  ManagerNotificationSentTimelineInput,
   ManagerTakeoverTimelineInput,
   ManualContactRecordedTimelineInput,
   NextStepUpdatedTimelineInput,
@@ -42,7 +44,11 @@ export const TIMELINE_EVENT_TYPES = {
   conversationDeliveryBlocked: "conversation.delivery_blocked",
   conversationDeliveryUncertain: "conversation.delivery_uncertain",
   conversationDeliveryUncertainResolution: "conversation.delivery_uncertain_resolution",
-  managerNotificationEnqueued: "manager.notification_enqueued"
+  managerNotificationEnqueued: "manager.notification_enqueued",
+  managerNotificationSent: "manager.notification_sent",
+  managerNotificationRetrying: "manager.notification_retrying",
+  managerNotificationFailed: "manager.notification_failed",
+  managerNotificationBlocked: "manager.notification_blocked"
 } as const;
 
 export type TimelineEventType = (typeof TIMELINE_EVENT_TYPES)[keyof typeof TIMELINE_EVENT_TYPES];
@@ -246,6 +252,44 @@ export function managerNotificationEnqueuedTimelineEvent(
   };
 }
 
+export function managerNotificationSentTimelineEvent(
+  input: ManagerNotificationSentTimelineInput
+): TimelineEvent {
+  return {
+    leadId: input.leadId,
+    eventType: TIMELINE_EVENT_TYPES.managerNotificationSent,
+    summary: "Telegram manager notification delivered",
+    metadata: managerNotificationMetadata({
+      notificationId: input.notificationId,
+      publicConversationId: input.publicConversationId,
+      publicMessageId: input.publicMessageId,
+      notificationStatus: "sent",
+      attemptCount: input.attemptCount,
+      providerMessageId: input.providerMessageId
+    }),
+    createdAt: input.sentAt
+  };
+}
+
+export function managerNotificationFailureTimelineEvent(
+  input: ManagerNotificationFailureTimelineInput
+): TimelineEvent {
+  return {
+    leadId: input.leadId,
+    eventType: managerNotificationFailureEventType(input.status),
+    summary: managerNotificationFailureSummary(input.status),
+    metadata: managerNotificationMetadata({
+      notificationId: input.notificationId,
+      publicConversationId: input.publicConversationId,
+      publicMessageId: input.publicMessageId,
+      notificationStatus: input.status,
+      attemptCount: input.attemptCount,
+      lastError: input.lastError
+    }),
+    createdAt: input.failedAt
+  };
+}
+
 export function deliverySentTimelineEvent(input: DeliverySentTimelineInput): TimelineEvent {
   return {
     leadId: input.leadId,
@@ -352,6 +396,50 @@ function deliveryFailureSummary(status: DeliveryFailureTimelineInput["status"]) 
   }
 
   return "Telegram delivery failed";
+}
+
+function managerNotificationFailureEventType(
+  status: ManagerNotificationFailureTimelineInput["status"]
+) {
+  if (status === "retrying") {
+    return TIMELINE_EVENT_TYPES.managerNotificationRetrying;
+  }
+
+  if (status === "blocked_no_destination") {
+    return TIMELINE_EVENT_TYPES.managerNotificationBlocked;
+  }
+
+  return TIMELINE_EVENT_TYPES.managerNotificationFailed;
+}
+
+function managerNotificationFailureSummary(
+  status: ManagerNotificationFailureTimelineInput["status"]
+) {
+  if (status === "retrying") {
+    return "Telegram manager notification failed and will retry";
+  }
+
+  if (status === "blocked_no_destination") {
+    return "Telegram manager notification blocked because no manager destination is stored";
+  }
+
+  return "Telegram manager notification failed";
+}
+
+function managerNotificationMetadata(input: Record<string, unknown>) {
+  return {
+    notification_id: input.notificationId,
+    channel: "telegram",
+    provider: "telegram_bot",
+    notification_status: input.notificationStatus,
+    ...(input.publicConversationId
+      ? { public_conversation_id: input.publicConversationId }
+      : {}),
+    ...(input.publicMessageId ? { public_message_id: input.publicMessageId } : {}),
+    ...(input.attemptCount !== undefined ? { attempt_count: input.attemptCount } : {}),
+    ...(input.providerMessageId ? { provider_message_id: input.providerMessageId } : {}),
+    ...(input.lastError ? { last_error: input.lastError } : {})
+  };
 }
 
 function deliveryMetadata(input: Record<string, unknown>) {

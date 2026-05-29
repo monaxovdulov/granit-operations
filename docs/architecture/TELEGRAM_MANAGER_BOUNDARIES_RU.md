@@ -1,7 +1,7 @@
 # Telegram и мини-панель менеджера: границы и состояние
 
-Статус: снимок текущей архитектуры после локальной реализации, controlled staging smoke для manual sender/explicit worker и repo-level supervised scheduler templates. Это не разрешение на боевой запуск.
-Дата: 2026-05-22
+Статус: снимок текущей архитектуры после локальной реализации, controlled staging smoke для manual sender/explicit worker, repo-level supervised scheduler templates, task 5 staging enablement check and repo-local manager notification once sender. Это не разрешение на production.
+Дата: 2026-05-22; обновлено 2026-05-29
 Репозиторий: `granit-operations`
 
 Acceleration assumption от 2026-05-21: requester сообщил, что сейчас нет реальных клиентов и реальных менеджеров, которые зависят от Telegram path. Это снижает blast radius для controlled staging Bot API smoke с test bot/private chats и fake staging rows. Это не разрешает production, worker/scheduler, notification sender или Telegram AI outbound.
@@ -30,11 +30,12 @@ Acceleration assumption от 2026-05-21: requester сообщил, что сей
 - `message_deliveries` поддерживает `processing` и `uncertain`; `uncertain` не забирается автоматическим claim.
 - Добавлены repo templates для `systemd` service/timer и runbook stop/rollback.
 - Панель менеджера получает delivery status для исходящих сообщений: статус, число попыток, последнюю ошибку и внешний message id после успешной отправки.
+- Добавлен отдельный repo-local once sender `npm run deliver:manager-notifications:once`, который отправляет только persisted `manager_notification_outbox` уведомления менеджерам и пишет `sent`/`retrying`/`failed`/`blocked_no_destination`.
 
 Что принципиально не сделано:
 
 - Repo содержит supervised scheduler templates, но они не установлены и не включены как production service.
-- Нет отдельного отправщика, который реально отправляет уведомления менеджерам из `manager_notification_outbox`.
+- Нет scheduler/systemd/deploy для manager notification sender; есть только ручной repo-local once entrypoint.
 - Исходящие AI-ответы в Telegram заблокированы через `TelegramOutboundBlockedError`.
 - Боевой запуск заблокирован до G01-G17, backup/restore/rollback и явного подтверждения владельца.
 
@@ -56,6 +57,7 @@ Acceleration assumption от 2026-05-21: requester сообщил, что сей
 - Код сборки API: [app.ts](../../apps/api/src/app.ts), [config.ts](../../apps/api/src/config.ts).
 - Telegram route/service: [telegram.ts](../../apps/api/src/routes/telegram.ts), [telegram-bot-service.ts](../../apps/api/src/services/telegram-bot-service.ts).
 - Delivery sender/worker: [telegram-delivery-service.ts](../../apps/api/src/services/telegram-delivery-service.ts), [telegram-delivery-worker.ts](../../apps/api/src/services/telegram-delivery-worker.ts), [telegram-delivery-repository.ts](../../apps/api/src/repositories/telegram-delivery-repository.ts), [deliver-telegram-pending-once.ts](../../apps/api/src/scripts/deliver-telegram-pending-once.ts), [deliver-telegram-worker.ts](../../apps/api/src/scripts/deliver-telegram-worker.ts), [postgres-advisory-lock.ts](../../apps/api/src/services/postgres-advisory-lock.ts).
+- Manager notification sender: [manager-notification-sender-service.ts](../../apps/api/src/modules/manager-notifications/services/manager-notification-sender-service.ts), [manager-notification-outbox-repository.ts](../../apps/api/src/modules/manager-notifications/repositories/manager-notification-outbox-repository.ts), [deliver-manager-notifications-once.ts](../../apps/api/src/scripts/deliver-manager-notifications-once.ts).
 - Supervised scheduler: [service](../../deploy/systemd/granit-telegram-delivery-once.service), [timer](../../deploy/systemd/granit-telegram-delivery-once.timer), [runbook](../runbooks/TELEGRAM_MANAGER_REPLY_SUPERVISED_SCHEDULER_RU.md).
 - Общий контракт backend-сценариев: [intake-repository.ts](../../apps/api/src/repositories/intake-repository.ts).
 - Postgres реализация: [postgres-intake-repository.ts](../../apps/api/src/repositories/postgres-intake-repository.ts).
@@ -83,9 +85,12 @@ flowchart TD
   ManagerPanel -->|получает сессию| Auth[Вход менеджера и сессии]
   Auth -->|проверяет пользователя и роль| Db
 
-  Db -->|отдает pending/retrying доставки| DeliverySender[Отдельный sender доставки]
+  Db -->|отдает pending/retrying доставки клиенту| DeliverySender[Отдельный sender доставки клиенту]
   DeliverySender -->|только он вызывает sendMessage| BotApi
   DeliverySender -->|записывает sent/retrying/failed| Db
+  Db -->|отдает manager_notification_outbox| NotificationSender[Отдельный sender уведомлений менеджеру]
+  NotificationSender -->|только persisted manager notifications| BotApi
+  NotificationSender -->|записывает sent/retrying/failed/blocked| Db
 ```
 
 Как читать схему:
@@ -208,7 +213,7 @@ flowchart TD
 | `conversations` | Диалог и жесткий запрет AI-ответа после takeover | `acceptInboundMessage`, takeover, сохранение AI-ответа | Панель менеджера, контекст ответа, проверка перед AI send | `agent_allowed_to_reply` проверяется перед AI send; takeover выключает AI | AI-ответ после takeover |
 | `conversation_messages` | Единая история входящих и исходящих сообщений | Виджет, Telegram, AI, ответ менеджера | Панель менеджера, доставка/очередь, повторная обработка | `idempotency_key` уникален; provider ids защищают от повторов вебхука | Дубли, потерю истории, неподтвержденное исходящее сообщение |
 | `message_deliveries` | Состояние доставки клиенту | Ответ менеджера создает `pending`; sender обновляет `sent/retrying/failed/blocked_no_destination` | Sender, панель менеджера, таймлайн | Вызов Telegram API допустим только после записи доставки | Невидимые отправки и невозможность повтора |
-| `manager_notification_outbox` | Очередь уведомлений менеджерам | Входящее сообщение Telegram после сохранения сообщения | Будущий notification sender, таймлайн, модель чтения | Нет привязанного менеджера -> `blocked_no_destination` | `forwardMessage`/`copyMessage` до сохранения и уведомления в неизвестный чат |
+| `manager_notification_outbox` | Очередь уведомлений менеджерам | Входящее сообщение Telegram после сохранения сообщения | Repo-local once notification sender, таймлайн, модель чтения | Нет привязанного менеджера -> `blocked_no_destination`; sender не читает `message_deliveries` | `forwardMessage`/`copyMessage` до сохранения и уведомления в неизвестный чат |
 | `manager_telegram_bindings` | Привязка manager user к личному Telegram-чату | `/start <token>` | Поиск менеджера, destination для уведомлений, `/manager/me` | Активная привязка уникальна для manager/provider/chat | Подмену менеджера и отправку в чужой чат |
 | `manager_telegram_bind_tokens` | Одноразовый token для привязки Telegram | Web panel route `/manager/me/telegram-bind-token` | `/start <token>` | Hash, 10 минут, single-use | Привязку без web login |
 | `manager_telegram_reply_contexts` | Память "на какой диалог отвечает следующий текст менеджера" | Callback `Ответить` | Текстовый reply и `/cancel` | Только после takeover, expires через 10 минут, consumed after use | Ответ не тому клиенту или stale reply |
@@ -258,7 +263,7 @@ flowchart TD
 До боевого включения Telegram нужны:
 
 - Production supervised scheduler sign-off; rootless staging timer smoke passed, but no production timer is approved by this document.
-- Отправщик для `manager_notification_outbox`.
+- Scheduler/systemd/deploy для отправщика `manager_notification_outbox`.
 - Backup/restore/rollback proof.
 - Закрытие G01-G17 из [23-production-ready-first-release.md](/home/devuser/ai-projects/granit-plan-app/ai-agent-stack-wiki/wiki/23-production-ready-first-release.md).
 - Явное подтверждение владельца и ответственного за релиз.

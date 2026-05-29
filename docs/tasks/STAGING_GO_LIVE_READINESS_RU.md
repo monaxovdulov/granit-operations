@@ -1,6 +1,6 @@
 # Task: STAGING-GO-LIVE-READINESS - Боевое включение на staging
 
-Status: in_progress; backup/restore proof deferred by owner on 2026-05-29 because there are currently no customers; task 2 rollback documented; task 3 manual `uncertain` runbook documented; task 4 readiness bundle signed off by owner for task 5 only; task 5 supervised staging enablement check passed by server-agent on staging; production and real-customer staging traffic remain blocked
+Status: in_progress; backup/restore proof deferred by owner on 2026-05-29 because there are currently no customers; task 2 rollback documented; task 3 manual `uncertain` runbook documented; task 4 readiness bundle signed off by owner for task 5 only; task 5 supervised staging enablement check passed by server-agent on staging; task 6 repo-local manager notification sender implemented as a once sender only; production and real-customer staging traffic remain blocked
 Created: 2026-05-29
 Repo: `granit-operations`
 Slice: staging go-live readiness after Telegram manager reply worker and AI-S07
@@ -23,6 +23,8 @@ Owner sign-off update 2026-05-29: owner approved moving to task 5 after clarifyi
 Task 5 attempt update 2026-05-29: this session verified the repo-local scheduler templates and focused delivery tests, but could not perform staging runtime enablement because `devuser@giorno.aeza.network` rejected the available local SSH keys with `Permission denied (publickey)`. The host key was not previously present locally and was accepted with `StrictHostKeyChecking=accept-new`. No staging runtime, DB, env, secret, sender, notification, AI, Mastra, deploy, migration, public contract, production, or real-customer traffic change was performed. Server-agent handoff: `https://github.com/monaxovdulov/ai-homebase/issues/40`.
 
 Task 5 server-agent result update 2026-05-29: supervised staging enablement check passed on `giorno.aeza.network` under `devuser` for manager-authored Telegram replies only. Rootless `granit-telegram-delivery-once.timer` was verified, stopped after the timer-first order, restarted, and left active/enabled; the one-shot service finished successfully and stayed inactive between runs. Sanitized DB counts remained `sent=3`, `uncertain=1`; sent fingerprint stayed unchanged with `count=3`, `attempt_sum=3`, `newest_sent_updated_at=2026-05-22 18:16:19 UTC`; final checked run was `2026-05-29 18:18:28 UTC`; advisory lock returned `telegram_delivery_lock_busy` with service exit `0`; journal scans found no secret patterns, chat-id fields, or long numeric chat-id candidates. The existing `uncertain=1` row was not resolved or modified. No production, Telegram AI outbound, `manager_notification_outbox` sender, Mastra, AI handoff expansion, DB/schema/env/secret/public-contract changes, or real-customer staging traffic were enabled.
+
+Task 6 implementation update 2026-05-29: repo-local manager notification sender was added as an isolated once sender for `manager_notification_outbox`. It uses a separate advisory lock and the existing Telegram Bot API provider/timeout pattern, records `sent`/`retrying`/`failed`/`blocked_no_destination` in `manager_notification_outbox`, and writes manager-notification timeline evidence. No scheduler/systemd unit, staging deploy, production deploy, Telegram AI outbound, Mastra, AI handoff expansion, DB schema/migration, secret/env value, public contract, customer reply sender, or `message_deliveries` change was included.
 
 Это не разрешает:
 
@@ -324,14 +326,22 @@ Server-agent result 2026-05-29:
 
 ### 6. Manager notification sender
 
+Status: repo-local once sender implemented on 2026-05-29; not deployed, not scheduled, not production approval.
+
 Бизнес-смысл: менеджер должен получать уведомление, когда клиент написал, но это другой поток, не customer reply delivery.
 
-Сделать отдельно после staging safety path:
+Implemented scope:
 
 - читать только `manager_notification_outbox`;
 - не отправлять из Telegram webhook напрямую;
 - поддержать bounded retry/status/evidence;
 - не смешивать с `message_deliveries` customer reply sender.
+- использовать `npm run deliver:manager-notifications:once` как ручной one-shot entrypoint;
+- использовать отдельный Postgres advisory lock, не lock customer delivery sender;
+- использовать существующий Telegram Bot API `sendMessage` provider и timeout pattern;
+- `sent` записывает `provider_message_id`, `attempt_count`, `last_error=NULL`, `updated_at`;
+- `blocked_no_destination`, `retrying`, `failed` записывают `attempt_count`, `last_error`, `updated_at`;
+- timeline evidence uses `manager.notification_sent`, `manager.notification_retrying`, `manager.notification_failed`, `manager.notification_blocked`.
 
 Acceptance:
 
@@ -339,6 +349,16 @@ Acceptance:
 - no destination -> `blocked_no_destination`;
 - provider errors пишутся в notification outbox status;
 - Telegram AI outbound остается blocked.
+
+Explicitly not included:
+
+- no worker/scheduler/systemd install;
+- no staging deploy or production deploy;
+- no Telegram webhook provider send;
+- no `message_deliveries` read/update;
+- no customer reply delivery;
+- no DB migration, because existing `manager_notification_outbox.status` already allows `pending`, `sent`, `failed`, `retrying`, `blocked_no_destination`;
+- no secret/env value change.
 
 ### 7. AI handoff policy / manager-visible handoff
 
@@ -385,12 +405,19 @@ Acceptance:
 | `npm test -- apps/api/test/telegram-delivery-service.test.ts apps/api/test/telegram-delivery-worker.test.ts` | passed, 12 tests | Focused Telegram delivery service/worker tests before task 5 handoff |
 | `git diff --check` | passed | Task 5 attempt / handoff documentation update |
 | server-agent task 5 supervised staging enablement check | passed | Rootless timer active/enabled, service inactive after successful one-shot, stop/restart order passed, advisory lock busy exited `0`, DB counts stayed `sent=3`/`uncertain=1`, no secret/chat-id journal findings |
+| `npm test -- apps/api/test/manager-notification-sender.test.ts` | passed, 4 tests | Covers sent, blocked no destination, bounded retry/fail, and no `message_deliveries` coupling |
+| `npm test -- apps/api/test/manager-notification-sender.test.ts apps/api/test/telegram-delivery-service.test.ts` | passed, 13 tests | Focused notification sender tests plus existing customer delivery sender regression tests |
+| `npm test` | passed, 84 tests | Full local Vitest suite after task 6 implementation |
+| `npm run typecheck` | passed | API and manager TypeScript after task 6 implementation |
+| `npm run smoke:api` | passed, 44 tests | Existing public/API smoke including Telegram inbound and AI outbound block regressions |
+| `git diff --check` | passed | No whitespace errors |
 
 ## Evidence Links
 
 - `docs/tasks/TELEGRAM_POST_SUPERVISED_SCHEDULER_NEXT_TASKS_RU.md`
 - `docs/tasks/TELEGRAM_MANAGER_REPLY_WORKER_SUPERVISED_SCHEDULER_RU.md`
 - `docs/release/evidence/TELEGRAM_MANAGER_REPLY_WORKER_SUPERVISED_SCHEDULER_RU.md`
+- `docs/release/evidence/TELEGRAM_MANAGER_NOTIFICATION_SENDER_RU.md`
 - `docs/architecture/TELEGRAM_MANAGER_BOUNDARIES_RU.md`
 - `docs/BACKUP_RESTORE_ROLLBACK.md`
 - `docs/runbooks/TELEGRAM_MANAGER_REPLY_SUPERVISED_SCHEDULER_RU.md`
