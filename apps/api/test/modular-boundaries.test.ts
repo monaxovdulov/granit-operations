@@ -136,6 +136,8 @@ describe("ops-api modular monolith boundaries", () => {
       "modules/intake/ports/public-widget-ai-reply-generator.ts"
     );
     const widgetAiServiceSource = readSource("modules/ai/services/widget-ai-service.ts");
+    const widgetAiPolicySource = readSource("modules/ai/policy/widget-ai-policy.ts");
+    const widgetAiPromptSource = readSource("modules/ai/prompts/widget-ai-prompt.ts");
     const aiModuleSource = readTree("modules/ai");
 
     expect(widgetAiReplyGeneratorSource).toContain("interface PublicWidgetAiReplyGenerator");
@@ -150,6 +152,23 @@ describe("ops-api modular monolith boundaries", () => {
     expect(appContextSource).toContain("new WidgetAiService");
     expect(appContextSource).toContain("replyGenerator");
     expect(widgetAiServiceSource).toContain("implements PublicWidgetAiReplyGenerator");
+    expect(widgetAiServiceSource).toContain("../policy/widget-ai-policy.js");
+    expect(widgetAiServiceSource).toContain("../prompts/widget-ai-prompt.js");
+    expect(widgetAiPolicySource).toContain("buildWidgetAiPolicyReply");
+    expect(widgetAiPolicySource).toContain("unsafeWidgetAiModelReplyReason");
+    expect(widgetAiPolicySource).toContain("WIDGET_AI_POLICY_VERSION");
+    expect(widgetAiPromptSource).toContain("buildWidgetAiInstructions");
+    expect(widgetAiPromptSource).toContain("buildWidgetAiUserInput");
+    expect(widgetAiPromptSource).toContain("WIDGET_AI_PROMPT_VERSION");
+    expect(widgetAiServiceSource).not.toContain("price_requires_approved_source");
+    expect(widgetAiServiceSource).not.toContain("deadline_requires_manager_confirmation");
+    expect(widgetAiServiceSource).not.toContain("binding_terms_require_manager_confirmation");
+    expect(widgetAiServiceSource).not.toContain("out_of_scope_legal_funeral_inheritance");
+    expect(widgetAiServiceSource).not.toContain("price_amount_without_approved_source");
+    expect(widgetAiServiceSource).not.toContain("exact_deadline_promise");
+    expect(widgetAiServiceSource).not.toContain("binding_terms_promise");
+    expect(widgetAiServiceSource).not.toContain("legal_funeral_advice");
+    expect(widgetAiServiceSource).not.toContain("Ты AI-помощник компании Granit");
     expect(widgetAiServiceSource).not.toContain("SiteWidgetMessageRequest");
     expect(aiModuleSource).not.toContain("@granit/contracts");
     expect(aiModuleSource).not.toContain("SiteWidgetMessageRequest");

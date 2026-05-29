@@ -12,6 +12,8 @@ import {
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { AiTurnInput } from "../src/modules/ai/ai-turn.js";
+import { WIDGET_AI_POLICY_VERSION } from "../src/modules/ai/policy/widget-ai-policy.js";
+import { WIDGET_AI_PROMPT_VERSION } from "../src/modules/ai/prompts/widget-ai-prompt.js";
 import { buildApi } from "../src/app.js";
 import { TelegramOutboundBlockedError } from "../src/repositories/intake-repository.js";
 import type { PublicWidgetAiReplyGenerator } from "../src/modules/intake/ports/public-widget-ai-reply-generator.js";
@@ -1223,20 +1225,48 @@ describe("public site_widget intake", () => {
 
   it("keeps safe wording for price, deadline, warranty, contract, discount, availability, payment and legal prompts", async () => {
     const unsafePrompts = [
-      "Сколько точно будет стоить памятник?",
-      "Сделаете завтра и в какой точный срок?",
-      "Какая гарантия?",
-      "Какие условия договора?",
-      "Дадите скидку?",
-      "Есть ли модель в наличии?",
-      "Можно оплатить в рассрочку?",
-      "Как оформить наследство и документы на захоронение?"
+      {
+        text: "Сколько точно будет стоить памятник?",
+        reason: "price_requires_approved_source"
+      },
+      {
+        text: "Сделаете завтра и в какой точный срок?",
+        reason: "deadline_requires_manager_confirmation"
+      },
+      {
+        text: "Какая гарантия?",
+        reason: "binding_terms_require_manager_confirmation"
+      },
+      {
+        text: "Какие условия договора?",
+        reason: "binding_terms_require_manager_confirmation"
+      },
+      {
+        text: "Дадите скидку?",
+        reason: "binding_terms_require_manager_confirmation"
+      },
+      {
+        text: "Есть ли модель в наличии?",
+        reason: "binding_terms_require_manager_confirmation"
+      },
+      {
+        text: "Можно оплатить в рассрочку?",
+        reason: "binding_terms_require_manager_confirmation"
+      },
+      {
+        text: "Как оформить наследство и документы на захоронение?",
+        reason: "out_of_scope_legal_funeral_inheritance"
+      }
     ];
 
-    for (const [index, text] of unsafePrompts.entries()) {
+    for (const [index, prompt] of unsafePrompts.entries()) {
       const repository = new MemoryIntakeRepository();
+      let providerCalls = 0;
       const provider = new FakeWidgetAiProvider({
-        text: "Цена 10000 рублей, сделаем за 2 дня, гарантия есть."
+        text: "Цена 10000 рублей, сделаем за 2 дня, гарантия есть.",
+        onGenerate: () => {
+          providerCalls += 1;
+        }
       });
       const app = track(
         buildApi({
@@ -1254,7 +1284,7 @@ describe("public site_widget intake", () => {
         url: "/public/intake/site-widget/messages",
         payload: validWidgetRequest({
           idempotencyKey: `widget-safe-ai-${String(index).padStart(4, "0")}`,
-          messageText: text
+          messageText: prompt.text
         })
       });
 
@@ -1265,6 +1295,15 @@ describe("public site_widget intake", () => {
       expect(replyText).not.toMatch(/(?:за|через)\s+\d+\s*(?:дн|час|нед|месяц)/i);
       expect(replyText).not.toMatch(/гарантируем|скидк[ауи]\s*\d|в наличии|рассрочк[ау]/i);
       expect(replyText).toMatch(/менеджер|подтвердит|сохранено|передам/i);
+      expect(providerCalls).toBe(0);
+      expect(repository.lastAiSaveInput?.metadata).toMatchObject({
+        model_provider: "policy",
+        model_name: "deterministic",
+        fallback_mode: "manager_required",
+        handoff_reason: prompt.reason,
+        policy_version: WIDGET_AI_POLICY_VERSION,
+        prompt_version: WIDGET_AI_PROMPT_VERSION
+      });
     }
   });
 
@@ -1543,6 +1582,15 @@ describe("public site_widget intake", () => {
       }
     });
     expect(first.json().automation.reply.text).toMatch(/менеджер/i);
+    expect(repository.lastAiSaveInput?.agentAllowedToReplyAfterSend).toBe(false);
+    expect(repository.lastAiSaveInput?.metadata).toMatchObject({
+      model_provider: "policy",
+      model_name: "deterministic",
+      fallback_mode: "manager_required",
+      handoff_reason: "manager_requested",
+      policy_version: WIDGET_AI_POLICY_VERSION,
+      prompt_version: WIDGET_AI_PROMPT_VERSION
+    });
     expect(second.statusCode).toBe(202);
     expect(second.json()).toMatchObject({
       automation: {

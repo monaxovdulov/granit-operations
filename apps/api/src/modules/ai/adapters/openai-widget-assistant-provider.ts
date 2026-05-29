@@ -1,11 +1,11 @@
 import {
-  WIDGET_AI_POLICY_VERSION,
-  WIDGET_AI_PROMPT_VERSION,
   type WidgetAiProvider,
   type WidgetAiProviderInput,
   type WidgetAiProviderResult,
   type WidgetAiUsage
 } from "../services/widget-ai-service.js";
+import { WIDGET_AI_POLICY_VERSION } from "../policy/widget-ai-policy.js";
+import { WIDGET_AI_PROMPT_VERSION } from "../prompts/widget-ai-prompt.js";
 
 export type OpenAiWidgetAssistantProviderOptions = {
   apiKey: string;

@@ -3,6 +3,16 @@ import {
   WIDGET_AI_DISCLOSURE_VERSION,
   type PublicWidgetAiReplyGenerator
 } from "../../intake/ports/public-widget-ai-reply-generator.js";
+import {
+  buildWidgetAiPolicyReply,
+  unsafeWidgetAiModelReplyReason,
+  WIDGET_AI_POLICY_VERSION
+} from "../policy/widget-ai-policy.js";
+import {
+  buildWidgetAiInstructions,
+  buildWidgetAiUserInput,
+  WIDGET_AI_PROMPT_VERSION
+} from "../prompts/widget-ai-prompt.js";
 
 export {
   WIDGET_AI_DISCLOSURE_TEXT,
@@ -10,9 +20,8 @@ export {
   type PublicWidgetAiReplyGenerator,
   type PublicWidgetAiReplyResult
 } from "../../intake/ports/public-widget-ai-reply-generator.js";
-
-export const WIDGET_AI_POLICY_VERSION = "granit_widget_ai_policy.s05.v1";
-export const WIDGET_AI_PROMPT_VERSION = "granit_widget_ai_prompt.s05.v1";
+export { WIDGET_AI_POLICY_VERSION } from "../policy/widget-ai-policy.js";
+export { WIDGET_AI_PROMPT_VERSION } from "../prompts/widget-ai-prompt.js";
 
 export type WidgetAiUsage = {
   inputTokens?: number;
@@ -58,7 +67,7 @@ export class WidgetAiService implements PublicWidgetAiReplyGenerator {
       fallback_mode: "none"
     };
 
-    const policyReply = buildPolicyReply(input.inboundMessage.text);
+    const policyReply = buildWidgetAiPolicyReply(input.inboundMessage.text);
 
     if (policyReply) {
       return {
@@ -92,8 +101,8 @@ export class WidgetAiService implements PublicWidgetAiReplyGenerator {
     try {
       const providerResult = await this.options.provider.generateReply({
         turn: input,
-        instructions: buildInstructions(),
-        userInput: buildUserInput(input)
+        instructions: buildWidgetAiInstructions(),
+        userInput: buildWidgetAiUserInput(input)
       });
       const text = normalizeReply(providerResult.text);
 
@@ -113,7 +122,7 @@ export class WidgetAiService implements PublicWidgetAiReplyGenerator {
         };
       }
 
-      const unsafeReason = unsafeModelReplyReason(text);
+      const unsafeReason = unsafeWidgetAiModelReplyReason(text);
 
       if (unsafeReason) {
         return {
@@ -160,116 +169,8 @@ export class WidgetAiService implements PublicWidgetAiReplyGenerator {
   }
 }
 
-type PolicyReply = {
-  text: string;
-  fallbackMode: "manager_required";
-  reason: string;
-  stopAiAfterReply?: boolean;
-};
-
-function buildPolicyReply(message: string): PolicyReply | null {
-  const normalized = message.toLocaleLowerCase("ru-RU");
-
-  if (/(менеджер|оператор|человек|живой|позвон|свяж|перезвон|manager|human|operator)/i.test(normalized)) {
-    return {
-      text: "Передам менеджеру. Напишите телефон или удобный способ связи.",
-      fallbackMode: "manager_required",
-      reason: "manager_requested",
-      stopAiAfterReply: true
-    };
-  }
-
-  if (/(наслед|юрид|перезахорон|захорон|похорон|документ|legal|inheritance|burial|funeral)/i.test(normalized)) {
-    return {
-      text:
-        "По юридическим и похоронным вопросам не консультирую. По памятнику менеджер подскажет после уточнения деталей.",
-      fallbackMode: "manager_required",
-      reason: "out_of_scope_legal_funeral_inheritance"
-    };
-  }
-
-  if (/(цен|стоим|стоить|стоит|сколько.*сто|прайс|руб|₽|price|cost)/i.test(normalized)) {
-    return {
-      text:
-        "Цену подтвердит менеджер после уточнения материала, размера, гравировки и установки. Не буду называть неподтвержденные суммы.",
-      fallbackMode: "manager_required",
-      reason: "price_requires_approved_source"
-    };
-  }
-
-  if (/(срок|когда|дата|сегодня|завтра|дней|часов|deadline|timing|when)/i.test(normalized)) {
-    return {
-      text:
-        "Сроки зависят от модели, гравировки, установки и условий на месте. Возможные даты подтвердит менеджер.",
-      fallbackMode: "manager_required",
-      reason: "deadline_requires_manager_confirmation"
-    };
-  }
-
-  if (/(гарант|договор|контракт|скидк|наличи|оплат|рассроч|кредит|warranty|contract|discount|available|payment|installment)/i.test(normalized)) {
-    return {
-      text:
-        "Такие условия подтверждает менеджер. Сообщение сохранено, менеджер уточнит детали и ответит по условиям.",
-      fallbackMode: "manager_required",
-      reason: "binding_terms_require_manager_confirmation"
-    };
-  }
-
-  return null;
-}
-
-function buildInstructions(): string {
-  return [
-    "Ты AI-помощник компании Granit для первого сообщения в виджете сайта.",
-    "Отвечай по-русски, очень кратко и спокойно: 1-2 коротких предложения, максимум один вопрос.",
-    "Не повторяй одно и то же и не перечисляй много вариантов, если клиент не попросил.",
-    "Можно отвечать на общие вопросы о памятниках, материалах, вариантах оформления и сборе деталей заявки.",
-    "Важные условия подтверждает менеджер. Не обещай финальную цену, точные сроки, гарантию, договор, скидку, наличие, оплату или рассрочку.",
-    "В S05 нет утвержденного прайс-источника, поэтому не называй суммы и не используй формат 'от X'.",
-    "Не давай юридические, наследственные, похоронные или burial/funeral/legal советы.",
-    "Если вопрос требует цены, срока или условий, скажи, что менеджер подтвердит после уточнения деталей.",
-    "Если клиент просит менеджера или человека, попроси телефон или удобный способ связи и не продолжай консультацию."
-  ].join("\n");
-}
-
-function buildUserInput(input: AiTurnInput): string {
-  const contactParts = [
-    input.customer.name ? `Имя: ${input.customer.name}` : null,
-    input.customer.phoneProvided ? "Телефон указан" : "Телефон не указан",
-    input.customer.city ? `Город: ${input.customer.city}` : null
-  ].filter(Boolean);
-
-  return [
-    `Страница сайта: ${input.page.url}`,
-    contactParts.length ? `Контакт: ${contactParts.join(", ")}` : "Контакт: не указан",
-    `Сообщение посетителя: ${input.inboundMessage.text}`
-  ].join("\n");
-}
-
 function normalizeReply(value: string): string {
   return value.trim().replace(/\n{3,}/g, "\n\n").slice(0, 900);
-}
-
-function unsafeModelReplyReason(text: string): string | null {
-  const normalized = text.toLocaleLowerCase("ru-RU");
-
-  if (/\d[\d\s]*(?:₽|руб|р\.)/i.test(normalized)) {
-    return "price_amount_without_approved_source";
-  }
-
-  if (/(?:за|через)\s+\d+\s*(?:дн|час|нед|месяц)|\d+\s*(?:дн|час|нед|месяц)|будет готов|точн(?:о|ые сроки)|к\s+\d{1,2}[./]\d{1,2}/i.test(normalized)) {
-    return "exact_deadline_promise";
-  }
-
-  if (/(гарантируем|предоставим гарантию|скидк[ауи]\s*\d|в наличии|заключим договор|подпишем договор|можно оплатить|рассрочк[ау])/i.test(normalized)) {
-    return "binding_terms_promise";
-  }
-
-  if (/(по закону|юридически|наследств|оформить захоронение|похоронные документы)/i.test(normalized)) {
-    return "legal_funeral_advice";
-  }
-
-  return null;
 }
 
 function usageMetadata(usage?: WidgetAiUsage): Record<string, unknown> {
