@@ -1,7 +1,7 @@
 # Evidence: Telegram manager reply supervised scheduler
 
-Status: supervised staging smoke passed; not production approval
-Date: 2026-05-22
+Status: supervised staging smoke passed; post-sign-off staging enablement check passed; not production approval
+Date: 2026-05-22; post-sign-off check 2026-05-29
 Repo: `granit-operations`
 Slice: `TELEGRAM-MANAGER-REPLY-WORKER-SUPERVISED-SCHEDULER`
 Task link: `docs/tasks/TELEGRAM_MANAGER_REPLY_WORKER_SUPERVISED_SCHEDULER_RU.md`
@@ -42,6 +42,7 @@ Implementation facts:
 | staging `docker compose ... up -d ops-api` | passed | API restarted; `/health` returned `ok` |
 | staging `psql -f packages/db/migrations/0009_telegram_delivery_processing_uncertain.sql` | passed | `message_deliveries.status` now allows `processing` and `uncertain` |
 | staging supervised timer smoke | passed | User systemd timer launched one-shot; one fake manager-authored delivery became `sent` |
+| post-sign-off staging enablement check | passed | Rootless timer verified, stopped timer-first, restarted, advisory lock busy exited `0`, no resend after restart, no secret/chat-id journal findings |
 
 ## Runtime Artifacts
 
@@ -123,6 +124,53 @@ Final staging runtime state:
 - `ops-api` health: `{"ok":true,"service":"granit-operations-api"}`;
 - no token, DB URL, webhook secret, raw chat id, or private customer data appeared in the captured journal grep.
 
+## Post-Sign-Off Staging Enablement Check
+
+Date: 2026-05-29
+
+Source: server-agent handoff `https://github.com/monaxovdulov/ai-homebase/issues/40`, sanitized report copied into `docs/tasks/STAGING_GO_LIVE_READINESS_RU.md`.
+
+Scope:
+
+- manager-authored Telegram replies only;
+- same approved customer flow: `Telegram customer -> Telegram bot -> manager reply -> Telegram bot -> same Telegram customer`;
+- not production approval.
+
+Runtime result:
+
+- host/session: `giorno.aeza.network` under `devuser`, `/srv/botops` available;
+- rootless units exist in `~/.config/systemd/user`;
+- `systemd-analyze --user verify` passed;
+- stop/restart order passed: stop timer, stop service, start timer;
+- final timer state: active and enabled;
+- final service state: inactive after successful one-shot;
+- final checked run: `2026-05-29 18:18:28 UTC`;
+- one-shot after restart exited successfully with `claimed=0`.
+
+Delivery state:
+
+- before/final sanitized DB counts stayed `sent=3`, `uncertain=1`;
+- sent fingerprint stayed unchanged: `count=3`, `attempt_sum=3`, `newest_sent_updated_at=2026-05-22 18:16:19 UTC`;
+- this proves the existing `sent` rows were not re-sent by the restart check;
+- existing `uncertain=1` was not changed and remains subject to the manual `uncertain` runbook.
+
+No-overlap and log hygiene:
+
+- advisory lock check returned `telegram_delivery_lock_busy`;
+- service exited `0` while lock was held;
+- supervised-window journal scan found no secret patterns, chat-id fields, or long numeric chat-id candidates;
+- wider journal scan since `2026-05-22 18:16:00 UTC` found `secret_pattern_lines=0`, `chat_field_lines=0`, `long_numeric_candidate_lines=0`.
+
+Explicitly not performed:
+
+- production deploy or production approval;
+- Telegram AI outbound;
+- `manager_notification_outbox` sender;
+- Mastra runtime;
+- AI handoff expansion;
+- DB/schema/env/secret/public-contract changes;
+- real-customer staging traffic.
+
 ## Known Boundaries
 
 - This is not Telegram AI outbound.
@@ -151,4 +199,4 @@ This closes the owner-readable/manual policy gap for supervised scheduler operat
 
 ## Staging / Production Gate
 
-Repo-local implementation, supervised staging smoke, and `uncertain` manual policy documentation are complete. Before owner production approval, still capture separate production release evidence for backup/restore, rollback, monitoring/watch policy, and explicit owner sign-off.
+Repo-local implementation, supervised staging smoke, post-sign-off staging enablement check, and `uncertain` manual policy documentation are complete. Before owner production approval or real customer traffic, still capture separate evidence for backup/restore, rollback, monitoring/watch policy, and explicit owner sign-off.
