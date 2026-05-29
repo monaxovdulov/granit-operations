@@ -1,6 +1,6 @@
 # Task: STAGING-GO-LIVE-READINESS - Боевое включение на staging
 
-Status: planned; explicit owner goal as of 2026-05-29
+Status: in_progress; backup/restore proof deferred by owner on 2026-05-29 because there are currently no customers; production/staging customer traffic remains blocked
 Created: 2026-05-29
 Repo: `granit-operations`
 Slice: staging go-live readiness after Telegram manager reply worker and AI-S07
@@ -11,6 +11,8 @@ Owner/agent: owner decision + Codex implementation later
 Явная цель следующего блока: боевое включение на staging.
 
 Под "боевым включением на staging" понимается production-like staging path: staging использует реальные app-owned сценарии сохранения заявок, диалогов, manager takeover, manager-authored Telegram delivery и operator runbooks, но без production traffic и без production approval.
+
+Update 2026-05-29: владелец подтвердил, что клиентов сейчас нет, поэтому live backup/restore proof для staging DB можно отложить. Это снижает срочность task 1, но не является evidence, не разрешает production и не разрешает включать реальные customer-facing staging paths без возврата к backup/restore proof.
 
 Это не разрешает:
 
@@ -23,7 +25,7 @@ Owner/agent: owner decision + Codex implementation later
 
 ## Очередность
 
-### 1. Backup / restore proof для staging DB
+### 1. Backup / restore proof для staging DB - deferred now
 
 Бизнес-смысл: если staging enablement или обновление пойдет плохо, заявки, клиенты, диалоги и история не должны потеряться.
 
@@ -39,6 +41,12 @@ Acceptance:
 - restore smoke доказал, что manager-visible state не потерян;
 - evidence содержит команды/шаги, что проверялось и что не проверялось;
 - production approval не подразумевается.
+
+Current deferral:
+
+- deferred on 2026-05-29 by owner because there are currently no customers;
+- not accepted and not counted as restore evidence;
+- must be completed before real customer traffic, production-like staging sign-off, or production approval.
 
 ### 2. Rollback после частичной Telegram delivery
 
@@ -163,10 +171,13 @@ Acceptance:
 ## Files Touched
 
 - `docs/tasks/STAGING_GO_LIVE_READINESS_RU.md`
+- `docs/BACKUP_RESTORE_ROLLBACK.md`
 
 ## Checks Run
 
-To be filled by implementation slices.
+| Command/check | Result | Notes |
+|---|---|---|
+| `git diff --check` | passed | Documentation-only defer/rollback update |
 
 ## Evidence Links
 
@@ -178,9 +189,10 @@ To be filled by implementation slices.
 
 ## Blockers
 
-- Staging go-live remains blocked until backup/restore proof, partial-send rollback procedure, `uncertain` runbook and readiness bundle are accepted.
+- Staging go-live with customer-facing traffic remains blocked until backup/restore proof, partial-send rollback procedure, `uncertain` runbook and readiness bundle are accepted.
+- Backup/restore proof is explicitly deferred only while there are no customers and no production approval.
 - Production remains blocked after staging go-live until separate production gates, backup/restore/rollback evidence and explicit owner sign-off.
 
 ## Next Action
 
-Start with task 1: backup / restore proof for staging DB. Do not start notification sender, AI handoff expansion, Mastra or Telegram AI outbound before the staging safety path is accepted.
+Continue with docs-only task 2/3: partial Telegram delivery rollback procedure and manual `uncertain` handling. Return to task 1 before real customers, production-like staging sign-off, or production approval. Do not start notification sender, AI handoff expansion, Mastra or Telegram AI outbound before the staging safety path is accepted.
