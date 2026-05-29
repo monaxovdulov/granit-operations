@@ -1,5 +1,6 @@
 import type { SiteFormIntakeRequest, SiteWidgetMessageRequest } from "@granit/contracts";
 
+import type { AiTurnInput } from "../../ai/ai-turn.js";
 import type { AiState } from "./lead-conversation-types.js";
 import type {
   SaveSiteWidgetAiMessageInput,
@@ -38,6 +39,7 @@ export type SaveAcceptedSiteWidgetMessageResult = {
   aiState: AiState;
   replayed: boolean;
   aiReply?: SiteWidgetStoredAiReply;
+  aiTurnInput?: AiTurnInput;
 };
 
 export interface PublicIntakeRepository {

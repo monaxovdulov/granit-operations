@@ -16,6 +16,7 @@ import {
 } from "@granit/db";
 import type { SiteFormIntakeRequest, SiteWidgetMessageRequest } from "@granit/contracts";
 
+import type { AiTurnInput } from "../../ai/ai-turn.js";
 import {
   aiMessageSentTimelineEvent,
   conversationMessageReceivedTimelineEvent,
@@ -406,7 +407,14 @@ export class PostgresIntakeRepository implements IntakeRepository {
           widgetPublicSessionId: widgetSession?.publicSessionId ?? undefined,
           agentAllowedToReply: conversation.agentAllowedToReply,
           aiState: toAiState(conversation.aiState),
-          replayed: false
+          replayed: false,
+          aiTurnInput: buildSiteWidgetAiTurnInput(input, {
+            publicConversationId: conversation.publicConversationId,
+            publicMessageId: message.publicMessageId,
+            publicSessionId: widgetSession?.publicSessionId,
+            agentAllowedToReply: conversation.agentAllowedToReply,
+            aiState: toAiState(conversation.aiState)
+          })
         };
       });
     } catch (error) {
@@ -469,7 +477,8 @@ export class PostgresIntakeRepository implements IntakeRepository {
       agentAllowedToReply: result.agentAllowedToReply,
       aiState: result.aiState,
       replayed: result.replayed,
-      aiReply: result.existingAiReply
+      aiReply: result.existingAiReply,
+      aiTurnInput: result.aiTurnInput
     };
   }
 
@@ -995,16 +1004,32 @@ export class PostgresIntakeRepository implements IntakeRepository {
         leadId: conversationMessages.leadId,
         conversationId: conversationMessages.conversationId,
         publicConversationId: conversations.publicConversationId,
+        channel: conversations.channel,
         agentAllowedToReply: conversations.agentAllowedToReply,
         aiState: conversations.aiState,
         messageChannelIdentityId: conversationMessages.channelIdentityId,
         conversationChannelIdentityId: conversations.channelIdentityId,
         publicSessionId: widgetSessions.publicSessionId,
+        widgetInstanceId: conversations.widgetInstanceId,
+        sessionWidgetInstanceId: widgetSessions.widgetInstanceId,
+        referrerUrl: widgetSessions.referrerUrl,
+        pageTitle: widgetSessions.pageTitle,
+        visitorContext: widgetSessions.visitorContext,
         publicMessageId: conversationMessages.publicMessageId,
+        messageBody: conversationMessages.body,
+        sourcePageUrl: conversationMessages.sourcePageUrl,
+        conversationSourcePageUrl: conversations.sourcePageUrl,
+        submittedAt: conversationMessages.submittedAt,
+        contactName: leads.contactName,
+        contactPhone: leads.contactPhone,
+        contactEmail: leads.contactEmail,
+        contactPreferred: leads.contactPreferred,
+        contactCity: leads.contactCity,
         requestFingerprint: conversationMessages.requestFingerprint
       })
       .from(conversationMessages)
       .innerJoin(conversations, eq(conversationMessages.conversationId, conversations.id))
+      .innerJoin(leads, eq(conversationMessages.leadId, leads.id))
       .leftJoin(channelIdentities, eq(conversationMessages.channelIdentityId, channelIdentities.id))
       .leftJoin(widgetSessions, eq(channelIdentities.widgetSessionId, widgetSessions.id))
       .where(
@@ -1160,12 +1185,27 @@ export class PostgresIntakeRepository implements IntakeRepository {
       leadId: string;
       conversationId: string;
       publicConversationId: string;
+      channel: string;
       agentAllowedToReply: boolean;
       aiState: string;
       messageChannelIdentityId: string | null;
       conversationChannelIdentityId: string | null;
       publicSessionId: string | null;
+      widgetInstanceId: string | null;
+      sessionWidgetInstanceId: string | null;
+      referrerUrl: string | null;
+      pageTitle: string | null;
+      visitorContext: Record<string, unknown> | null;
       publicMessageId: string;
+      messageBody: string;
+      sourcePageUrl: string | null;
+      conversationSourcePageUrl: string | null;
+      submittedAt: Date;
+      contactName: string;
+      contactPhone: string | null;
+      contactEmail: string | null;
+      contactPreferred: string | null;
+      contactCity: string | null;
       requestFingerprint: string;
     },
     requestFingerprint: string
@@ -1195,7 +1235,8 @@ export class PostgresIntakeRepository implements IntakeRepository {
             body: existingAiReply.body,
             createdAt: existingAiReply.createdAt
           }
-        : undefined
+        : undefined,
+      aiTurnInput: buildPersistedSiteWidgetAiTurnInput(existing)
     };
   }
 
@@ -1225,6 +1266,160 @@ function nextAiStateForInbound(currentAiState: string, needsManager: boolean): A
   }
 
   return current === "manager_active" ? "manager_active" : "needs_manager";
+}
+
+function buildSiteWidgetAiTurnInput(
+  input: AcceptInboundMessageInput,
+  accepted: {
+    publicConversationId: string;
+    publicMessageId: string;
+    publicSessionId?: string;
+    agentAllowedToReply: boolean;
+    aiState: AiState;
+  }
+): AiTurnInput | undefined {
+  if (
+    input.channel !== "site_widget" ||
+    !accepted.publicSessionId ||
+    !input.sourcePageUrl ||
+    !input.widgetInstanceId
+  ) {
+    return undefined;
+  }
+
+  return {
+    channel: "site_widget",
+    replyCapability: "site_widget_sync_reply",
+    conversation: {
+      publicConversationId: accepted.publicConversationId,
+      aiState: accepted.aiState,
+      agentAllowedToReply: accepted.agentAllowedToReply
+    },
+    inboundMessage: {
+      publicMessageId: accepted.publicMessageId,
+      submittedAt: input.message.submittedAt,
+      text: input.message.text
+    },
+    page: {
+      url: input.sourcePageUrl,
+      widgetInstanceId: input.widgetInstanceId,
+      referrerUrl: input.referrerUrl,
+      title: input.pageTitle
+    },
+    customer: {
+      name: input.contact?.name,
+      phoneProvided: Boolean(input.contact?.phone),
+      emailProvided: Boolean(input.contact?.email),
+      preferredContact: input.contact?.preferredContact,
+      city: input.contact?.city
+    },
+    visitor: {
+      locale: readOptionalString(input.visitorContext, "locale"),
+      timezone: readOptionalString(input.visitorContext, "timezone")
+    },
+    compactContext: {
+      messages: [
+        {
+          publicMessageId: accepted.publicMessageId,
+          senderRole: "visitor",
+          text: input.message.text
+        }
+      ]
+    }
+  };
+}
+
+function buildPersistedSiteWidgetAiTurnInput(input: {
+  channel: string;
+  publicConversationId: string;
+  agentAllowedToReply: boolean;
+  aiState: string;
+  publicSessionId: string | null;
+  publicMessageId: string;
+  messageBody: string;
+  sourcePageUrl: string | null;
+  conversationSourcePageUrl: string | null;
+  submittedAt: Date;
+  widgetInstanceId: string | null;
+  sessionWidgetInstanceId: string | null;
+  referrerUrl: string | null;
+  pageTitle: string | null;
+  visitorContext: Record<string, unknown> | null;
+  contactName: string;
+  contactPhone: string | null;
+  contactEmail: string | null;
+  contactPreferred: string | null;
+  contactCity: string | null;
+}): AiTurnInput | undefined {
+  const pageUrl = input.sourcePageUrl ?? input.conversationSourcePageUrl;
+  const widgetInstanceId = input.widgetInstanceId ?? input.sessionWidgetInstanceId;
+
+  if (
+    input.channel !== "site_widget" ||
+    !input.publicSessionId ||
+    !pageUrl ||
+    !widgetInstanceId
+  ) {
+    return undefined;
+  }
+
+  return {
+    channel: "site_widget",
+    replyCapability: "site_widget_sync_reply",
+    conversation: {
+      publicConversationId: input.publicConversationId,
+      aiState: toAiState(input.aiState),
+      agentAllowedToReply: input.agentAllowedToReply
+    },
+    inboundMessage: {
+      publicMessageId: input.publicMessageId,
+      submittedAt: input.submittedAt.toISOString(),
+      text: input.messageBody
+    },
+    page: {
+      url: pageUrl,
+      widgetInstanceId,
+      referrerUrl: input.referrerUrl ?? undefined,
+      title: input.pageTitle ?? undefined
+    },
+    customer: {
+      name: input.contactName === "Site visitor" ? undefined : input.contactName,
+      phoneProvided: Boolean(input.contactPhone),
+      emailProvided: Boolean(input.contactEmail),
+      preferredContact: normalizeAiPreferredContact(input.contactPreferred),
+      city: input.contactCity ?? undefined
+    },
+    visitor: {
+      locale: readOptionalString(input.visitorContext, "locale"),
+      timezone: readOptionalString(input.visitorContext, "timezone")
+    },
+    compactContext: {
+      messages: [
+        {
+          publicMessageId: input.publicMessageId,
+          senderRole: "visitor",
+          text: input.messageBody
+        }
+      ]
+    }
+  };
+}
+
+function normalizeAiPreferredContact(value: string | null | undefined) {
+  if (value === "phone" || value === "whatsapp" || value === "telegram" || value === "email") {
+    return value;
+  }
+
+  return undefined;
+}
+
+function readOptionalString(
+  value: Record<string, unknown> | null | undefined,
+  key: string
+): string | undefined {
+  const entry = value?.[key];
+
+  return typeof entry === "string" && entry.trim() ? entry : undefined;
 }
 
 async function enqueueTelegramManagerNotifications(
@@ -1542,16 +1737,32 @@ async function findExistingProviderInbound(
       leadId: conversationMessages.leadId,
       conversationId: conversationMessages.conversationId,
       publicConversationId: conversations.publicConversationId,
+      channel: conversations.channel,
       agentAllowedToReply: conversations.agentAllowedToReply,
       aiState: conversations.aiState,
       messageChannelIdentityId: conversationMessages.channelIdentityId,
       conversationChannelIdentityId: conversations.channelIdentityId,
       publicSessionId: widgetSessions.publicSessionId,
+      widgetInstanceId: conversations.widgetInstanceId,
+      sessionWidgetInstanceId: widgetSessions.widgetInstanceId,
+      referrerUrl: widgetSessions.referrerUrl,
+      pageTitle: widgetSessions.pageTitle,
+      visitorContext: widgetSessions.visitorContext,
       publicMessageId: conversationMessages.publicMessageId,
+      messageBody: conversationMessages.body,
+      sourcePageUrl: conversationMessages.sourcePageUrl,
+      conversationSourcePageUrl: conversations.sourcePageUrl,
+      submittedAt: conversationMessages.submittedAt,
+      contactName: leads.contactName,
+      contactPhone: leads.contactPhone,
+      contactEmail: leads.contactEmail,
+      contactPreferred: leads.contactPreferred,
+      contactCity: leads.contactCity,
       requestFingerprint: conversationMessages.requestFingerprint
     })
     .from(conversationMessages)
     .innerJoin(conversations, eq(conversationMessages.conversationId, conversations.id))
+    .innerJoin(leads, eq(conversationMessages.leadId, leads.id))
     .leftJoin(channelIdentities, eq(conversationMessages.channelIdentityId, channelIdentities.id))
     .leftJoin(widgetSessions, eq(channelIdentities.widgetSessionId, widgetSessions.id))
     .where(

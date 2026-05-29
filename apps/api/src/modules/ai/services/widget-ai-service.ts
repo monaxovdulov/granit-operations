@@ -1,9 +1,7 @@
-import type { SiteWidgetMessageRequest } from "@granit/contracts";
-
+import type { AiReplyCandidateDecision, AiTurnInput } from "../ai-turn.js";
 import {
   WIDGET_AI_DISCLOSURE_VERSION,
-  type PublicWidgetAiReplyGenerator,
-  type PublicWidgetAiReplyResult
+  type PublicWidgetAiReplyGenerator
 } from "../../intake/ports/public-widget-ai-reply-generator.js";
 
 export {
@@ -23,7 +21,7 @@ export type WidgetAiUsage = {
 };
 
 export type WidgetAiProviderInput = {
-  request: SiteWidgetMessageRequest;
+  turn: AiTurnInput;
   instructions: string;
   userInput: string;
 };
@@ -40,7 +38,7 @@ export interface WidgetAiProvider {
   generateReply(input: WidgetAiProviderInput): Promise<WidgetAiProviderResult>;
 }
 
-export type WidgetAiReplyResult = PublicWidgetAiReplyResult;
+export type WidgetAiReplyResult = AiReplyCandidateDecision;
 
 export type WidgetAiServiceOptions = {
   provider?: WidgetAiProvider;
@@ -50,7 +48,7 @@ export type WidgetAiServiceOptions = {
 export class WidgetAiService implements PublicWidgetAiReplyGenerator {
   constructor(private readonly options: WidgetAiServiceOptions = {}) {}
 
-  async generateReply(request: SiteWidgetMessageRequest): Promise<WidgetAiReplyResult> {
+  async generateReply(input: AiTurnInput): Promise<WidgetAiReplyResult> {
     const baseMetadata = {
       prompt_version: WIDGET_AI_PROMPT_VERSION,
       policy_version: WIDGET_AI_POLICY_VERSION,
@@ -60,11 +58,11 @@ export class WidgetAiService implements PublicWidgetAiReplyGenerator {
       fallback_mode: "none"
     };
 
-    const policyReply = buildPolicyReply(request.message.text);
+    const policyReply = buildPolicyReply(input.inboundMessage.text);
 
     if (policyReply) {
       return {
-        status: "replied",
+        decision: "reply_candidate",
         text: policyReply.text,
         agentAllowedToReplyAfterSend: policyReply.stopAiAfterReply ? false : undefined,
         metadata: {
@@ -79,7 +77,7 @@ export class WidgetAiService implements PublicWidgetAiReplyGenerator {
 
     if (!this.options.provider) {
       return {
-        status: "unavailable",
+        decision: "no_reply",
         reason: "missing_openai_config",
         metadata: {
           ...baseMetadata,
@@ -93,15 +91,15 @@ export class WidgetAiService implements PublicWidgetAiReplyGenerator {
 
     try {
       const providerResult = await this.options.provider.generateReply({
-        request,
+        turn: input,
         instructions: buildInstructions(),
-        userInput: buildUserInput(request)
+        userInput: buildUserInput(input)
       });
       const text = normalizeReply(providerResult.text);
 
       if (!text) {
         return {
-          status: "unavailable",
+          decision: "no_reply",
           reason: "empty_model_response",
           metadata: {
             ...baseMetadata,
@@ -119,7 +117,7 @@ export class WidgetAiService implements PublicWidgetAiReplyGenerator {
 
       if (unsafeReason) {
         return {
-          status: "unavailable",
+          decision: "no_reply",
           reason: "unsafe_model_response",
           metadata: {
             ...baseMetadata,
@@ -136,7 +134,7 @@ export class WidgetAiService implements PublicWidgetAiReplyGenerator {
       }
 
       return {
-        status: "replied",
+        decision: "reply_candidate",
         text,
         metadata: {
           ...baseMetadata,
@@ -148,7 +146,7 @@ export class WidgetAiService implements PublicWidgetAiReplyGenerator {
       };
     } catch {
       return {
-        status: "unavailable",
+        decision: "no_reply",
         reason: "model_error",
         metadata: {
           ...baseMetadata,
@@ -234,17 +232,17 @@ function buildInstructions(): string {
   ].join("\n");
 }
 
-function buildUserInput(request: SiteWidgetMessageRequest): string {
+function buildUserInput(input: AiTurnInput): string {
   const contactParts = [
-    request.contact?.name ? `Имя: ${request.contact.name}` : null,
-    request.contact?.phone ? "Телефон указан" : "Телефон не указан",
-    request.contact?.city ? `Город: ${request.contact.city}` : null
+    input.customer.name ? `Имя: ${input.customer.name}` : null,
+    input.customer.phoneProvided ? "Телефон указан" : "Телефон не указан",
+    input.customer.city ? `Город: ${input.customer.city}` : null
   ].filter(Boolean);
 
   return [
-    `Страница сайта: ${request.source.page_url}`,
+    `Страница сайта: ${input.page.url}`,
     contactParts.length ? `Контакт: ${contactParts.join(", ")}` : "Контакт: не указан",
-    `Сообщение посетителя: ${request.message.text}`
+    `Сообщение посетителя: ${input.inboundMessage.text}`
   ].join("\n");
 }
 

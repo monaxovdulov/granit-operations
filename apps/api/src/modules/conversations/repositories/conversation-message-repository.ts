@@ -1,5 +1,6 @@
 import type { SiteWidgetUtm } from "@granit/contracts";
 
+import type { AiTurnInput } from "../../ai/ai-turn.js";
 import type {
   AiState,
   ChannelProvider,
@@ -73,6 +74,7 @@ export type AcceptInboundMessageResult = {
   aiState: AiState;
   replayed: boolean;
   existingAiReply?: SiteWidgetStoredAiReply;
+  aiTurnInput?: AiTurnInput;
 };
 
 export type PersistAiReplyWithSendGateInput = {
