@@ -1,0 +1,1162 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Учебная карта: простая backend-архитектура для Granit и AI-агентов</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f5f7fb;
+        --paper: #ffffff;
+        --paper-2: #f9fbfe;
+        --ink: #172033;
+        --muted: #647084;
+        --line: #d8e0eb;
+        --blue: #1e5d92;
+        --blue-soft: #e8f2fc;
+        --green: #197052;
+        --green-soft: #e4f4ed;
+        --amber: #8b5b04;
+        --amber-soft: #fff3d8;
+        --red: #9a3412;
+        --red-soft: #fff0e8;
+        --violet: #5a4ea3;
+        --violet-soft: #efedff;
+        --code-bg: #162033;
+        --radius: 8px;
+        --shadow: 0 16px 40px rgba(23, 32, 51, 0.08);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        background:
+          linear-gradient(180deg, #eef4fb 0, rgba(245, 247, 251, 0) 360px),
+          var(--bg);
+        color: var(--ink);
+        font: 16px/1.6 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      a {
+        color: var(--blue);
+        text-decoration-thickness: 1px;
+        text-underline-offset: 3px;
+      }
+
+      code,
+      pre {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+          monospace;
+      }
+
+      code {
+        padding: 0.09rem 0.32rem;
+        border: 1px solid var(--line);
+        border-radius: 5px;
+        color: #1e2a41;
+        background: #eef3f9;
+        font-size: 0.92em;
+      }
+
+      pre {
+        overflow-x: auto;
+        margin: 12px 0 0;
+        padding: 16px;
+        border-radius: var(--radius);
+        color: #eef5ff;
+        background: var(--code-bg);
+        font-size: 0.92rem;
+        line-height: 1.5;
+      }
+
+      h1,
+      h2,
+      h3,
+      h4 {
+        margin: 0;
+        line-height: 1.22;
+        letter-spacing: 0;
+      }
+
+      h1 {
+        max-width: 980px;
+        font-size: clamp(2rem, 4.5vw, 4rem);
+      }
+
+      h2 {
+        margin-bottom: 14px;
+        font-size: clamp(1.5rem, 2.7vw, 2.2rem);
+      }
+
+      h3 {
+        margin-bottom: 8px;
+        font-size: 1.15rem;
+      }
+
+      h4 {
+        margin-bottom: 6px;
+        font-size: 0.98rem;
+      }
+
+      p {
+        margin: 0 0 12px;
+      }
+
+      ul,
+      ol {
+        margin: 0;
+        padding-left: 1.25rem;
+      }
+
+      li {
+        margin-bottom: 8px;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 12px;
+        font-size: 0.95rem;
+      }
+
+      th,
+      td {
+        padding: 11px 12px;
+        border-bottom: 1px solid var(--line);
+        vertical-align: top;
+        text-align: left;
+      }
+
+      th {
+        color: #2a3547;
+        background: #eef3f9;
+      }
+
+      main {
+        max-width: 1220px;
+        margin: 0 auto;
+        padding: 28px 20px 64px;
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
+        gap: 22px;
+        align-items: stretch;
+        margin-bottom: 26px;
+      }
+
+      .hero-copy {
+        padding: 24px 0 10px;
+      }
+
+      .eyebrow {
+        margin-bottom: 12px;
+        color: var(--muted);
+        font-size: 0.98rem;
+      }
+
+      .subtitle {
+        max-width: 920px;
+        margin-top: 16px;
+        color: #4c586c;
+        font-size: 1.12rem;
+      }
+
+      .status-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 18px;
+      }
+
+      .tag {
+        display: inline-flex;
+        align-items: center;
+        min-height: 28px;
+        padding: 3px 9px;
+        border-radius: 999px;
+        color: #263448;
+        background: #e9eef6;
+        font-size: 0.84rem;
+        white-space: nowrap;
+      }
+
+      .tag.good {
+        color: #124b38;
+        background: var(--green-soft);
+      }
+
+      .tag.warn {
+        color: #6c4705;
+        background: var(--amber-soft);
+      }
+
+      .tag.ai {
+        color: #463b8f;
+        background: var(--violet-soft);
+      }
+
+      .hero-panel {
+        display: grid;
+        gap: 12px;
+        padding: 18px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--paper);
+        box-shadow: var(--shadow);
+      }
+
+      .mini-map {
+        display: grid;
+        gap: 8px;
+      }
+
+      .mini-step {
+        display: grid;
+        grid-template-columns: 34px 1fr;
+        gap: 10px;
+        align-items: start;
+        padding: 10px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--paper-2);
+      }
+
+      .num {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        color: #fff;
+        background: var(--blue);
+        font-weight: 700;
+        font-size: 0.9rem;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: 260px minmax(0, 1fr);
+        gap: 22px;
+        align-items: start;
+      }
+
+      .toc {
+        position: sticky;
+        top: 18px;
+        padding: 16px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: rgba(255, 255, 255, 0.92);
+        box-shadow: 0 12px 30px rgba(23, 32, 51, 0.06);
+      }
+
+      .toc h2 {
+        margin-bottom: 10px;
+        font-size: 1rem;
+      }
+
+      .toc a {
+        display: block;
+        padding: 6px 0;
+        color: #334057;
+        text-decoration: none;
+        border-bottom: 1px solid #edf1f6;
+        font-size: 0.92rem;
+      }
+
+      .toc a:hover {
+        color: var(--blue);
+      }
+
+      .content {
+        display: grid;
+        gap: 18px;
+      }
+
+      .section {
+        padding: 22px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--paper);
+      }
+
+      .section.soft {
+        background: #fbfcff;
+      }
+
+      .grid {
+        display: grid;
+        gap: 14px;
+      }
+
+      .grid.two {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .grid.three {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .card {
+        padding: 16px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--paper);
+      }
+
+      .card.blue {
+        border-top: 4px solid var(--blue);
+      }
+
+      .card.green {
+        border-top: 4px solid var(--green);
+      }
+
+      .card.amber {
+        border-top: 4px solid var(--amber);
+      }
+
+      .card.violet {
+        border-top: 4px solid var(--violet);
+      }
+
+      .callout {
+        margin: 14px 0;
+        padding: 14px 16px;
+        border-left: 4px solid var(--blue);
+        border-radius: 6px;
+        background: var(--blue-soft);
+      }
+
+      .callout.good {
+        border-left-color: var(--green);
+        background: var(--green-soft);
+      }
+
+      .callout.warn {
+        border-left-color: var(--amber);
+        background: var(--amber-soft);
+      }
+
+      .callout.risk {
+        border-left-color: var(--red);
+        background: var(--red-soft);
+      }
+
+      .lesson {
+        display: grid;
+        grid-template-columns: 42px 1fr;
+        gap: 14px;
+        align-items: start;
+      }
+
+      .term {
+        padding: 14px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: #fbfcff;
+      }
+
+      .term-title {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        margin-bottom: 8px;
+      }
+
+      .term-title strong {
+        font-size: 1.05rem;
+      }
+
+      .py-ts {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 12px;
+      }
+
+      .diagram {
+        display: grid;
+        gap: 10px;
+        margin: 14px 0;
+      }
+
+      .diagram-row {
+        display: grid;
+        grid-template-columns: 170px 1fr;
+        gap: 12px;
+        align-items: stretch;
+      }
+
+      .diagram-label,
+      .diagram-box {
+        padding: 12px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--paper-2);
+      }
+
+      .diagram-label {
+        color: #2a3547;
+        font-weight: 700;
+      }
+
+      .chain {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 8px;
+        margin: 14px 0;
+      }
+
+      .chain > div {
+        min-height: 86px;
+        padding: 12px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--paper-2);
+      }
+
+      .quote {
+        padding: 16px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: #f7f9fc;
+      }
+
+      .quote strong {
+        color: var(--blue);
+      }
+
+      .checklist li {
+        list-style: none;
+        position: relative;
+        padding-left: 1.2rem;
+      }
+
+      .checklist li::before {
+        content: "";
+        position: absolute;
+        left: 0;
+        top: 0.62rem;
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--green);
+      }
+
+      .muted {
+        color: var(--muted);
+      }
+
+      .small {
+        font-size: 0.92rem;
+      }
+
+      .source-list {
+        columns: 2;
+      }
+
+      .footer-note {
+        margin-top: 24px;
+        padding: 16px;
+        color: var(--muted);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--paper);
+      }
+
+      @media (max-width: 980px) {
+        .hero,
+        .layout,
+        .grid.two,
+        .grid.three,
+        .py-ts,
+        .chain,
+        .diagram-row {
+          grid-template-columns: 1fr;
+        }
+
+        .toc {
+          position: static;
+        }
+      }
+
+      @media (max-width: 640px) {
+        main {
+          padding: 20px 12px 42px;
+        }
+
+        .section,
+        .hero-panel {
+          padding: 16px;
+        }
+
+        .lesson {
+          grid-template-columns: 1fr;
+        }
+
+        .source-list {
+          columns: 1;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header class="hero">
+        <div class="hero-copy">
+          <div class="eyebrow">Granit Operations · учебная карта из диалога · 2026-05-25</div>
+          <h1>Простая backend-архитектура для малого бизнеса и AI-разработки</h1>
+          <p class="subtitle">
+            Последовательное объяснение с нуля для Python-разработчика: intake, persistence,
+            DTO, repository, port, contract, aggregate, public intake scenarios, а затем
+            практики 2026 для AI-friendly проекта без enterprise-перегруза.
+          </p>
+          <div class="status-row">
+            <span class="tag good">малый бизнес</span>
+            <span class="tag good">boring tech</span>
+            <span class="tag ai">AI-friendly docs</span>
+            <span class="tag warn">не enterprise DDD</span>
+          </div>
+        </div>
+        <aside class="hero-panel" aria-label="Как читать">
+          <h2>Как читать</h2>
+          <div class="mini-map">
+            <div class="mini-step">
+              <span class="num">1</span>
+              <div>
+                <strong>Сначала карта</strong>
+                <p class="small muted">Пойми, где route, service, repository и Postgres.</p>
+              </div>
+            </div>
+            <div class="mini-step">
+              <span class="num">2</span>
+              <div>
+                <strong>Потом словарь</strong>
+                <p class="small muted">Переведи TypeScript-термины на Python-мышление.</p>
+              </div>
+            </div>
+            <div class="mini-step">
+              <span class="num">3</span>
+              <div>
+                <strong>Потом практика</strong>
+                <p class="small muted">Отдели полезные границы от enterprise-ритуалов.</p>
+              </div>
+            </div>
+          </div>
+        </aside>
+      </header>
+
+      <div class="layout">
+        <nav class="toc" aria-label="Оглавление">
+          <h2>Оглавление</h2>
+          <a href="#main-idea">1. Главная мысль</a>
+          <a href="#map">2. Карта backend flow</a>
+          <a href="#python-ts">3. Python → TypeScript</a>
+          <a href="#terms">4. Словарь концептов</a>
+          <a href="#what-changed">5. Что поменяли в P1-1</a>
+          <a href="#not-enterprise">6. Почему это не enterprise</a>
+          <a href="#best-practices">7. Best practices</a>
+          <a href="#ai-2026">8. AI-friendly 2026</a>
+          <a href="#validation">9. Frozen validation</a>
+          <a href="#rules">10. Правила для Granit</a>
+          <a href="#self-check">11. Самопроверка</a>
+        </nav>
+
+        <article class="content">
+          <section class="section" id="main-idea">
+            <div class="lesson">
+              <span class="num">1</span>
+              <div>
+                <h2>Главная мысль</h2>
+                <p>
+                  Мы не строим enterprise-архитектуру. Для Granit правильная цель другая:
+                  маленькая надежная система, которую понимает человек и которую AI-агент может
+                  безопасно менять через месяц.
+                </p>
+                <div class="callout good">
+                  <p>
+                    Рабочая формула:
+                    <strong>Boring runtime, explicit boundaries, executable checks, short local docs,
+                    small agent tasks.</strong>
+                  </p>
+                </div>
+                <p>
+                  На практике это значит: один backend, один Postgres как source of truth, понятные
+                  модули внутри монолита, короткие task packs, ADR только для настоящих boundary
+                  decisions, проверки как evidence.
+                </p>
+              </div>
+            </div>
+          </section>
+
+          <section class="section soft" id="map">
+            <h2>Карта backend flow</h2>
+            <p>
+              В нашем разговоре вся архитектура сводилась к простой цепочке. Это почти как FastAPI
+              приложение с service layer и Protocol для базы.
+            </p>
+            <div class="chain" aria-label="Backend flow">
+              <div>
+                <h3>Route / webhook</h3>
+                <p class="small">Принимает HTTP или provider update. Не держит бизнес-логику.</p>
+              </div>
+              <div>
+                <h3>Service / use case</h3>
+                <p class="small">Решает сценарий: принять форму, сохранить сообщение, взять takeover.</p>
+              </div>
+              <div>
+                <h3>Port / contract</h3>
+                <p class="small">Interface: какие возможности нужны service.</p>
+              </div>
+              <div>
+                <h3>Repository</h3>
+                <p class="small">Реализация persistence. Сейчас это Postgres implementation.</p>
+              </div>
+              <div>
+                <h3>Postgres</h3>
+                <p class="small">Source of truth: leads, conversations, messages, evidence.</p>
+              </div>
+            </div>
+            <pre>HTTP route / webhook
+  -> service / use case
+  -> repository interface / port
+  -> Postgres implementation
+  -> database</pre>
+          </section>
+
+          <section class="section" id="python-ts">
+            <h2>Python → TypeScript перевод</h2>
+            <p>
+              Если ты Python-разработчик, самый близкий перевод такой:
+            </p>
+            <table>
+              <thead>
+                <tr>
+                  <th>В Python</th>
+                  <th>В нашем TypeScript коде</th>
+                  <th>Смысл</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>FastAPI endpoint</code></td>
+                  <td><code>Fastify route</code></td>
+                  <td>HTTP-адаптер: принимает request, вызывает use case, возвращает response.</td>
+                </tr>
+                <tr>
+                  <td><code>application service</code></td>
+                  <td><code>PublicIntakeService</code>, <code>ManagerLeadUseCases</code></td>
+                  <td>Сценарий приложения без SQL и без raw HTTP деталей.</td>
+                </tr>
+                <tr>
+                  <td><code>Protocol</code> / <code>ABC</code></td>
+                  <td><code>interface PublicIntakeRepository</code></td>
+                  <td>Контракт возможностей, от которого зависит service.</td>
+                </tr>
+                <tr>
+                  <td><code>dataclass</code> / <code>TypedDict</code> / Pydantic model</td>
+                  <td><code>type SaveAcceptedSiteWidgetMessageInput</code></td>
+                  <td>DTO: объект передачи данных между слоями.</td>
+                </tr>
+                <tr>
+                  <td>SQLAlchemy / asyncpg class</td>
+                  <td><code>PostgresIntakeRepository</code></td>
+                  <td>Реальная реализация сохранения в Postgres.</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <div class="py-ts">
+              <div class="card blue">
+                <h3>Python-модель</h3>
+                <pre>from typing import Protocol
+
+class PublicIntakeRepository(Protocol):
+    async def save_form(self, input):
+        ...
+
+class PostgresPublicIntakeRepository:
+    async def save_form(self, input):
+        await db.execute(...)</pre>
+              </div>
+              <div class="card green">
+                <h3>TypeScript-модель</h3>
+                <pre>export interface PublicIntakeRepository {
+  saveAcceptedSiteFormSubmission(
+    input: SaveAcceptedSiteFormSubmissionInput
+  ): Promise&lt;SaveAcceptedSiteFormSubmissionResult&gt;;
+}
+
+export class PostgresIntakeRepository
+  implements PublicIntakeRepository {
+  ...
+}</pre>
+              </div>
+            </div>
+          </section>
+
+          <section class="section" id="terms">
+            <h2>Словарь концептов</h2>
+
+            <div class="grid two">
+              <div class="term">
+                <div class="term-title">
+                  <strong>Intake</strong>
+                  <span class="tag">прием обращения</span>
+                </div>
+                <p>
+                  В Granit это момент, когда внешний клиент впервые входит в систему: форма на сайте,
+                  site widget, Telegram inbound.
+                </p>
+                <pre>client input enters the system</pre>
+              </div>
+
+              <div class="term">
+                <div class="term-title">
+                  <strong>Persistence</strong>
+                  <span class="tag">сохранение</span>
+                </div>
+                <p>
+                  Запись в постоянное хранилище, у нас в Postgres. Не просто держать в памяти, а
+                  надежно сохранить lead, conversation, message, evidence.
+                </p>
+                <pre>intake persistence =
+прием обращения + запись в Postgres</pre>
+              </div>
+
+              <div class="term">
+                <div class="term-title">
+                  <strong>DTO</strong>
+                  <span class="tag">Data Transfer Object</span>
+                </div>
+                <p>
+                  Простой объект передачи данных. Не “умная” бизнес-сущность, а явная форма:
+                  какие поля нужно передать между слоями.
+                </p>
+                <pre>type SaveAcceptedSiteFormSubmissionInput = {
+  publicSubmissionId: string;
+  request: SiteFormIntakeRequest;
+  requestFingerprint: string;
+};</pre>
+              </div>
+
+              <div class="term">
+                <div class="term-title">
+                  <strong>Repository</strong>
+                  <span class="tag">обертка над persistence</span>
+                </div>
+                <p>
+                  Объект, который прячет SQL/Drizzle/Postgres details. Service вызывает понятный
+                  метод, repository знает, какие таблицы трогать.
+                </p>
+                <pre>repository.saveAcceptedSiteWidgetMessage(...)</pre>
+              </div>
+
+              <div class="term">
+                <div class="term-title">
+                  <strong>Contract</strong>
+                  <span class="tag">типовое обещание</span>
+                </div>
+                <p>
+                  Описание, какие методы и данные доступны. В TypeScript это обычно
+                  <code>interface</code> или <code>type</code>.
+                </p>
+                <pre>contract говорит ЧТО доступно,
+но не говорит КАК это реализовано</pre>
+              </div>
+
+              <div class="term">
+                <div class="term-title">
+                  <strong>Port</strong>
+                  <span class="tag">interface между слоями</span>
+                </div>
+                <p>
+                  Не TCP-порт. Это архитектурный “разъем”: service зависит от interface, а не от
+                  Postgres-класса.
+                </p>
+                <pre>PublicIntakeRepository = port
+PostgresIntakeRepository = implementation</pre>
+              </div>
+
+              <div class="term">
+                <div class="term-title">
+                  <strong>Aggregate repository contract</strong>
+                  <span class="tag">собранный контракт</span>
+                </div>
+                <p>
+                  Большой интерфейс, который объединяет несколько маленьких repository contracts.
+                  Он нужен для compatibility, но новому коду лучше брать narrow port.
+                </p>
+                <pre>interface IntakeRepository
+  extends PublicIntakeRepository,
+    ConversationMessageRepository,
+    ManagerLeadRepository,
+    ManagerTelegramRepository {}</pre>
+              </div>
+
+              <div class="term">
+                <div class="term-title">
+                  <strong>Public intake scenarios</strong>
+                  <span class="tag">клиентские входные сценарии</span>
+                </div>
+                <p>
+                  Тесты, которые проверяют внешний вход: сайт-форма и site widget. Например:
+                  валидная форма, validation error, idempotency, AI fallback.
+                </p>
+                <pre>valid form -> lead saved
+invalid form -> typed validation error
+same request -> no duplicate lead</pre>
+              </div>
+            </div>
+          </section>
+
+          <section class="section soft" id="what-changed">
+            <h2>Что поменяли в P1-1</h2>
+            <p>
+              Был один большой file-level import target: <code>intake-repository.ts</code>.
+              Он уже содержал логически хорошие интерфейсы, но они были физически спрятаны в одном
+              broad file.
+            </p>
+            <div class="diagram">
+              <div class="diagram-row">
+                <div class="diagram-label">Было</div>
+                <div class="diagram-box">
+                  <code>intake-repository.ts</code> экспортировал shared types, public intake DTO,
+                  conversation message DTO, manager lead port, manager Telegram port и aggregate
+                  <code>IntakeRepository</code>.
+                </div>
+              </div>
+              <div class="diagram-row">
+                <div class="diagram-label">Стало</div>
+                <div class="diagram-box">
+                  Контракты разнесены по файлам:
+                  <code>lead-conversation-types.ts</code>,
+                  <code>public-intake-repository.ts</code>,
+                  <code>conversation-message-repository.ts</code>,
+                  <code>manager-lead-repository.ts</code>,
+                  <code>manager-telegram-repository.ts</code>.
+                </div>
+              </div>
+              <div class="diagram-row">
+                <div class="diagram-label">Compatibility</div>
+                <div class="diagram-box">
+                  Старый <code>IntakeRepository</code> сохранен как aggregate compatibility interface.
+                  Legacy exports under <code>apps/api/src/repositories/*</code> тоже сохранены.
+                </div>
+              </div>
+            </div>
+            <div class="callout">
+              <p>
+                Это не перенос behavior. Это contract/type split. Postgres queries, DB schema,
+                migrations, env names, npm scripts and runtime topology не менялись.
+              </p>
+            </div>
+          </section>
+
+          <section class="section" id="not-enterprise">
+            <h2>Почему это не enterprise</h2>
+            <p>
+              Важно: слова repository, DTO, port, contract могут звучать enterprise-но. Но в Granit
+              они используются в маленькой практичной версии.
+            </p>
+            <div class="grid two">
+              <div class="card amber">
+                <h3>Enterprise-вариант, который нам не нужен</h3>
+                <ul>
+                  <li>generic <code>Repository&lt;T&gt;</code>;</li>
+                  <li>Unit of Work ради паттерна;</li>
+                  <li>DI container;</li>
+                  <li>CQRS/event bus без реальной боли;</li>
+                  <li>микросервисы на ранней стадии;</li>
+                  <li>DTO на каждый слой без пользы.</li>
+                </ul>
+              </div>
+              <div class="card green">
+                <h3>Наш вариант</h3>
+                <ul>
+                  <li>один ops-api service;</li>
+                  <li>один Postgres source of truth;</li>
+                  <li>маленькие explicit interfaces по ответственности;</li>
+                  <li>repository methods под реальные business actions;</li>
+                  <li>DTO только на важных границах;</li>
+                  <li>проверки там, где есть риск потерять lead/message/evidence.</li>
+                </ul>
+              </div>
+            </div>
+            <pre>Если тип защищает важную границу - оставляем.
+Если тип просто переименовывает тот же объект без пользы - не добавляем.</pre>
+          </section>
+
+          <section class="section" id="best-practices">
+            <h2>Best practices: кто пишет про простые решения</h2>
+            <div class="grid two">
+              <div class="card blue">
+                <h3>37signals / Basecamp</h3>
+                <p>
+                  Jason Fried, DHH, Ryan Singer: маленькие команды, меньше процесса, меньше
+                  unnecessary software, реальные shipped features. Полезные источники:
+                  <a href="https://books.37signals.com/8/getting-real">Getting Real</a> и
+                  <a href="https://basecamp.com/shapeup">Shape Up</a>.
+                </p>
+                <pre>Не строить систему “на вырост”.
+Строить маленький надежный продукт,
+который решает реальную боль.</pre>
+              </div>
+              <div class="card blue">
+                <h3>DHH / Rails monolith culture</h3>
+                <p>
+                  Идея: монолит не проблема, проблема - неструктурированный монолит.
+                  Полезно смотреть <a href="https://rails.github.io/homepage/doctrine">Rails Doctrine</a>
+                  и материалы DHH про monoliths.
+                </p>
+                <pre>Один deployable app,
+понятные внутренние модули,
+простая эксплуатация.</pre>
+              </div>
+              <div class="card green">
+                <h3>Dan McKinley: Choose Boring Technology</h3>
+                <p>
+                  <a href="https://boringtechnology.club/">Choose Boring Technology</a> хорошо
+                  объясняет, почему новый tech stack тратит innovation budget.
+                </p>
+                <pre>Postgres, Fastify, TypeScript, Vitest.
+Без Kafka/Redis/Kubernetes,
+пока боль не доказана.</pre>
+              </div>
+              <div class="card green">
+                <h3>Martin Fowler: Monolith First</h3>
+                <p>
+                  <a href="https://martinfowler.com/bliki/MonolithFirst.html">Monolith First</a>:
+                  начинать с монолита, а сервисы выделять только когда границы и боль стали ясны.
+                </p>
+                <pre>Сначала modular monolith.
+Потом, если реально нужно,
+выделение частей.</pre>
+              </div>
+              <div class="card violet">
+                <h3>John Ousterhout</h3>
+                <p>
+                  <a href="https://web.stanford.edu/~ouster/cgi-bin/aposd.php">A Philosophy of Software Design</a>
+                  полезна идеей deep modules: простой interface, который скрывает реальную сложность.
+                </p>
+                <pre>PublicIntakeRepository снаружи простой.
+Postgres внутри может быть сложным.</pre>
+              </div>
+              <div class="card violet">
+                <h3>Matt Pocock / Dan Vanderkam</h3>
+                <p>
+                  Matt Pocock помогает писать понятный TypeScript, Dan Vanderkam в Effective
+                  TypeScript помогает думать о типах как о способе представлять valid states.
+                </p>
+                <pre>DTO / union / literal types -> type
+capability contracts -> interface</pre>
+              </div>
+            </div>
+          </section>
+
+          <section class="section soft" id="ai-2026">
+            <h2>AI-friendly разработка в 2026</h2>
+            <p>
+              В 2026 актуальная практика для small-business проекта: писать код и docs так, чтобы
+              AI-агент мог безопасно продолжить работу, а не угадывал правила проекта.
+            </p>
+            <div class="grid two">
+              <div class="card blue">
+                <h3>AGENTS.md</h3>
+                <p>
+                  <a href="https://github.com/agentsmd/agents.md">AGENTS.md</a> описывают как README
+                  for agents: команды, правила, границы, что нельзя менять, как проверять результат.
+                </p>
+                <pre>AGENTS.md =
+операционная инструкция для AI-агента</pre>
+              </div>
+              <div class="card blue">
+                <h3>Context engineering</h3>
+                <p>
+                  В <a href="https://code.claude.com/docs/en/best-practices">Claude Code best practices</a>
+                  главный ресурс - context window. Чем больше мусора в контексте, тем выше риск ошибок.
+                </p>
+                <pre>Не один огромный документ.
+А короткие task packs,
+ADR, runbooks, evidence.</pre>
+              </div>
+              <div class="card green">
+                <h3>Path-specific instructions</h3>
+                <p>
+                  GitHub Copilot docs описывают repo-wide and path-specific instructions. Это полезно,
+                  когда API, UI, Telegram delivery и docs имеют разные правила.
+                </p>
+                <pre>Общие правила -> AGENTS.md
+Местные правила -> рядом с модулем</pre>
+              </div>
+              <div class="card amber">
+                <h3>MCP осторожно</h3>
+                <p>
+                  <a href="https://modelcontextprotocol.io/docs/learn/architecture">MCP</a> полезен,
+                  когда агенту нужен безопасный доступ к внешним tools/resources. Но для Granit сначала
+                  достаточно repo docs, scripts, tests and evidence.
+                </p>
+                <pre>MCP не нужен “потому что модно”.
+Нужен только под регулярную реальную интеграцию.</pre>
+              </div>
+              <div class="card amber">
+                <h3>llms.txt</h3>
+                <p>
+                  <a href="https://llmtxt.info/">llms.txt</a> полезен для публичных docs сайта/API.
+                  Для внутреннего repo важнее AGENTS.md, task docs and local evidence.
+                </p>
+                <pre>Public docs -> можно llms.txt
+Internal repo -> AGENTS.md важнее</pre>
+              </div>
+              <div class="card violet">
+                <h3>AI-friendly file names</h3>
+                <p>
+                  Маленькие файлы с честными именами помогают агенту меньше додумывать:
+                  <code>manager-telegram-repository.ts</code> понятнее, чем один огромный
+                  <code>intake-repository.ts</code>.
+                </p>
+                <pre>Пиши код так,
+чтобы следующий агент понял scope
+по имени файла и тесту.</pre>
+              </div>
+            </div>
+          </section>
+
+          <section class="section" id="validation">
+            <h2>Frozen validation: как лучше формулировать</h2>
+            <p>
+              В repo docs не было закрепленного термина <code>frozen validation</code>. Поэтому
+              лучше не использовать его как магическое слово. Нужна точная формулировка:
+              что именно заморожено и что можно менять.
+            </p>
+            <div class="callout good">
+              <p>
+                Рекомендуемая формулировка:
+                <strong>Public validation contract is compatibility-frozen for v1. Internal
+                validation implementation may be refactored only when evidence shows public behavior
+                is unchanged.</strong>
+              </p>
+            </div>
+            <pre>Public validation contract is compatibility-frozen for v1.
+Internal validation implementation may be refactored only when evidence shows:
+1. typed validation errors still return the same public shape;
+2. unsupported-version behavior is unchanged;
+3. retry/fallback behavior is unchanged;
+4. accepted requests are persisted before success is reported;
+5. no false public success is introduced.</pre>
+            <p>
+              По-русски: мы замораживаем внешний контракт ошибок для сайта/клиента, но не запрещаем
+              улучшать внутреннюю реализацию, если тесты и evidence доказывают то же поведение.
+            </p>
+          </section>
+
+          <section class="section soft" id="rules">
+            <h2>Практические правила для Granit</h2>
+            <div class="grid two">
+              <div class="card green">
+                <h3>Делать</h3>
+                <ul class="checklist">
+                  <li>Оставлять <code>ops-api</code> одним service, пока нет доказанной причины.</li>
+                  <li>Держать Postgres source of truth для leads, messages, delivery evidence.</li>
+                  <li>Делать small refactor slices с explicit out of scope.</li>
+                  <li>Писать repository methods как business actions.</li>
+                  <li>Использовать DTO на boundary, где они реально защищают контракт.</li>
+                  <li>Добавлять checks as evidence, а не просто “я думаю работает”.</li>
+                  <li>Оставлять compatibility exports, если release phase этого требует.</li>
+                </ul>
+              </div>
+              <div class="card amber">
+                <h3>Не делать без явной причины</h3>
+                <ul>
+                  <li>microservices;</li>
+                  <li>event bus;</li>
+                  <li>DI container;</li>
+                  <li>generic repository layer;</li>
+                  <li>CQRS;</li>
+                  <li>широкий rewrite;</li>
+                  <li>omnichannel CRM / WhatsApp / MAX / call tracking вне scope;</li>
+                  <li>изменение public API, DB schema, env names, npm scripts без acceptance criteria.</li>
+                </ul>
+              </div>
+            </div>
+            <pre>Новая абстракция допустима только если она:
+1. уменьшает реальную сложность;
+2. защищает важную границу;
+3. убирает значимое дублирование;
+4. делает тестирование надежнее;
+5. соответствует уже существующему стилю проекта.</pre>
+          </section>
+
+          <section class="section" id="self-check">
+            <h2>Самопроверка понимания</h2>
+            <div class="grid two">
+              <div class="quote">
+                <h3>Если ты понял, ты можешь объяснить так</h3>
+                <p>
+                  <strong>Intake persistence</strong> - это прием клиентского обращения и надежная
+                  запись фактов в Postgres.
+                </p>
+                <p>
+                  <strong>Port</strong> - это interface, от которого зависит use case, чтобы не знать
+                  про SQL/Drizzle/Postgres details.
+                </p>
+                <p>
+                  <strong>DTO</strong> - это явная форма данных на границе, похожая на dataclass,
+                  TypedDict или Pydantic model.
+                </p>
+              </div>
+              <div class="quote">
+                <h3>Если непонятно, спроси так</h3>
+                <ul>
+                  <li>“Покажи мне один реальный DTO из Granit и где он проходит по цепочке”.</li>
+                  <li>“Покажи на Python Protocol, как это выглядит”.</li>
+                  <li>“Где именно service перестает знать про Postgres?”</li>
+                  <li>“Почему aggregate оставили, но новому коду лучше его не импортировать?”</li>
+                  <li>“Какая проверка доказывает, что public intake не сломался?”</li>
+                </ul>
+              </div>
+            </div>
+          </section>
+
+          <section class="section">
+            <h2>Источники и ориентиры</h2>
+            <ul class="source-list">
+              <li><a href="https://books.37signals.com/8/getting-real">37signals - Getting Real</a></li>
+              <li><a href="https://basecamp.com/shapeup">Basecamp - Shape Up</a></li>
+              <li><a href="https://rails.github.io/homepage/doctrine">Rails Doctrine</a></li>
+              <li><a href="https://boringtechnology.club/">Dan McKinley - Choose Boring Technology</a></li>
+              <li><a href="https://martinfowler.com/bliki/MonolithFirst.html">Martin Fowler - Monolith First</a></li>
+              <li><a href="https://web.stanford.edu/~ouster/cgi-bin/aposd.php">John Ousterhout - A Philosophy of Software Design</a></li>
+              <li><a href="https://github.com/agentsmd/agents.md">AGENTS.md</a></li>
+              <li><a href="https://code.claude.com/docs/en/best-practices">Claude Code best practices</a></li>
+              <li><a href="https://docs.github.com/en/copilot/concepts/prompting/response-customization?tool=visualstudio">GitHub Copilot custom instructions</a></li>
+              <li><a href="https://modelcontextprotocol.io/docs/learn/architecture">Model Context Protocol architecture</a></li>
+              <li><a href="https://llmtxt.info/">llms.txt reference</a></li>
+            </ul>
+          </section>
+
+          <div class="footer-note">
+            <p>
+              Следующий учебный шаг: открыть реальный файл
+              <code>apps/api/src/modules/conversations/repositories/public-intake-repository.ts</code>
+              и пройти один метод от HTTP route до Postgres repository, сопоставляя каждую строку с
+              этой картой.
+            </p>
+          </div>
+        </article>
+      </div>
+    </main>
+  </body>
+</html>
