@@ -133,6 +133,10 @@ export function timelineEventLabel(eventType: string) {
     "conversation.delivery_blocked": "Доставка заблокирована",
     "conversation.delivery_uncertain": "Статус доставки неясен",
     "manager.notification_enqueued": "Уведомление менеджеру",
+    "manager.notification_sent": "Уведомление доставлено",
+    "manager.notification_retrying": "Повтор уведомления",
+    "manager.notification_failed": "Ошибка уведомления",
+    "manager.notification_blocked": "Уведомление заблокировано",
     "lead.status_changed": "Статус изменен"
   };
 
@@ -166,7 +170,11 @@ export function timelineSummaryLabel(event: ManagerLeadDetail["timeline"][number
     "conversation.delivery_failed": "Доставка в Telegram завершилась ошибкой",
     "conversation.delivery_blocked": "Доставка в Telegram заблокирована",
     "conversation.delivery_uncertain": "Результат доставки в Telegram неизвестен",
-    "manager.notification_enqueued": "Уведомление менеджеру поставлено в очередь"
+    "manager.notification_enqueued": "Уведомление менеджеру поставлено в очередь",
+    "manager.notification_sent": "Уведомление менеджеру доставлено в Telegram",
+    "manager.notification_retrying": "Уведомление менеджеру будет повторено",
+    "manager.notification_failed": "Уведомление менеджеру завершилось ошибкой",
+    "manager.notification_blocked": "Уведомление менеджеру заблокировано"
   };
 
   return labels[event.eventType] ?? "Событие заявки";
