@@ -5,13 +5,16 @@ import {
   PUBLIC_INTAKE_EVENT_TYPE,
   SITE_WIDGET_CONTRACT_VERSION,
   SITE_WIDGET_MESSAGE_EVENT_TYPE,
+  SiteWidgetResponseSchema,
   type SiteFormIntakeRequest,
   type SiteWidgetMessageRequest
 } from "@granit/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 
+import type { AiTurnInput } from "../src/modules/ai/ai-turn.js";
 import { buildApi } from "../src/app.js";
 import { TelegramOutboundBlockedError } from "../src/repositories/intake-repository.js";
+import type { PublicWidgetAiReplyGenerator } from "../src/modules/intake/ports/public-widget-ai-reply-generator.js";
 import { FakeWidgetAiProvider } from "./helpers/fake-widget-ai-provider.js";
 import { MemoryIntakeRepository } from "./helpers/memory-intake-repository.js";
 import {
@@ -440,6 +443,7 @@ describe("public site_widget intake", () => {
         next_step: "manager_review"
       }
     });
+    expect(SiteWidgetResponseSchema.safeParse(response.json()).success).toBe(true);
     expect(response.json().public_session_id).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
     );
@@ -702,6 +706,262 @@ describe("public site_widget intake", () => {
         body: "Могу помочь с общими вариантами памятника. Какой формат вы рассматриваете?"
       }
     ]);
+  });
+
+  it("builds AI input from accepted app-owned state instead of the raw widget DTO", async () => {
+    const repository = new MemoryIntakeRepository();
+    let seenInput: AiTurnInput | undefined;
+    const replyGenerator: PublicWidgetAiReplyGenerator = {
+      async generateReply(input) {
+        seenInput = input;
+        expect(repository.leadCount).toBe(1);
+
+        return {
+          decision: "reply_candidate",
+          text: "Могу помочь с общими вариантами памятника. Какие детали важны?",
+          metadata: {
+            model_provider: "fake",
+            model_name: "boundary-test"
+          }
+        };
+      }
+    };
+    const app = track(
+      buildApi({
+        repository,
+        widgetAi: {
+          enabled: true,
+          replyGenerator
+        }
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/public/intake/site-widget/messages",
+      payload: validWidgetRequest({
+        idempotencyKey: "widget-ai-boundary-input-0001",
+        messageText: "Расскажите про варианты гранита"
+      })
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json().automation.status).toBe("replied");
+    expect(seenInput).toMatchObject({
+      channel: "site_widget",
+      replyCapability: "site_widget_sync_reply",
+      conversation: {
+        publicConversationId: repository.onlyLead().conversations[0]?.publicConversationId,
+        agentAllowedToReply: true,
+        aiState: "ai_collecting_info"
+      },
+      inboundMessage: {
+        publicMessageId: response.json().public_message_id,
+        text: "Расскажите про варианты гранита"
+      },
+      page: {
+        url: "https://granit.example/catalog/widget",
+        widgetInstanceId: "floating-widget-v1"
+      },
+      customer: {
+        name: "Widget Visitor",
+        phoneProvided: true
+      },
+      compactContext: {
+        messages: [
+          {
+            publicMessageId: response.json().public_message_id,
+            senderRole: "visitor",
+            text: "Расскажите про варианты гранита"
+          }
+        ]
+      }
+    });
+    expect(JSON.stringify(seenInput)).not.toContain("idempotency_key");
+    expect(JSON.stringify(seenInput)).not.toContain("schema_version");
+    expect(JSON.stringify(seenInput)).not.toContain("event_type");
+  });
+
+  it("replays a persisted AI reply without calling the generator again", async () => {
+    const repository = new MemoryIntakeRepository();
+    let generatorCalls = 0;
+    const replyGenerator: PublicWidgetAiReplyGenerator = {
+      async generateReply() {
+        generatorCalls += 1;
+
+        return {
+          decision: "reply_candidate",
+          text: "Могу помочь собрать детали заявки.",
+          metadata: {
+            model_provider: "fake",
+            model_name: "replay-test"
+          }
+        };
+      }
+    };
+    const app = track(
+      buildApi({
+        repository,
+        widgetAi: {
+          enabled: true,
+          replyGenerator
+        }
+      })
+    );
+    const payload = validWidgetRequest({ idempotencyKey: "widget-ai-replay-0001" });
+
+    const first = await app.inject({
+      method: "POST",
+      url: "/public/intake/site-widget/messages",
+      payload
+    });
+    const second = await app.inject({
+      method: "POST",
+      url: "/public/intake/site-widget/messages",
+      payload
+    });
+
+    expect(first.statusCode).toBe(202);
+    expect(second.statusCode).toBe(202);
+    expect(generatorCalls).toBe(1);
+    expect(second.json()).toMatchObject({
+      ok: true,
+      status: "replayed",
+      automation: {
+        status: "replied",
+        reply: {
+          public_message_id: first.json().automation.reply.public_message_id,
+          text: "Могу помочь собрать детали заявки."
+        }
+      }
+    });
+  });
+
+  it("fails closed when AI returns an invalid candidate", async () => {
+    const repository = new MemoryIntakeRepository();
+    const replyGenerator: PublicWidgetAiReplyGenerator = {
+      async generateReply() {
+        return {
+          decision: "reply_candidate",
+          text: { unsafe: true },
+          metadata: {}
+        };
+      }
+    };
+    const app = track(
+      buildApi({
+        repository,
+        widgetAi: {
+          enabled: true,
+          replyGenerator
+        }
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/public/intake/site-widget/messages",
+      payload: validWidgetRequest({ idempotencyKey: "widget-invalid-candidate-0001" })
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toMatchObject({
+      automation: {
+        status: "fallback",
+        next_step: "manager_review",
+        reason: "unsafe_model_response"
+      }
+    });
+    expect(response.json().automation.reply).toBeUndefined();
+    expect(repository.aiSaveCalls).toBe(0);
+  });
+
+  it("fails closed when a price or facts candidate lacks an approved source", async () => {
+    const repository = new MemoryIntakeRepository();
+    const replyGenerator: PublicWidgetAiReplyGenerator = {
+      async generateReply() {
+        return {
+          decision: "reply_candidate",
+          text: "Цена 10000 рублей.",
+          metadata: {
+            model_provider: "fake",
+            model_name: "missing-source-test"
+          },
+          evidence: {
+            businessFacts: [{ kind: "price" }]
+          }
+        };
+      }
+    };
+    const app = track(
+      buildApi({
+        repository,
+        widgetAi: {
+          enabled: true,
+          replyGenerator
+        }
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/public/intake/site-widget/messages",
+      payload: validWidgetRequest({
+        idempotencyKey: "widget-price-source-block-0001",
+        messageText: "Сколько стоит памятник?"
+      })
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toMatchObject({
+      automation: {
+        status: "fallback",
+        reason: "unsafe_model_response"
+      }
+    });
+    expect(response.json().automation.reply).toBeUndefined();
+    expect(repository.aiSaveCalls).toBe(0);
+  });
+
+  it("keeps the AI input fingerprint separate from outbound persistence idempotency", async () => {
+    const repository = new MemoryIntakeRepository();
+    const replyGenerator: PublicWidgetAiReplyGenerator = {
+      async generateReply() {
+        return {
+          decision: "reply_candidate",
+          text: "Могу помочь собрать детали заявки.",
+          metadata: {
+            model_provider: "fake",
+            model_name: "fingerprint-test"
+          }
+        };
+      }
+    };
+    const app = track(
+      buildApi({
+        repository,
+        widgetAi: {
+          enabled: true,
+          replyGenerator
+        }
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/public/intake/site-widget/messages",
+      payload: validWidgetRequest({ idempotencyKey: "widget-ai-fingerprint-0001" })
+    });
+
+    const aiSaveInput = repository.lastAiSaveInput;
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json().automation.status).toBe("replied");
+    expect(aiSaveInput).toBeDefined();
+    expect(aiSaveInput?.idempotencyKey).toBe(`ai:${response.json().public_message_id}`);
+    expect(typeof aiSaveInput?.metadata.ai_input_fingerprint).toBe("string");
+    expect(aiSaveInput?.metadata.ai_input_fingerprint).not.toBe(aiSaveInput?.requestFingerprint);
+    expect(aiSaveInput?.metadata.ai_input_fingerprint).not.toBe(aiSaveInput?.idempotencyKey);
   });
 
   it("does not expose an AI reply when AI persistence fails", async () => {

@@ -136,8 +136,11 @@ describe("ops-api modular monolith boundaries", () => {
       "modules/intake/ports/public-widget-ai-reply-generator.ts"
     );
     const widgetAiServiceSource = readSource("modules/ai/services/widget-ai-service.ts");
+    const aiModuleSource = readTree("modules/ai");
 
     expect(widgetAiReplyGeneratorSource).toContain("interface PublicWidgetAiReplyGenerator");
+    expect(widgetAiReplyGeneratorSource).toContain("AiTurnInput");
+    expect(widgetAiReplyGeneratorSource).not.toContain("SiteWidgetMessageRequest");
     expect(publicWidgetIntakeServiceSource).toContain(
       "../ports/public-widget-ai-reply-generator.js"
     );
@@ -147,6 +150,9 @@ describe("ops-api modular monolith boundaries", () => {
     expect(appContextSource).toContain("new WidgetAiService");
     expect(appContextSource).toContain("replyGenerator");
     expect(widgetAiServiceSource).toContain("implements PublicWidgetAiReplyGenerator");
+    expect(widgetAiServiceSource).not.toContain("SiteWidgetMessageRequest");
+    expect(aiModuleSource).not.toContain("@granit/contracts");
+    expect(aiModuleSource).not.toContain("SiteWidgetMessageRequest");
   });
 
   it("keeps Telegram inbound free of delivery provider sends", () => {
