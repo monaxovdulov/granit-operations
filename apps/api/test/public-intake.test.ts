@@ -837,6 +837,62 @@ describe("public site_widget intake", () => {
     });
   });
 
+  it("replays a persisted AI reply even when current AI config is disabled", async () => {
+    const repository = new MemoryIntakeRepository();
+    let generatorCalls = 0;
+    const replyGenerator: PublicWidgetAiReplyGenerator = {
+      async generateReply() {
+        generatorCalls += 1;
+
+        return {
+          decision: "reply_candidate",
+          text: "Могу помочь собрать детали заявки.",
+          metadata: {
+            model_provider: "fake",
+            model_name: "replay-disabled-test"
+          }
+        };
+      }
+    };
+    const enabledApp = track(
+      buildApi({
+        repository,
+        widgetAi: {
+          enabled: true,
+          replyGenerator
+        }
+      })
+    );
+    const payload = validWidgetRequest({ idempotencyKey: "widget-ai-replay-disabled-0001" });
+
+    const first = await enabledApp.inject({
+      method: "POST",
+      url: "/public/intake/site-widget/messages",
+      payload
+    });
+    const disabledApp = track(buildApi({ repository }));
+    const second = await disabledApp.inject({
+      method: "POST",
+      url: "/public/intake/site-widget/messages",
+      payload
+    });
+
+    expect(first.statusCode).toBe(202);
+    expect(second.statusCode).toBe(202);
+    expect(generatorCalls).toBe(1);
+    expect(second.json()).toMatchObject({
+      ok: true,
+      status: "replayed",
+      automation: {
+        status: "replied",
+        reply: {
+          public_message_id: first.json().automation.reply.public_message_id,
+          text: "Могу помочь собрать детали заявки."
+        }
+      }
+    });
+  });
+
   it("fails closed when AI returns an invalid candidate", async () => {
     const repository = new MemoryIntakeRepository();
     const replyGenerator: PublicWidgetAiReplyGenerator = {
@@ -908,6 +964,101 @@ describe("public site_widget intake", () => {
       url: "/public/intake/site-widget/messages",
       payload: validWidgetRequest({
         idempotencyKey: "widget-price-source-block-0001",
+        messageText: "Сколько стоит памятник?"
+      })
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toMatchObject({
+      automation: {
+        status: "fallback",
+        reason: "unsafe_model_response"
+      }
+    });
+    expect(response.json().automation.reply).toBeUndefined();
+    expect(repository.aiSaveCalls).toBe(0);
+  });
+
+  it("fails closed when a Stage A price candidate gives amount, range or from-X orientation", async () => {
+    const unsafePriceTexts = ["Цена 10000.", "Цена от 10000.", "Стоимость 10000-15000."];
+
+    for (const [index, text] of unsafePriceTexts.entries()) {
+      const repository = new MemoryIntakeRepository();
+      const replyGenerator: PublicWidgetAiReplyGenerator = {
+        async generateReply() {
+          return {
+            decision: "reply_candidate",
+            text,
+            metadata: {
+              model_provider: "fake",
+              model_name: "price-orientation-test"
+            }
+          };
+        }
+      };
+      const app = track(
+        buildApi({
+          repository,
+          widgetAi: {
+            enabled: true,
+            replyGenerator
+          }
+        })
+      );
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/public/intake/site-widget/messages",
+        payload: validWidgetRequest({
+          idempotencyKey: `widget-price-orientation-block-${String(index).padStart(4, "0")}`,
+          messageText: "Сколько стоит памятник?"
+        })
+      });
+
+      expect(response.statusCode).toBe(202);
+      expect(response.json()).toMatchObject({
+        automation: {
+          status: "fallback",
+          reason: "unsafe_model_response"
+        }
+      });
+      expect(response.json().automation.reply).toBeUndefined();
+      expect(repository.aiSaveCalls).toBe(0);
+    }
+  });
+
+  it("fails closed when a candidate self-authorizes a price source", async () => {
+    const repository = new MemoryIntakeRepository();
+    const replyGenerator: PublicWidgetAiReplyGenerator = {
+      async generateReply() {
+        return {
+          decision: "reply_candidate",
+          text: "Цена от 10000.",
+          metadata: {
+            model_provider: "fake",
+            model_name: "candidate-source-test"
+          },
+          evidence: {
+            businessFacts: [{ kind: "price", approvedSourceId: "candidate-price-list-v1" }]
+          }
+        };
+      }
+    };
+    const app = track(
+      buildApi({
+        repository,
+        widgetAi: {
+          enabled: true,
+          replyGenerator
+        }
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/public/intake/site-widget/messages",
+      payload: validWidgetRequest({
+        idempotencyKey: "widget-self-approved-price-block-0001",
         messageText: "Сколько стоит памятник?"
       })
     });

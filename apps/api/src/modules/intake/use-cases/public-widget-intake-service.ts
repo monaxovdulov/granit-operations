@@ -34,6 +34,10 @@ export type PublicWidgetIntakeServiceOptions = {
   };
 };
 
+// Stage A has no app-owned approved business fact or price sources yet.
+const STAGE_A_APPROVED_BUSINESS_FACT_SOURCE_IDS = new Set<string>();
+const STAGE_A_APPROVED_PRICE_SOURCE_IDS = new Set<string>();
+
 export class PublicWidgetIntakeService {
   constructor(
     private readonly repository: PublicIntakeRepository,
@@ -88,6 +92,16 @@ export class PublicWidgetIntakeService {
         requestFingerprint
       });
 
+      if (saved.aiReply) {
+        return aiReplySuccess(
+          saved.replayed,
+          saved.publicSessionId,
+          saved.publicMessageId,
+          saved.aiReply.publicMessageId,
+          saved.aiReply.body
+        );
+      }
+
       if (!this.options.ai?.enabled) {
         return disabledSuccess(saved.replayed, saved.publicSessionId, saved.publicMessageId);
       }
@@ -98,16 +112,6 @@ export class PublicWidgetIntakeService {
           saved.publicSessionId,
           saved.publicMessageId,
           "missing_openai_config"
-        );
-      }
-
-      if (saved.aiReply) {
-        return aiReplySuccess(
-          saved.replayed,
-          saved.publicSessionId,
-          saved.publicMessageId,
-          saved.aiReply.publicMessageId,
-          saved.aiReply.body
         );
       }
 
@@ -407,7 +411,7 @@ function validateAiReplyCandidate(value: unknown): ValidatedAiReplyCandidate {
 
   const evidence = isRecord(value.evidence) ? readCandidateEvidence(value.evidence) : undefined;
 
-  if (hasBusinessFactWithoutApprovedSource(evidence)) {
+  if (hasBusinessFactWithoutAppApprovedSource(evidence)) {
     return unavailable("unsafe_model_response");
   }
 
@@ -476,9 +480,11 @@ function readCandidateEvidence(value: Record<string, unknown>): AiReplyCandidate
   return { businessFacts };
 }
 
-function hasBusinessFactWithoutApprovedSource(evidence: AiReplyCandidateEvidence | undefined) {
+function hasBusinessFactWithoutAppApprovedSource(evidence: AiReplyCandidateEvidence | undefined) {
   return Boolean(
-    evidence?.businessFacts?.some((fact) => !fact.approvedSourceId || !fact.approvedSourceId.trim())
+    evidence?.businessFacts?.some(
+      (fact) => !isAppApprovedBusinessFactSource(fact.kind, fact.approvedSourceId)
+    )
   );
 }
 
@@ -488,7 +494,7 @@ function unsafeCandidateReplyReason(
 ): string | null {
   const normalized = text.toLocaleLowerCase("ru-RU");
 
-  if (/\d[\d\s]*(?:₽|руб|р\.)/i.test(normalized) && !hasApprovedPriceSource(evidence)) {
+  if (hasStageAPriceAmountOrOrientation(normalized) && !hasAppApprovedPriceSource(evidence)) {
     return "price_amount_without_approved_source";
   }
 
@@ -507,12 +513,40 @@ function unsafeCandidateReplyReason(
   return null;
 }
 
-function hasApprovedPriceSource(evidence: AiReplyCandidateEvidence | undefined) {
+function hasStageAPriceAmountOrOrientation(normalized: string) {
+  if (/\d[\d\s]*(?:₽|руб|р\.)/i.test(normalized)) {
+    return true;
+  }
+
+  if (!/(цен|стоим|стоить|стоит|прайс|бюджет|сумм)/i.test(normalized)) {
+    return false;
+  }
+
+  return /(?:^|\s)(?:от|примерно|ориентир(?:овочно)?|порядка|около|в районе)\s+\d[\d\s]*(?:тыс|тысяч)?|\d[\d\s]*(?:[-–—]|\s+до\s+)\d[\d\s]*(?:тыс|тысяч)?|(?:^|\s)\d[\d\s]{3,}(?:[.,!?]|\s|$)|(?:^|\s)\d+\s*(?:тыс|тысяч)/i.test(
+    normalized
+  );
+}
+
+function hasAppApprovedPriceSource(evidence: AiReplyCandidateEvidence | undefined) {
   return Boolean(
     evidence?.businessFacts?.some(
-      (fact) => fact.kind === "price" && fact.approvedSourceId && fact.approvedSourceId.trim()
+      (fact) =>
+        fact.kind === "price" && isAppApprovedBusinessFactSource(fact.kind, fact.approvedSourceId)
     )
   );
+}
+
+function isAppApprovedBusinessFactSource(
+  kind: "price" | "business_fact",
+  approvedSourceId: string | undefined
+) {
+  if (!approvedSourceId?.trim()) {
+    return false;
+  }
+
+  return kind === "price"
+    ? STAGE_A_APPROVED_PRICE_SOURCE_IDS.has(approvedSourceId.trim())
+    : STAGE_A_APPROVED_BUSINESS_FACT_SOURCE_IDS.has(approvedSourceId.trim());
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
