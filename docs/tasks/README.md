@@ -26,6 +26,7 @@ Current task records:
 - `TELEGRAM_MANAGER_REPLY_WORKER_SUPERVISED_SCHEDULER_RU.md` - systemd timer plus one-shot plus Postgres advisory lock for supervised manager reply delivery; staging smoke passed, not production approval.
 - `TELEGRAM_POST_SUPERVISED_SCHEDULER_NEXT_TASKS_RU.md` - ordered next task pack for supervised staging smoke, `uncertain` policy, notification sender, backup/rollback, release bundle, AI handoff policy and branch cleanup.
 - `TELEGRAM_SAFE_SENDER_NEXT_TASK_PACK_RU.md` - plain-language next-session task pack for audit, safe refactor, local manual smoke and staging smoke preparation after the local Telegram sender slice.
+- `STAGING_GO_LIVE_READINESS_RU.md` - explicit owner goal and ordered safety path for production-like staging enablement before notification sender, AI handoff expansion, Mastra or Telegram AI outbound.
 
 Required fields:
 

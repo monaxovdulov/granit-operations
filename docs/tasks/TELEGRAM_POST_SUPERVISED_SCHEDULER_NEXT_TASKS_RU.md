@@ -1,6 +1,6 @@
 # Task: TELEGRAM-POST-SUPERVISED-SCHEDULER-NEXT-TASKS - Следующие Telegram/production-readiness задачи
 
-Status: planned; task 1 accepted after supervised staging smoke; task 2 policy/runbook defined
+Status: planned; staging go-live order superseded by `STAGING_GO_LIVE_READINESS_RU`; task 1 accepted after supervised staging smoke; task 2 policy/runbook defined
 Created: 2026-05-22
 Repo: `granit-operations`
 Slice: Telegram operations after supervised scheduler merge
@@ -9,6 +9,16 @@ Owner/agent: owner decision + Codex implementation later
 ## Цель
 
 Зафиксировать следующий порядок работ после merge `TELEGRAM-MANAGER-REPLY-WORKER-SUPERVISED-SCHEDULER`, чтобы не смешать production-readiness, manager notification sender и будущую AI/handoff логику в один рискованный срез.
+
+Update 2026-05-29: явная цель следующего блока - боевое включение на staging. Актуальная очередность вынесена в `docs/tasks/STAGING_GO_LIVE_READINESS_RU.md`:
+
+1. Backup / restore proof для staging DB.
+2. Rollback после частичной Telegram delivery.
+3. Manual `uncertain` delivery runbook.
+4. Staging go-live readiness bundle.
+5. Supervised staging enablement.
+6. Manager notification sender отдельно.
+7. AI handoff policy отдельно.
 
 Главный принцип:
 
@@ -202,4 +212,4 @@ Acceptance:
 
 ## Next Action
 
-Before any production approval, apply the documented `uncertain` policy to existing rows if they appear, then continue only with separate production-readiness slices such as backup/restore/rollback evidence.
+Continue with `docs/tasks/STAGING_GO_LIVE_READINESS_RU.md`, task 1: backup / restore proof for staging DB. Do not start notification sender, AI handoff expansion, Mastra or Telegram AI outbound before the staging safety path is accepted.

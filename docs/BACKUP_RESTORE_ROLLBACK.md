@@ -1,8 +1,13 @@
 # Backup Restore Rollback
 
-Status: later slice
+Status: next required slice for staging go-live; later required again for production approval
 
-Backup, restore, and rollback are not implemented in S01, but production launch cannot happen without evidence.
+Backup, restore, and rollback are not implemented in S01, but staging go-live and production launch cannot happen without evidence.
+
+Current target:
+
+- first prove backup/restore/rollback for production-like staging enablement;
+- then reuse or harden the evidence for a later production release decision.
 
 Future coverage:
 
