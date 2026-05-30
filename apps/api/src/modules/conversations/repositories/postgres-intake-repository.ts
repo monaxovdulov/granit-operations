@@ -16,7 +16,10 @@ import {
 } from "@granit/db";
 import type { SiteFormIntakeRequest, SiteWidgetMessageRequest } from "@granit/contracts";
 
-import type { AiTurnInput } from "../../ai/ai-turn.js";
+import {
+  buildStageASiteWidgetAiTurnInput,
+  type AiTurnInput
+} from "../../ai/ai-turn.js";
 import {
   aiMessageSentTimelineEvent,
   conversationMessageReceivedTimelineEvent,
@@ -1287,19 +1290,12 @@ function buildSiteWidgetAiTurnInput(
     return undefined;
   }
 
-  return {
-    channel: "site_widget",
-    replyCapability: "site_widget_sync_reply",
-    conversation: {
-      publicConversationId: accepted.publicConversationId,
-      aiState: accepted.aiState,
-      agentAllowedToReply: accepted.agentAllowedToReply
-    },
-    inboundMessage: {
-      publicMessageId: accepted.publicMessageId,
-      submittedAt: input.message.submittedAt,
-      text: input.message.text
-    },
+  return buildStageASiteWidgetAiTurnInput({
+    publicConversationId: accepted.publicConversationId,
+    publicMessageId: accepted.publicMessageId,
+    requestFingerprint: input.requestFingerprint,
+    submittedAt: input.message.submittedAt,
+    text: input.message.text,
     page: {
       url: input.sourcePageUrl,
       widgetInstanceId: input.widgetInstanceId,
@@ -1317,16 +1313,11 @@ function buildSiteWidgetAiTurnInput(
       locale: readOptionalString(input.visitorContext, "locale"),
       timezone: readOptionalString(input.visitorContext, "timezone")
     },
-    compactContext: {
-      messages: [
-        {
-          publicMessageId: accepted.publicMessageId,
-          senderRole: "visitor",
-          text: input.message.text
-        }
-      ]
+    gate: {
+      aiState: accepted.aiState,
+      agentAllowedToReply: accepted.agentAllowedToReply
     }
-  };
+  });
 }
 
 function buildPersistedSiteWidgetAiTurnInput(input: {
@@ -1350,6 +1341,7 @@ function buildPersistedSiteWidgetAiTurnInput(input: {
   contactEmail: string | null;
   contactPreferred: string | null;
   contactCity: string | null;
+  requestFingerprint: string;
 }): AiTurnInput | undefined {
   const pageUrl = input.sourcePageUrl ?? input.conversationSourcePageUrl;
   const widgetInstanceId = input.widgetInstanceId ?? input.sessionWidgetInstanceId;
@@ -1363,19 +1355,12 @@ function buildPersistedSiteWidgetAiTurnInput(input: {
     return undefined;
   }
 
-  return {
-    channel: "site_widget",
-    replyCapability: "site_widget_sync_reply",
-    conversation: {
-      publicConversationId: input.publicConversationId,
-      aiState: toAiState(input.aiState),
-      agentAllowedToReply: input.agentAllowedToReply
-    },
-    inboundMessage: {
-      publicMessageId: input.publicMessageId,
-      submittedAt: input.submittedAt.toISOString(),
-      text: input.messageBody
-    },
+  return buildStageASiteWidgetAiTurnInput({
+    publicConversationId: input.publicConversationId,
+    publicMessageId: input.publicMessageId,
+    requestFingerprint: input.requestFingerprint,
+    submittedAt: input.submittedAt.toISOString(),
+    text: input.messageBody,
     page: {
       url: pageUrl,
       widgetInstanceId,
@@ -1393,16 +1378,11 @@ function buildPersistedSiteWidgetAiTurnInput(input: {
       locale: readOptionalString(input.visitorContext, "locale"),
       timezone: readOptionalString(input.visitorContext, "timezone")
     },
-    compactContext: {
-      messages: [
-        {
-          publicMessageId: input.publicMessageId,
-          senderRole: "visitor",
-          text: input.messageBody
-        }
-      ]
+    gate: {
+      aiState: toAiState(input.aiState),
+      agentAllowedToReply: input.agentAllowedToReply
     }
-  };
+  });
 }
 
 function normalizeAiPreferredContact(value: string | null | undefined) {

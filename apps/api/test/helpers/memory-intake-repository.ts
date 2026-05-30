@@ -5,7 +5,10 @@ import {
   SITE_WIDGET_MESSAGE_EVENT_TYPE
 } from "@granit/contracts";
 
-import type { AiTurnInput } from "../../src/modules/ai/ai-turn.js";
+import {
+  buildStageASiteWidgetAiTurnInput,
+  type AiTurnInput
+} from "../../src/modules/ai/ai-turn.js";
 import {
   AgentReplyBlockedError,
   IdempotencyConflictError,
@@ -1371,19 +1374,12 @@ function buildMemorySiteWidgetAiTurnInput(
     aiState: SaveAcceptedSiteWidgetMessageResult["aiState"];
   }
 ): AiTurnInput {
-  return {
-    channel: "site_widget",
-    replyCapability: "site_widget_sync_reply",
-    conversation: {
-      publicConversationId: accepted.publicConversationId,
-      aiState: accepted.aiState,
-      agentAllowedToReply: accepted.agentAllowedToReply
-    },
-    inboundMessage: {
-      publicMessageId: accepted.publicMessageId,
-      submittedAt: input.request.submitted_at,
-      text: input.request.message.text
-    },
+  return buildStageASiteWidgetAiTurnInput({
+    publicConversationId: accepted.publicConversationId,
+    publicMessageId: accepted.publicMessageId,
+    requestFingerprint: input.requestFingerprint,
+    submittedAt: input.request.submitted_at,
+    text: input.request.message.text,
     page: {
       url: input.request.source.page_url,
       widgetInstanceId: input.request.source.widget_instance_id,
@@ -1401,16 +1397,11 @@ function buildMemorySiteWidgetAiTurnInput(
       locale: input.request.visitor_context?.locale,
       timezone: input.request.visitor_context?.timezone
     },
-    compactContext: {
-      messages: [
-        {
-          publicMessageId: accepted.publicMessageId,
-          senderRole: "visitor",
-          text: input.request.message.text
-        }
-      ]
+    gate: {
+      aiState: accepted.aiState,
+      agentAllowedToReply: accepted.agentAllowedToReply
     }
-  };
+  });
 }
 
 function toManagerTelegramLead(

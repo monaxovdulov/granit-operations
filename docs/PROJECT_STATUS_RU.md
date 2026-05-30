@@ -1,6 +1,6 @@
 # granit-operations - Статус Репозитория
 
-Обновлено: 2026-05-22T18:18:00Z
+Обновлено: 2026-05-29T19:00:00Z
 
 Этот репозиторий отвечает за рабочую систему бизнеса: intake API, Postgres operational state, manager backend/panel, AI workflows, Telegram delivery, future observability/evals.
 
@@ -18,6 +18,7 @@
 6. Telegram outbound delivery sender accepted after controlled staging smoke for manager-authored replies.
 7. Telegram manager reply worker accepted after local checks and controlled staging worker smoke.
 8. Telegram supervised scheduler passed staging smoke as `systemctl --user` timer + one-shot + Postgres advisory lock: migration applied, lock busy/uncertain/stop/restart/no-resend checked.
+9. AI dialog boundary Stage A implemented locally: website widget AI now receives a versioned neutral `AiTurnInput` with app-owned gate/evidence fields after inbound persistence; Mastra, Telegram AI outbound and production AI remain blocked.
 
 Что это означает: путь "менеджер написал ответ -> Postgres delivery state -> Telegram sendMessage -> sent/retrying/failed/blocked status" проверен для manager-authored replies. Это не approval для Telegram AI outbound и не production approval.
 
@@ -38,7 +39,7 @@
 
 1. Не включать Telegram AI outbound. Текущий scheduler проверяет только ответы менеджера.
 2. Не включать `manager_notification_outbox` sender внутри этого решения; это отдельный scope.
-3. Следующий AI-engineering шаг должен идти через planning task `AI-DIALOG-RISK-REDUCTION-TARGET-ARCHITECTURE`: neutral `AiTurnInput`, compact conversation context, cohesive AI modules, manager-visible degradation/handoff and review/eval linkage.
+3. AI dialog boundary Stage A local implementation passed. Следующий AI-engineering шаг должен быть отдельным P1 slice for app-owned review/eval/degradation linkage or approved AI asset import; Mastra runtime and Telegram AI outbound remain blocked.
 4. Production остается заблокирован до G01-G17, backup/restore, rollback evidence, monitoring/watch policy and explicit owner sign-off.
 
 ## Блокеры
@@ -66,3 +67,5 @@
 - Supervised scheduler runbook: `docs/runbooks/TELEGRAM_MANAGER_REPLY_SUPERVISED_SCHEDULER_RU.md`
 - Planning project status: `../../granit-plan-app/docs/PROJECT_STATUS_RU.md`
 - Planning task board: `../../granit-plan-app/docs/TASK_BOARD_RU.md`
+- AI boundary Stage A task: `docs/tasks/AI_DIALOG_BOUNDARY_STAGE_A_RU.md`
+- AI boundary Stage A evidence: `docs/release/evidence/AI_DIALOG_BOUNDARY_STAGE_A_RU.md`

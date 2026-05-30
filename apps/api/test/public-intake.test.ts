@@ -11,7 +11,7 @@ import {
 } from "@granit/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 
-import type { AiTurnInput } from "../src/modules/ai/ai-turn.js";
+import { AI_TURN_INPUT_VERSION, type AiTurnInput } from "../src/modules/ai/ai-turn.js";
 import { WIDGET_AI_POLICY_VERSION } from "../src/modules/ai/policy/widget-ai-policy.js";
 import { WIDGET_AI_PROMPT_VERSION } from "../src/modules/ai/prompts/widget-ai-prompt.js";
 import { buildApi } from "../src/app.js";
@@ -750,15 +750,27 @@ describe("public site_widget intake", () => {
     expect(response.statusCode).toBe(202);
     expect(response.json().automation.status).toBe("replied");
     expect(seenInput).toMatchObject({
+      version: AI_TURN_INPUT_VERSION,
       channel: "site_widget",
       replyCapability: "site_widget_sync_reply",
+      turn: {
+        idempotencyKey: `ai-turn:${response.json().public_message_id}`,
+        startedAt: "2026-05-13T10:00:00.000Z",
+        inputFingerprint: expect.stringMatching(/^[0-9a-f]{64}$/)
+      },
       conversation: {
         publicConversationId: repository.onlyLead().conversations[0]?.publicConversationId,
         agentAllowedToReply: true,
         aiState: "ai_collecting_info"
       },
+      gateSnapshot: {
+        agentAllowedToReply: true,
+        aiState: "ai_collecting_info",
+        capturedAt: "2026-05-13T10:00:00.000Z"
+      },
       inboundMessage: {
         publicMessageId: response.json().public_message_id,
+        contentType: "text",
         text: "Расскажите про варианты гранита"
       },
       page: {
@@ -773,12 +785,39 @@ describe("public site_widget intake", () => {
         messages: [
           {
             publicMessageId: response.json().public_message_id,
+            direction: "inbound",
             senderRole: "visitor",
+            contentType: "text",
+            submittedAt: "2026-05-13T10:00:00.000Z",
             text: "Расскажите про варианты гранита"
           }
         ]
+      },
+      knownSlots: {
+        customerNameProvided: true,
+        phoneProvided: true,
+        emailProvided: false,
+        preferredContact: "phone"
+      },
+      boundaryConfig: {
+        replyCapableChannel: "site_widget",
+        maxClarifyingQuestions: 1,
+        priceOrientationAllowed: false,
+        telegramAiOutboundAllowed: false
+      },
+      approvedSources: {
+        price: null,
+        businessFacts: []
+      },
+      evidence: {
+        boundary: "stage_a_neutral_ai_turn",
+        source: "accept_inbound_message"
       }
     });
+    expect(seenInput?.turn.acceptedRequestFingerprint).toMatch(/^[0-9a-f]{64}$/);
+    expect(seenInput?.evidence.acceptedRequestFingerprint).toBe(
+      seenInput?.turn.acceptedRequestFingerprint
+    );
     expect(JSON.stringify(seenInput)).not.toContain("idempotency_key");
     expect(JSON.stringify(seenInput)).not.toContain("schema_version");
     expect(JSON.stringify(seenInput)).not.toContain("event_type");

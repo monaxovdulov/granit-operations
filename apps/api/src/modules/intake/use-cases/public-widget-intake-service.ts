@@ -145,7 +145,16 @@ export class PublicWidgetIntakeService {
       }
 
       const aiInputFingerprint = sha256Hex(stableStringify(aiTurnInput));
-      const aiReply = validateAiReplyCandidate(await aiReplyGenerator.generateReply(aiTurnInput));
+      const aiTurnInputWithFingerprint: AiTurnInput = {
+        ...aiTurnInput,
+        turn: {
+          ...aiTurnInput.turn,
+          inputFingerprint: aiInputFingerprint
+        }
+      };
+      const aiReply = validateAiReplyCandidate(
+        await aiReplyGenerator.generateReply(aiTurnInputWithFingerprint)
+      );
 
       if (aiReply.status === "unavailable") {
         return fallbackSuccess(
@@ -174,7 +183,7 @@ export class PublicWidgetIntakeService {
           idempotencyKey: `ai:${saved.publicMessageId}`,
           requestFingerprint: outboundFingerprint,
           body: aiReply.text,
-          sourcePageUrl: aiTurnInput.page.url,
+          sourcePageUrl: aiTurnInputWithFingerprint.page.url,
           agentAllowedToReplyAfterSend: aiReply.agentAllowedToReplyAfterSend,
           metadata: {
             ...aiReply.metadata,

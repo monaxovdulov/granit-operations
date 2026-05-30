@@ -1,16 +1,40 @@
+export const AI_TURN_INPUT_VERSION = "granit_ai_turn_input.stage_a.v1";
+
 export type AiReplyCapableChannel = "site_widget";
 
+export type AiTurnAiState =
+  | "ai_collecting_info"
+  | "needs_manager"
+  | "manager_active"
+  | "watching"
+  | "closed";
+
+export type AiTurnPreferredContact = "phone" | "whatsapp" | "telegram" | "email";
+
 export type AiTurnInput = {
+  version: typeof AI_TURN_INPUT_VERSION;
   channel: AiReplyCapableChannel;
   replyCapability: "site_widget_sync_reply";
+  turn: {
+    idempotencyKey: string;
+    acceptedRequestFingerprint: string;
+    startedAt: string;
+    inputFingerprint?: string;
+  };
   conversation: {
     publicConversationId: string;
-    aiState: "ai_collecting_info" | "needs_manager" | "manager_active" | "watching" | "closed";
+    aiState: AiTurnAiState;
     agentAllowedToReply: boolean;
+  };
+  gateSnapshot: {
+    aiState: AiTurnAiState;
+    agentAllowedToReply: boolean;
+    capturedAt: string;
   };
   inboundMessage: {
     publicMessageId: string;
     submittedAt: string;
+    contentType: "text";
     text: string;
   };
   page: {
@@ -23,7 +47,7 @@ export type AiTurnInput = {
     name?: string;
     phoneProvided: boolean;
     emailProvided: boolean;
-    preferredContact?: "phone" | "whatsapp" | "telegram" | "email";
+    preferredContact?: AiTurnPreferredContact;
     city?: string;
   };
   visitor: {
@@ -33,9 +57,34 @@ export type AiTurnInput = {
   compactContext: {
     messages: Array<{
       publicMessageId: string;
+      direction: "inbound";
       senderRole: "visitor";
+      contentType: "text";
+      submittedAt: string;
       text: string;
     }>;
+  };
+  knownSlots: {
+    customerNameProvided: boolean;
+    phoneProvided: boolean;
+    emailProvided: boolean;
+    preferredContact?: AiTurnPreferredContact;
+    city?: string;
+  };
+  boundaryConfig: {
+    replyCapableChannel: AiReplyCapableChannel;
+    maxClarifyingQuestions: 1;
+    priceOrientationAllowed: false;
+    telegramAiOutboundAllowed: false;
+  };
+  approvedSources: {
+    price: null;
+    businessFacts: [];
+  };
+  evidence: {
+    acceptedRequestFingerprint: string;
+    boundary: "stage_a_neutral_ai_turn";
+    source: "accept_inbound_message";
   };
 };
 
@@ -65,3 +114,114 @@ export type AiReplyCandidateDecision =
       reason: AiUnavailableReason;
       metadata: Record<string, unknown>;
     };
+
+export type AiTurnDecision = AiReplyCandidateDecision;
+
+export type AiTurnResult =
+  | {
+      status: "persisted";
+      publicMessageId: string;
+      evidence: Record<string, unknown>;
+    }
+  | {
+      status: "blocked" | "handed_off" | "fallback_unavailable";
+      reason: string;
+      evidence: Record<string, unknown>;
+    };
+
+export type BuildStageASiteWidgetAiTurnInput = {
+  publicConversationId: string;
+  publicMessageId: string;
+  requestFingerprint: string;
+  submittedAt: string;
+  text: string;
+  page: {
+    url: string;
+    widgetInstanceId: string;
+    referrerUrl?: string;
+    title?: string;
+  };
+  customer: {
+    name?: string;
+    phoneProvided: boolean;
+    emailProvided: boolean;
+    preferredContact?: AiTurnPreferredContact;
+    city?: string;
+  };
+  visitor: {
+    locale?: string;
+    timezone?: string;
+  };
+  gate: {
+    aiState: AiTurnAiState;
+    agentAllowedToReply: boolean;
+  };
+};
+
+export function buildStageASiteWidgetAiTurnInput(
+  input: BuildStageASiteWidgetAiTurnInput
+): AiTurnInput {
+  return {
+    version: AI_TURN_INPUT_VERSION,
+    channel: "site_widget",
+    replyCapability: "site_widget_sync_reply",
+    turn: {
+      idempotencyKey: `ai-turn:${input.publicMessageId}`,
+      acceptedRequestFingerprint: input.requestFingerprint,
+      startedAt: input.submittedAt
+    },
+    conversation: {
+      publicConversationId: input.publicConversationId,
+      aiState: input.gate.aiState,
+      agentAllowedToReply: input.gate.agentAllowedToReply
+    },
+    gateSnapshot: {
+      aiState: input.gate.aiState,
+      agentAllowedToReply: input.gate.agentAllowedToReply,
+      capturedAt: input.submittedAt
+    },
+    inboundMessage: {
+      publicMessageId: input.publicMessageId,
+      submittedAt: input.submittedAt,
+      contentType: "text",
+      text: input.text
+    },
+    page: input.page,
+    customer: input.customer,
+    visitor: input.visitor,
+    compactContext: {
+      messages: [
+        {
+          publicMessageId: input.publicMessageId,
+          direction: "inbound",
+          senderRole: "visitor",
+          contentType: "text",
+          submittedAt: input.submittedAt,
+          text: input.text
+        }
+      ]
+    },
+    knownSlots: {
+      customerNameProvided: Boolean(input.customer.name),
+      phoneProvided: input.customer.phoneProvided,
+      emailProvided: input.customer.emailProvided,
+      preferredContact: input.customer.preferredContact,
+      city: input.customer.city
+    },
+    boundaryConfig: {
+      replyCapableChannel: "site_widget",
+      maxClarifyingQuestions: 1,
+      priceOrientationAllowed: false,
+      telegramAiOutboundAllowed: false
+    },
+    approvedSources: {
+      price: null,
+      businessFacts: []
+    },
+    evidence: {
+      acceptedRequestFingerprint: input.requestFingerprint,
+      boundary: "stage_a_neutral_ai_turn",
+      source: "accept_inbound_message"
+    }
+  };
+}

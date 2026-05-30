@@ -17,6 +17,7 @@ Current task records:
 - `S03_MIN_LIFECYCLE_RU.md` - minimal manager statuses and status-change history before widget persistence.
 - `S04_WIDGET_PERSISTENCE_RU.md` - website widget message persistence before AI replies.
 - `SERIOUS_AI_LAYER_RU.md` - preparation plan for the serious backend AI layer after S05 website safe AI.
+- `AI_DIALOG_BOUNDARY_STAGE_A_RU.md` - local Stage A implementation of the neutral AI turn boundary before Mastra runtime, Telegram AI outbound or production AI approval.
 - `MODULAR_MONOLITH_REFACTOR_RU.md` - planned refactor to make `ops-api` a clearer modular monolith without changing runtime topology, public contracts, DB schema or production state.
 - `OPS_API_THICK_MODULE_REFACTOR_NEXT_TASKS_RU.md` - ordered next refactor slices after the thick-module audit, with mandatory explicit ADRs for boundary-changing work.
 - `P0_CHANNEL_NEUTRAL_CONVERSATION_FOUNDATION_RU.md` - implementation handoff for channel-neutral widget/Telegram conversation foundation before Telegram adapter and production.
