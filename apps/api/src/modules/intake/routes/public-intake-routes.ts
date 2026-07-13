@@ -16,13 +16,13 @@ export function registerPublicIntakeRoutes(
   app: FastifyInstance,
   useCases: PublicIntakeRouteUseCases
 ) {
-  app.post("/public/intake/site-form", async (request, reply) => {
+  app.post("/site-form", async (request, reply) => {
     const result = await useCases.siteForm.acceptSiteFormSubmission(request.body);
 
     return reply.code(result.statusCode).send(result.body);
   });
 
-  app.post("/public/intake/site-widget/messages", async (request, reply) => {
+  app.post("/site-widget/messages", async (request, reply) => {
     const result = await useCases.siteWidget.acceptSiteWidgetMessage(request.body);
 
     return reply.code(result.statusCode).send(result.body);

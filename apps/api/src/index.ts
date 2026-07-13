@@ -24,6 +24,7 @@ const widgetAi = await buildConfiguredWidgetAiAssembly({
 const app = buildApi({
   repository,
   logger: true,
+  publicIntakeCors: config.publicIntakeCors,
   widgetAi,
   telegramBot: config.telegramBot,
   managerAuth: config.managerAuth
