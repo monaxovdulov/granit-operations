@@ -1,3 +1,4 @@
+import cors from "@fastify/cors";
 import Fastify from "fastify";
 
 import { buildAppContext, type WidgetAiAssemblyOptions } from "./app-context.js";
@@ -15,6 +16,9 @@ import type { TelegramBotServiceOptions } from "./modules/telegram/inbound/teleg
 
 export type BuildApiOptions = {
   repository: IntakeRepository;
+  publicIntakeCors?: {
+    allowedOrigins: string[];
+  };
   widgetAi?: WidgetAiAssemblyOptions;
   managerAuth?: ManagerAuthOptions;
   managerShell?: ManagerShellOptions;
@@ -38,7 +42,19 @@ export function buildApi(options: BuildApiOptions) {
     service: "granit-operations-api"
   }));
 
-  registerPublicIntakeRoutes(app, context.publicIntake);
+  app.register(
+    async (publicIntakeApp) => {
+      await publicIntakeApp.register(cors, {
+        origin: options.publicIntakeCors?.allowedOrigins ?? [],
+        methods: ["POST", "OPTIONS"],
+        allowedHeaders: ["Content-Type", "Accept"],
+        credentials: false,
+        strictPreflight: true
+      });
+      registerPublicIntakeRoutes(publicIntakeApp, context.publicIntake);
+    },
+    { prefix: "/public/intake" }
+  );
   registerManagerAuthRoutes(app, context.managerAuth, context.managerTelegram);
   registerManagerShellRoutes(app, options.managerShell);
   registerManagerRoutes(app, context.managerLeads, context.managerAuth);

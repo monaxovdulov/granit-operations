@@ -23,6 +23,7 @@ const widgetAiProvider = config.widgetAi.openAiApiKey
 const app = buildApi({
   repository,
   logger: true,
+  publicIntakeCors: config.publicIntakeCors,
   widgetAi: {
     enabled: config.widgetAi.enabled,
     provider: widgetAiProvider,

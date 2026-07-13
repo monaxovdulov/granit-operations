@@ -4,6 +4,9 @@ export type ApiConfig = {
   host: string;
   port: number;
   databaseUrl: string;
+  publicIntakeCors: {
+    allowedOrigins: string[];
+  };
   widgetAi: {
     enabled: boolean;
     openAiApiKey?: string;
@@ -47,6 +50,9 @@ export function loadConfig(env: NodeJS.ProcessEnv): ApiConfig {
     host: env.HOST ?? "0.0.0.0",
     port: Number.parseInt(env.PORT ?? "3001", 10),
     databaseUrl,
+    publicIntakeCors: {
+      allowedOrigins: parsePublicIntakeAllowedOrigins(env.PUBLIC_INTAKE_ALLOWED_ORIGINS)
+    },
     widgetAi: {
       enabled: env.AI_WIDGET_ENABLED === "true",
       openAiApiKey: env.OPENAI_API_KEY,
@@ -93,6 +99,42 @@ export function loadConfig(env: NodeJS.ProcessEnv): ApiConfig {
     },
     managerAuth: loadManagerAuthConfig(env)
   };
+}
+
+export function parsePublicIntakeAllowedOrigins(value: string | undefined): string[] {
+  if (!value?.trim()) {
+    return [];
+  }
+
+  const origins = new Set<string>();
+
+  for (const rawEntry of value.split(",")) {
+    const entry = rawEntry.trim();
+
+    if (!entry || entry === "*") {
+      throw new Error("PUBLIC_INTAKE_ALLOWED_ORIGINS must contain exact HTTP(S) origins");
+    }
+
+    let url: URL;
+
+    try {
+      url = new URL(entry);
+    } catch {
+      throw new Error("PUBLIC_INTAKE_ALLOWED_ORIGINS must contain exact HTTP(S) origins");
+    }
+
+    const isHttpOrigin = url.protocol === "http:" || url.protocol === "https:";
+    const isOriginOnly =
+      !url.username && !url.password && url.pathname === "/" && !url.search && !url.hash;
+
+    if (!isHttpOrigin || !isOriginOnly) {
+      throw new Error("PUBLIC_INTAKE_ALLOWED_ORIGINS must contain exact HTTP(S) origins");
+    }
+
+    origins.add(url.origin);
+  }
+
+  return [...origins];
 }
 
 function parseIntegerEnv(
