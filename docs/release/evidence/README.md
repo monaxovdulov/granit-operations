@@ -43,6 +43,10 @@ Current evidence records:
 - `AI_DIALOG_BOUNDARY_STAGE_A_RU.md` - neutral AI turn boundary implementation evidence before Mastra runtime, Telegram AI outbound or production AI approval.
 - `AI_DIALOG_APP_TURN_BOUNDARY_P1_RU.md` - G1/P1 evidence for bounded causal history,
   app-only persistence identity, structural legacy orchestration and frozen direct S05 checks.
+- `AI_DIALOG_LIVE_V2_CORE_P1Q_RU.md` - local evidence for the disabled provider-neutral P1Q core
+  at `78c9947`; this records `core_local_checks_passed`, not G1Q sign-off, deployment or runtime
+  enablement. G1Q/P2 remain pending explicit owner approval of all 15 facts rows, production
+  `facts.v1.ts` and repeated checks.
 - `P0_CHANNEL_NEUTRAL_CONVERSATION_FOUNDATION_RU.md` - channel-neutral widget/Telegram-ready conversation foundation evidence.
 - `TELEGRAM_INBOUND_MANAGER_MINI_PANEL_RU.md` - Telegram inbound webhook, manager binding, takeover/reply mini-panel, and no-direct-send evidence.
 - `TELEGRAM_OUTBOUND_DELIVERY_SENDER_RU.md` - Telegram delivery sender path, retry/failure status and manager-visible delivery evidence.

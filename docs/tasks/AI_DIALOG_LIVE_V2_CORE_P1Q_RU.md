@@ -1,6 +1,6 @@
 # Task: AI-DIALOG-P1Q — provider-neutral live_v2 dialog core
 
-Status: in_progress
+Status: core_local_checks_passed; G1Q pending owner facts approval; not deployed
 Created: 2026-07-14
 Repo: `granit-operations`
 Slice: P1Q / G1Q
@@ -54,15 +54,31 @@ fail-closed валидирует кандидат и детерминирова�
 7. P1Q доказывает только обработку заранее заданных кандидатов. Понимание моделью отрицания,
    mixed intent и естественность ответа проверяются только authenticated fixed corpus в M3.
 
-## Предлагаемая структура
+## Реализованная структура
 
-- `live-v2-contract.ts` — версии, строгие provider-neutral types и controlled enums.
-- `live-v2-context.ts` — безопасная проекция `AiTurnInput`.
-- `live-v2-assets.ts` — schema-validated prompt/tone descriptors и owner-reviewed facts snapshot.
-- `live-v2-validator.ts` — strict candidate validation и hard-safety checks.
-- `live-v2-apply.ts` — deterministic state/send plan.
-- `live-v2-profile.ts` — provider port и orchestration composition без runtime wiring.
-- `apps/api/test/live-v2-*.test.ts` — focused и synthetic fixture checks.
+Локальное provider-neutral ядро зафиксировано коммитом `78c9947`. Оно не подключено к runtime и
+не развёрнуто.
+
+- `apps/api/src/modules/ai/profiles/live-v2/live-v2-contract.ts` — версии, строгие типы и
+  controlled enums.
+- `apps/api/src/modules/ai/profiles/live-v2/live-v2-context.ts` — ограниченная model-safe
+  проекция `AiTurnInput`.
+- `apps/api/src/modules/ai/profiles/live-v2/live-v2-assets.ts` — строгая проверка facts schema,
+  test-only registry, approval-window и customer-safe model projection.
+- `apps/api/src/modules/ai/profiles/live-v2/assets/prompt.v1.ts` и `tone.v1.ts` — версионированные
+  prompt/tone assets.
+- `apps/api/src/modules/ai/profiles/live-v2/live-v2-validator.ts` — строгая candidate validation,
+  evidence allowlist и hard-safety checks.
+- `apps/api/src/modules/ai/profiles/live-v2/live-v2-apply-plan.ts` — детерминированный план
+  persistence/send/state transition.
+- `apps/api/src/modules/ai/profiles/live-v2/live-v2-orchestrator.ts` — provider-neutral
+  orchestration, fail-closed context/generator handling и свежая gate-проверка перед apply.
+- `apps/api/src/modules/ai/profiles/live-v2/live-v2-profile.ts` — статически disabled профиль без
+  runtime provider.
+- `apps/api/test/fixtures/live-v2-synthetic.v1.ts` — test-only facts fixture и фиксированный
+  synthetic corpus.
+- `apps/api/test/live-v2-{context,assets,validator,apply-plan,synthetic-fixtures}.test.ts` — пять
+  focused test-файлов.
 
 ## Out Of Scope
 
@@ -76,23 +92,59 @@ fail-closed валидирует кандидат и детерминирова�
 ## Files Touched
 
 - `docs/tasks/AI_DIALOG_LIVE_V2_CORE_P1Q_RU.md`
+- `docs/tasks/AI_DIALOG_LIVE_V2_FACTS_P1Q_REVIEW_RU.md`
 - `docs/tasks/README.md`
-- После design gate: новый subtree `apps/api/src/modules/ai/profiles/live-v2/`
-- После design gate: focused tests `apps/api/test/live-v2-*.test.ts`
-- После прохождения G1Q: `docs/release/evidence/AI_DIALOG_LIVE_V2_CORE_P1Q_RU.md`
+- Новый subtree `apps/api/src/modules/ai/profiles/live-v2/`, включая `assets/prompt.v1.ts` и
+  `assets/tone.v1.ts`; production `facts.v1.ts` пока отсутствует.
+- `apps/api/test/fixtures/live-v2-synthetic.v1.ts`
+- Пять focused test-файлов `apps/api/test/live-v2-*.test.ts`.
+- Локальный evidence `docs/release/evidence/AI_DIALOG_LIVE_V2_CORE_P1Q_RU.md`; он фиксирует
+  прошедший core, но не является G1Q sign-off.
 
 ## Checks Run
 
-Все Node-проверки запускаются последовательно, с `NODE_OPTIONS=--max-old-space-size=512`;
-Vitest дополнительно с `--maxWorkers=1 --minWorkers=1`.
+Все Node-проверки были запущены последовательно, с
+`NODE_OPTIONS=--max-old-space-size=512`; Vitest дополнительно с
+`--maxWorkers=1 --minWorkers=1`, чтобы не перегружать сервер по памяти.
 
 | Command/check | Result | Notes |
 |---|---|---|
-| AST impact search по `AiTurn*` и legacy profile | passed | Изменения изолируются от direct runtime |
-| Focused P1Q tests | pending | После реализации |
-| Frozen direct golden tests | pending | Обязательный regression gate |
-| Full API/unit suite | pending | Только после focused green, один worker |
-| Build/typecheck | pending | Последовательно, heap 512 МБ |
+| Focused P1Q tests | passed: 5 files / 108 tests | Context, assets, validator, apply/orchestration и ровно 18 synthetic cases |
+| Frozen legacy/direct golden tests | passed: 3 files / 9 tests | Активный `legacy_s05` не переключён |
+| Full API/unit suite | passed: 17 files / 207 tests | Один Vitest worker |
+| Typecheck | passed | Heap limit 512 МБ |
+| Build | passed | Последовательно после тестов, heap limit 512 МБ |
+| Frozen direct diff/impact check | passed | Нет runtime wiring, provider dependency или изменения frozen direct файлов |
+
+## Independent Review Follow-up
+
+После независимой проверки в том же локальном slice закрыты следующие замечания:
+
+- gate проверяется до построения контекста/генерации и повторно читается после валидного
+  candidate непосредственно перед apply; takeover во время генерации и ошибка gate reader
+  завершаются fail-closed без отправки;
+- невалидный или слишком большой контекст даёт controlled `context_invalid`, не вызывает
+  generator и не читает post-generation gate;
+- facts registry отклоняет некалендарные даты, ещё не вступившие в силу и просроченные факты;
+- hard-safety расширен на вариативные формулировки цены, срока, наличия, скидки, оплаты,
+  договора, гарантии, юридических правил, неподтверждённых свойств и размеров;
+- test naming больше не утверждает, что синтаксическая source metadata сама доказывает
+  содержимое внешнего CMS source.
+
+## Ограничения локального доказательства
+
+- `managerRequest` и `mixedIntent` — структурные входные сигналы. P1Q проверяет их обработку,
+  но не доказывает, что будущая модель правильно поняла отрицание или смешанный intent.
+- `usedFactIds` доказывает только уникальные allowlisted ID. P1Q не доказывает семантическое
+  соответствие свободного текста выбранному факту; это остаётся частью M3 fixed corpus и
+  owner-reviewed wording.
+- В known slots входят только app-owned controlled city и contact-presence flags без contact
+  values. Domain slots не извлекаются моделью и не считаются подтверждёнными.
+- Source commit/path/line/blob SHA валидируются как строгая metadata. Содержимое CMS проверяется
+  отдельным owner review; runtime не читает CMS и не выполняет cross-repo verification.
+- Естественность, semantic classification и качество реального model output этим slice не
+  доказаны. Первый реальный `live_v2` вызов остаётся только M3 через Mastra и server-side
+  `OPENAI_API_KEY`.
 
 ## Evidence Links
 
@@ -100,15 +152,21 @@ Vitest дополнительно с `--maxWorkers=1 --minWorkers=1`.
 - `docs/tasks/AI_DIALOG_LIVE_V2_FACTS_P1Q_REVIEW_RU.md` — точный facts proposal; pending owner
   approval, не runtime snapshot.
 - `docs/release/evidence/AI_DIALOG_APP_TURN_BOUNDARY_P1_RU.md`
-- Планируемый evidence: `docs/release/evidence/AI_DIALOG_LIVE_V2_CORE_P1Q_RU.md`
+- Local core evidence, не G1Q sign-off:
+  `docs/release/evidence/AI_DIALOG_LIVE_V2_CORE_P1Q_RU.md`
 
 ## Blockers
 
-- Для runtime-approved facts snapshot нужна явная owner-проверка точной нормализованной таблицы
-  с source path/line, content hash, allowed wording, forbidden extrapolation, source version,
-  `valid from` и `review by`. До неё facts proposal не считается approved.
+- G1Q остаётся pending: для runtime-approved facts snapshot нужна явная owner-проверка всех 15
+  строк точной нормализованной таблицы с source path/line, content hash, allowed wording,
+  forbidden extrapolation, source version, `valid from` и `review by`.
+- `core_local_checks_passed` не означает deploy, staging readiness или runtime enablement.
+- До owner decision нет production `facts.v1.ts`, P2 не начинается.
 
 ## Next Action
 
-Извлечь минимальный facts proposal из закреплённого CMS source SHA, затем реализовать strict
-contract/context/validator/apply и fixed synthetic fixtures без runtime wiring.
+Получить явное решение владельца по всем 15 строкам
+`AI_DIALOG_LIVE_V2_FACTS_P1Q_REVIEW_RU.md`: принять таблицу целиком либо перечислить ID для
+изменения/исключения. После принятия создать production `facts.v1.ts`, повторить focused,
+frozen legacy, full suite, typecheck, build и diff checks, затем оформить G1Q evidence. Только
+после G1Q переходить к P2.
