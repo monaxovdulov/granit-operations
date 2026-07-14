@@ -1,9 +1,12 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import type { SiteWidgetMessageRequest } from "@granit/contracts";
 
 import {
   AI_TURN_CONTEXT_MAX_CHARACTERS,
+  AI_TURN_CONTEXT_CURSOR_VERSION,
   AI_TURN_CONTEXT_MAX_MESSAGES,
   buildBoundedAiTurnContext,
   type AiTurnContextMessage
@@ -11,6 +14,22 @@ import {
 import { MemoryIntakeRepository } from "./helpers/memory-intake-repository.js";
 
 describe("bounded AI turn context", () => {
+  it("keeps the Postgres replay cursor causal instead of ordering equal timestamps by random UUID", () => {
+    const source = readFileSync(
+      new URL(
+        "../src/modules/conversations/repositories/postgres-intake-repository.ts",
+        import.meta.url
+      ),
+      "utf8"
+    );
+
+    expect(AI_TURN_CONTEXT_CURSOR_VERSION).toBe("conversation_updated_at.v1");
+    expect(source).toContain("updatedAt: nextConversationMessageTimestamp()");
+    expect(source).toContain("MAX(${conversationMessages.createdAt})");
+    expect(source).toContain("lt(conversationMessages.createdAt, anchor.createdAt)");
+    expect(source).not.toContain("lt(conversationMessages.id, anchor.id)");
+  });
+
   it("keeps the current inbound exactly once and returns the newest bounded window oldest-first", () => {
     const current = inboundMessage("current", "current text", "2026-07-14T10:04:00.000Z");
     const messages = buildBoundedAiTurnContext({

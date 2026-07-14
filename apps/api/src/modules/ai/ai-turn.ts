@@ -1,5 +1,6 @@
 export const AI_TURN_INPUT_VERSION = "granit_ai_turn_input.stage_a.v1";
 export const AI_TURN_EXECUTION_CONTEXT_VERSION = "granit_ai_turn_execution_context.v1";
+export const AI_TURN_CONTEXT_CURSOR_VERSION = "conversation_updated_at.v1";
 export const AI_TURN_CONTEXT_MAX_MESSAGES = 8;
 export const AI_TURN_CONTEXT_MAX_CHARACTERS = 8_000;
 

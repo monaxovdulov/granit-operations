@@ -1,4 +1,4 @@
-import { and, desc, eq, lt, or, type SQLWrapper } from "drizzle-orm";
+import { and, desc, eq, lt, or, sql, type SQLWrapper } from "drizzle-orm";
 
 import {
   channelIdentities,
@@ -17,6 +17,7 @@ import {
 import type { SiteFormIntakeRequest, SiteWidgetMessageRequest } from "@granit/contracts";
 
 import {
+  AI_TURN_CONTEXT_CURSOR_VERSION,
   AI_TURN_CONTEXT_MAX_MESSAGES,
   buildSiteWidgetAiTurnExecutionContext,
   buildStageASiteWidgetAiTurnInput,
@@ -184,6 +185,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
     try {
       return await this.db.transaction(async (tx) => {
         const now = new Date();
+        let messageCreatedAt = now;
         const contentType = normalizeContentType(input.message.contentType);
         const isMedia = contentType !== "text";
         const needsManagerReason =
@@ -256,7 +258,8 @@ export class PostgresIntakeRepository implements IntakeRepository {
               publicConversationId: conversations.publicConversationId,
               leadId: conversations.leadId,
               agentAllowedToReply: conversations.agentAllowedToReply,
-              aiState: conversations.aiState
+              aiState: conversations.aiState,
+              updatedAt: conversations.updatedAt
             });
 
           if (!createdConversation) {
@@ -264,6 +267,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
           }
 
           conversation = createdConversation;
+          messageCreatedAt = createdConversation.updatedAt;
 
           await tx.insert(leadTimelineEvents).values(
             inboundLeadCreatedTimelineEvent({
@@ -301,7 +305,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
             })
             .where(eq(leads.id, conversation.leadId));
 
-          await tx
+          const [updatedConversation] = await tx
             .update(conversations)
             .set({
               sourcePageUrl: input.sourcePageUrl ?? null,
@@ -313,9 +317,16 @@ export class PostgresIntakeRepository implements IntakeRepository {
                 automation_status: effectiveAgentAllowedToReply ? "enabled" : "disabled",
                 needs_manager_reason: needsManagerReason ?? null
               },
-              updatedAt: now
+              updatedAt: nextConversationMessageTimestamp()
             })
-            .where(eq(conversations.id, conversation.id));
+            .where(eq(conversations.id, conversation.id))
+            .returning({ updatedAt: conversations.updatedAt });
+
+          if (!updatedConversation) {
+            throw new Error("conversation update returned no row");
+          }
+
+          messageCreatedAt = updatedConversation.updatedAt;
 
           conversation = {
             ...conversation,
@@ -358,10 +369,13 @@ export class PostgresIntakeRepository implements IntakeRepository {
               ...(input.message.metadata ?? {}),
               public_conversation_id: conversation.publicConversationId,
               channel_identity_id: identity.id,
-              automation_status: conversation.agentAllowedToReply ? "enabled" : "disabled"
+              automation_status: conversation.agentAllowedToReply ? "enabled" : "disabled",
+              ...(input.channel === "site_widget"
+                ? { ai_context_cursor_version: AI_TURN_CONTEXT_CURSOR_VERSION }
+                : {})
             },
             submittedAt: new Date(input.message.submittedAt),
-            createdAt: now
+            createdAt: messageCreatedAt
           })
           .returning({
             id: conversationMessages.id,
@@ -386,7 +400,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
             widgetInstanceId: input.widgetInstanceId,
             providerMessageId: input.providerMessageId,
             providerUpdateId: input.providerUpdateId,
-            createdAt: now
+            createdAt: messageCreatedAt
           })
         );
 
@@ -400,7 +414,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
             publicMessageId: message.publicMessageId,
             reason: needsManagerReason ?? "telegram_new_inbound",
             contentType,
-            createdAt: now
+            createdAt: messageCreatedAt
           });
         }
 
@@ -526,7 +540,6 @@ export class PostgresIntakeRepository implements IntakeRepository {
       }
 
       return await this.db.transaction(async (tx) => {
-        const now = new Date();
         const nextAiState =
           input.agentAllowedToReplyAfterSend === false ? "needs_manager" : "ai_collecting_info";
         const [sendGate] = await tx
@@ -534,7 +547,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
           .set({
             agentAllowedToReply: input.agentAllowedToReplyAfterSend ?? true,
             aiState: nextAiState,
-            updatedAt: now
+            updatedAt: nextConversationMessageTimestamp()
           })
           .where(
             and(
@@ -547,7 +560,8 @@ export class PostgresIntakeRepository implements IntakeRepository {
             id: conversations.id,
             leadId: conversations.leadId,
             publicConversationId: conversations.publicConversationId,
-            channelIdentityId: conversations.channelIdentityId
+            channelIdentityId: conversations.channelIdentityId,
+            updatedAt: conversations.updatedAt
           });
 
         if (!sendGate) {
@@ -573,6 +587,8 @@ export class PostgresIntakeRepository implements IntakeRepository {
           throw new AgentReplyBlockedError();
         }
 
+        const sentAt = sendGate.updatedAt;
+
         const [message] = await tx
           .insert(conversationMessages)
           .values({
@@ -591,8 +607,8 @@ export class PostgresIntakeRepository implements IntakeRepository {
               ...input.metadata,
               public_conversation_id: sendGate.publicConversationId
             },
-            submittedAt: now,
-            createdAt: now
+            submittedAt: sentAt,
+            createdAt: sentAt
           })
           .returning({
             internalMessageId: conversationMessages.id,
@@ -608,7 +624,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
         await tx
           .update(leads)
           .set({
-            updatedAt: now
+            updatedAt: sentAt
           })
           .where(eq(leads.id, input.leadId));
 
@@ -620,7 +636,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
             inboundPublicMessageId: input.inboundPublicMessageId,
             publicConversationId: sendGate.publicConversationId,
             metadata: input.metadata,
-            createdAt: now
+            createdAt: sentAt
           })
         );
 
@@ -1318,6 +1334,24 @@ export class PostgresIntakeRepository implements IntakeRepository {
 
 type Transaction = Parameters<Parameters<OperationsDb["transaction"]>[0]>[0];
 
+function nextConversationMessageTimestamp() {
+  // Updating the conversation row serializes message writes for one conversation. The one
+  // millisecond increment survives the PostgreSQL -> JavaScript Date precision boundary, so the
+  // returned value remains strictly newer even when two writes share the same wall-clock tick.
+  return sql<Date>`GREATEST(
+    clock_timestamp(),
+    ${conversations.updatedAt} + interval '1 millisecond',
+    COALESCE(
+      (
+        SELECT MAX(${conversationMessages.createdAt}) + interval '1 millisecond'
+        FROM ${conversationMessages}
+        WHERE ${conversationMessages.conversationId} = ${conversations.id}
+      ),
+      clock_timestamp()
+    )
+  )`;
+}
+
 function nextAiStateForInbound(currentAiState: string, needsManager: boolean): AiState {
   const current = toAiState(currentAiState);
 
@@ -1457,8 +1491,8 @@ async function loadPreviousAiTurnContextMessages(
 ): Promise<AiTurnContextMessage[]> {
   const [anchor] = await reader
     .select({
-      id: conversationMessages.id,
-      createdAt: conversationMessages.createdAt
+      createdAt: conversationMessages.createdAt,
+      metadata: conversationMessages.metadata
     })
     .from(conversationMessages)
     .where(
@@ -1474,6 +1508,15 @@ async function loadPreviousAiTurnContextMessages(
 
   if (!anchor) {
     throw new Error("accepted inbound message anchor not found for AI turn context");
+  }
+
+  if (
+    readOptionalString(anchor.metadata, "ai_context_cursor_version") !==
+    AI_TURN_CONTEXT_CURSOR_VERSION
+  ) {
+    // Pre-P1 rows have no causal cursor guarantee. Returning only the current inbound (added by
+    // buildBoundedAiTurnContext) is safer than pulling a potentially later same-timestamp row.
+    return [];
   }
 
   const rows = await reader
@@ -1499,13 +1542,7 @@ async function loadPreviousAiTurnContextMessages(
             eq(conversationMessages.senderRole, "ai_assistant")
           )
         ),
-        or(
-          lt(conversationMessages.createdAt, anchor.createdAt),
-          and(
-            eq(conversationMessages.createdAt, anchor.createdAt),
-            lt(conversationMessages.id, anchor.id)
-          )
-        )
+        lt(conversationMessages.createdAt, anchor.createdAt)
       )
     )
     .orderBy(desc(conversationMessages.createdAt), desc(conversationMessages.id))
