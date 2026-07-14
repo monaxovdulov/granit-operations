@@ -1,6 +1,6 @@
 # Task: AI-DIALOG-MASTRA-OBSERVABILITY-FIRST-SLICE - implementation plan первого staging-only Mastra + observability slice
 
-Status: in_progress; G0/G1 passed; W0 local consumer implementation passed; P1Q core local checks passed; G1Q owner facts approval pending
+Status: in_progress; G0/G1 passed; W0 consumer + preview integration passed; P1Q core local checks passed; G1Q owner facts approval pending
 Created: 2026-07-13
 Updated: 2026-07-14
 Repo: `granit-operations`
@@ -179,7 +179,7 @@ implementation status; completed work after that baseline is recorded immediatel
 |---|---|---|
 | G0 | `passed` | Exact cross-repo acceptance is recorded in `docs/release/evidence/SITE_WIDGET_V1_CROSS_REPO_ACCEPTANCE_RU.md`. |
 | G1/P1 | `passed` | App-owned neutral turn boundary passed locally at `84e61de`; evidence is in `docs/release/evidence/AI_DIALOG_APP_TURN_BOUNDARY_P1_RU.md`. |
-| W0 consumer implementation | `local_implementation_passed` | `business-ai-web-widget` branch `codex/w0-site-widget-truth-timeout`, full commit `2982de06e6f767af549e9f59aa5bf2fc042da51e`; source baseline `47481d5e6077a8d3ae9aa0d5134a1f5c2b4a530a`, design commit `4ff894f34226ddd7ac34851a04cb7bb3519fab9b`. Check, 81/81 unit tests, build, package verification and 24/24 Playwright tests with one worker passed, including the <=300 ms pending/sending assertion; raw measured timing was not retained as a separate artifact. The artifact has not been vendored/deployed into `landing-granit-static`, so combined staging widget-UX evidence remains pending. |
+| W0 consumer + preview integration | `passed` | Source `business-ai-web-widget@2982de06e6f767af549e9f59aa5bf2fc042da51e` passed CI [29358217137](https://github.com/monaxovdulov/business-ai-web-widget/actions/runs/29358217137), 81/81 local unit tests, package verification and 24/24 one-worker Playwright tests. Content-addressed landing integration `151062cb6d19c12a25edb6a8d226bea8d96c8d83` deployed through [run 29358660849](https://github.com/monaxovdulov/landing-granit-static/actions/runs/29358660849). Hardened loopback browser smoke measured pending at 15.0 ms; remote static bytes matched exact loader/ESM hashes. Evidence: `docs/release/evidence/AI_DIALOG_W0_WIDGET_UX_INTEGRATION_RU.md`. This is local UI/static preview proof, not staging backend/model latency. |
 | P1Q core | `local_checks_passed` | Provider-neutral core and fixed synthetic checks passed at code commit `78c9947`. G1Q remains open: the owner has not yet accepted the exact 15-fact table, and no production `facts.v1.ts` snapshot exists. |
 | P2 onward | `not_started` | Continue only after G1Q in the fixed order P2 -> P3 -> M1 disabled -> M2 local/fake -> G6 -> M3 staging. |
 
@@ -189,10 +189,10 @@ app-owned run/trace state, manager-visible quality state, owner-approved product
 and explicit staging-only runtime selection remain prerequisites for their later gates.
 
 The May `granit-site-cms` consumer remains useful historical evidence, but it is not the current
-preview owner. W0 was therefore implemented locally from the correct
-`business-ai-web-widget@47481d5...` baseline, not from the stale May checkout. Its resulting
-artifact at `2982de06...` has not yet been vendored and deployed by `landing-granit-static`, whose
-currently deployed integration remains at `7007b982...` until that separate integration step.
+preview owner. W0 was implemented from the correct `business-ai-web-widget@47481d5...` baseline,
+published at `2982de06...`, vendored by full source SHA and deployed by
+`landing-granit-static@151062cb...`. The prior `7007b982...` integration and version-only ESM
+remain the verified manual rollback; no backend/model call was part of W0.
 
 ## Chosen architecture and rejected alternatives
 
@@ -538,17 +538,25 @@ unit/browser-tested at `business-ai-web-widget@47481d5...`; deployed ESM bytes m
 source. At that baseline W0 was open for strict response-truth mapping, the timeout invariant and
 <=300 ms deferred-response browser timing evidence below.
 
-Local implementation result on 2026-07-14: `passed` at
+Consumer and preview integration result on 2026-07-14: `passed`. Source implementation at
 `business-ai-web-widget@2982de06e6f767af549e9f59aa5bf2fc042da51e`, branch
 `codex/w0-site-widget-truth-timeout`. The implementation started from baseline
 `47481d5e6077a8d3ae9aa0d5134a1f5c2b4a530a`; its design commit is
 `4ff894f34226ddd7ac34851a04cb7bb3519fab9b`. Strict saved-response truth, replay/idempotency,
 honest timeout/retry behavior and the timeout invariant are implemented with a 20,000 ms server
 budget and a browser minimum of 20,001 ms/default of 25,000 ms. `npm run check`, 81/81 unit tests,
-build, package verification and 24/24 Playwright tests with one worker passed, including the
-<=300 ms pending/sending render assertion. Its raw measured timing was not retained as a separate
-artifact, and the widget is not yet vendored/deployed into `landing-granit-static`; therefore
-combined staging widget-UX evidence is not claimed.
+build, package verification and 24/24 Playwright tests with one worker passed; source CI
+[29358217137](https://github.com/monaxovdulov/business-ai-web-widget/actions/runs/29358217137)
+also passed at the exact source SHA. Deterministic ZIP
+`5c60ced38cc528f76df610f19e5e7681a68e944124e5f61fc7ac7209095fdc7e` was vendored without
+payload changes at `landing-granit-static@151062cb6d19c12a25edb6a8d226bea8d96c8d83` under a
+full-SHA path and deployed by Actions run
+[29358660849](https://github.com/monaxovdulov/landing-granit-static/actions/runs/29358660849).
+The final loopback-only integrated browser smoke measured pending render at 15.0 ms, proved no
+premature saved/session/assistant truth and made no real API/model request. Remote loader and ESM
+matched SHA-256 `98b71bd9...d617` and `e44d1faf...e6b8` byte-for-byte; the old `v1.0.0` ESM
+`22c57df9...05ae6` remains available for manual rollback. Detailed evidence is in
+`docs/release/evidence/AI_DIALOG_W0_WIDGET_UX_INTEGRATION_RU.md`.
 
 Work:
 
@@ -823,8 +831,9 @@ After G5 and explicit G6 only:
    rollback; do not average a safety failure into a pass rate.
 7. Switch back to `direct_openai`, restart, and prove a new turn succeeds without replay/duplicate
    writes.
-8. If W0 is complete, record its consumer SHA and pending-state timing against the same staging
-   flow; otherwise state explicitly that backend evidence does not prove live widget UX.
+8. Reuse the verified W0 source/integration SHAs, but record a new pending-state measurement
+   against the same approved M3 staging flow; do not present the W0 local 15.0 ms render as
+   staging backend/model latency.
 9. Disable customer AI after evidence unless the owner separately approves continued staging use.
 
 Write sanitized proof to
@@ -1047,7 +1056,7 @@ operations boundary decision changes.
 | Targeted AST/file/source inspection | passed | Verified AI boundary, direct adapter, send gate, schema, manager view, routes and tests listed above. |
 | `granit-ops-decisions` read-only audit | passed | Confirmed proposed structured-decision/eval sequence and that the repo is decision evidence, not an accepted harness. |
 | Planning-baseline deployed widget read-only audit | passed; W0 was partial | Verified immediate pending/separate sending status, same-key retry and honest errors at `business-ai-web-widget@47481d5`, exact `landing-granit-static@7007b982` bundle provenance, plus the baseline strict response-truth, <=300 ms browser timing and 15-second timeout-invariant gaps. |
-| W0 local consumer implementation | passed locally; combined staging evidence pending | At `business-ai-web-widget@2982de06e6f767af549e9f59aa5bf2fc042da51e`: check, 81/81 unit tests, build, package verification and 24/24 Playwright tests with one worker passed, including the <=300 ms assertion. A separate raw timing artifact and `landing-granit-static` vendoring/deployment remain pending. |
+| W0 consumer + preview integration | passed | Source CI `29358217137`, local 81/81 unit and 24/24 browser tests, immutable landing commit `151062cb...`, deploy run `29358660849`, 15.0 ms loopback pending render and exact deployed hashes passed. No real intake/model request was made; see `docs/release/evidence/AI_DIALOG_W0_WIDGET_UX_INTEGRATION_RU.md`. |
 | P1Q provider-neutral core | local checks passed; G1Q pending | Core checks passed at `78c9947` without a model call or Mastra dependency. Exact owner approval of the 15 facts and production `facts.v1.ts` are still absent. |
 | Historical `granit-site-cms` read-only inspection | passed | Verified candidate content/import caveat and that this stale May checkout is supporting history rather than current preview ownership. |
 | `gh pr view 5`, branch/doc inspection at `cf04541` | passed | Verified draft PR metadata, owner-sequenced branch and source documents. |
@@ -1075,6 +1084,8 @@ operations boundary decision changes.
   `docs/release/evidence/P0_CHANNEL_NEUTRAL_CONVERSATION_FOUNDATION_RU.md`
 - P1Q local core evidence, not G1Q sign-off:
   `docs/release/evidence/AI_DIALOG_LIVE_V2_CORE_P1Q_RU.md`
+- W0 consumer/preview integration evidence:
+  `docs/release/evidence/AI_DIALOG_W0_WIDGET_UX_INTEGRATION_RU.md`
 - Planned implementation evidence:
   `docs/release/evidence/AI_DIALOG_MASTRA_OBSERVABILITY_FIRST_SLICE_RU.md`
 
@@ -1085,10 +1096,6 @@ operations boundary decision changes.
 - G1Q cannot close until the owner explicitly accepts the exact 15-row P1Q facts proposal and the
   matching production `facts.v1.ts` snapshot is created and rechecked. The P1Q core itself has
   passed local checks at `78c9947`.
-- W0 local consumer code passes, including strict accepted/replayed truth and corrected timeout
-  budgets and the <=300 ms render assertion, but a separate raw timing artifact and
-  vendoring/deployment into `landing-granit-static` remain pending; combined staging widget-UX
-  evidence is therefore open.
 - Official Mastra packages/docs have intentionally not been selected or pinned in this planning
   session.
 - All schema, AI behavior, environment, staging and production changes require owner review under
@@ -1116,10 +1123,11 @@ Owner approved the plan and ordered implementation on 2026-07-14. The accepted d
 9. explicit exclusion of separate/public Mastra Studio and exact staging latency acceptance after
    the first representative baseline.
 
-G0 and G1/P1 are recorded as passed. W0 has passed local consumer implementation checks at
-`2982de06...`, including the <=300 ms assertion, but a raw timing artifact and combined
-landing/staging integration evidence remain open. P1Q core checks passed at `78c9947`; the
-immediate backend action is exact owner review of
+G0 and G1/P1 are recorded as passed. W0 consumer and content-addressed preview integration passed
+at source `2982de06...` and deployed landing commit `151062cb...`, including a 15.0 ms local
+pending-render measurement and exact remote static hashes. This does not claim staging
+backend/model latency. P1Q core checks passed at `78c9947`; the immediate backend action is exact
+owner review of
 all 15 proposed facts, creation of the matching production `facts.v1.ts`, focused and frozen-direct
 rechecks, and G1Q evidence. Only after G1Q closes does work proceed to P2, then P3, M1 disabled,
 M2 local/fake, G6 and M3 staging.
