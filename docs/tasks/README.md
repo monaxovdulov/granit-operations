@@ -21,6 +21,9 @@ Current task records:
 - `AI_DIALOG_APP_TURN_BOUNDARY_P1_RU.md` - locally passed G1/P1 implementation of bounded causal
   history, app-owned identity, structural legacy decision orchestration and frozen direct S05
   golden checks before P1Q.
+- `AI_DIALOG_LIVE_V2_CORE_P1Q_RU.md` - active provider-neutral P1Q/G1Q task for strict `live_v2`
+  context, candidate validation, deterministic apply semantics and fixed synthetic fixtures;
+  no model call, Mastra dependency or runtime switch.
 - `AI_DIALOG_MASTRA_OBSERVABILITY_FIRST_SLICE_RU.md` - active implementation plan: G0 is accepted;
   external W0 widget UX may run in parallel with the operations lane
   `P1 -> P1Q -> P2 -> P3 -> M1 disabled -> M2 local/fake -> G6 owner gate -> M3 authenticated
