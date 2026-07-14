@@ -4,7 +4,7 @@ Status: needs_review; implementation not started
 Created: 2026-07-13
 Updated: 2026-07-14
 Repo: `granit-operations`
-Slice: app-owned AI quality/trace prerequisites -> staging-only in-process Mastra + observability
+Slice: backend P1 -> P1Q -> P2 -> P3 -> M1 -> M2 -> M3; W0 parallel after G0
 Owner/agent: owner review required / Codex planning agent
 
 ## Результат этой planning-сессии
@@ -15,6 +15,10 @@ packages, runtime-код, migrations, deploy config, staging/production flags, T
 
 План заканчивается owner review gate. Реализация не должна начинаться только на основании
 наличия этого файла.
+
+Дополнительное owner decision от 2026-07-14 уточняет самый быстрый путь к живому website
+assistant, не меняя исходный порядок верхнего уровня. Его локальный design artifact находится в
+`docs/superpowers/specs/2026-07-14-live-widget-ai-design.md`.
 
 ## Owner-approved порядок
 
@@ -33,6 +37,31 @@ site-widget.v1 acceptance
 
 Sequencing утвержден, но не является разрешением на package install, schema change, staging
 enablement или production.
+
+### Owner-confirmed local execution refinement (2026-07-14)
+
+```text
+site_widget.v1 acceptance
+  +-> widget lane: W0 Live Widget UX -------------------------> combined widget-UX evidence
+  |
+  +-> backend lane: P1 neutral boundary
+        -> P1Q Live Dialog Core (synthetic acceptance fixtures)
+        -> P2 minimum run/quality persistence
+        -> P3 assets/privacy/retention/manager visibility
+        -> M1 Mastra adapter disabled
+        -> M2 local/fake contract + observability proof
+        -> G6 owner staging approval
+        -> M3 first authenticated live_v2 Mastra call/evidence
+```
+
+W0 после G0 идет параллельно и не блокирует backend lane; он обязателен только для итогового
+combined widget-UX claim. P1Q создает контекст, structured decision, tone/facts profile и
+synthetic contract fixtures, но не вызывает реальную модель и не добавляет Mastra packages.
+Первый authenticated `live_v2` model call остается в M3 после всех gates.
+
+Это декомпозиция operations prerequisites и внешний W0 handoff, а не замена cross-repo S01-S15
+order. Если refinement должен стать общепроектным каноном, владелец фиксирует его отдельным
+изменением в `granit-plan-app`; этот repo-local plan не присваивает себе такую authority.
 
 ## Owner-selected first runtime profile
 
@@ -67,6 +96,21 @@ Planning/source-of-truth:
 - `../../granit-plan-app/ai-agent-stack-wiki/wiki/25-first-implementation-slices.md` at
   `cf04541`.
 
+Additional decision evidence at `granit-ops-decisions` commit
+`91dcfa1f19f229154ee7f857e798eced03c54868`, not accepted source of truth:
+
+- `README.md`;
+- `50-implementation/roadmap.md`;
+- `40-decisions/adr/ADR-0003-structured-ai-decision-and-policy-boundary.md`;
+- `40-decisions/adr/ADR-0004-approved-business-facts-and-price-ranges.md`;
+- `40-decisions/adr/ADR-0005-ai-eval-corpus-and-release-gates.md`;
+- `40-decisions/uxd/UXD-0001-website-widget-ai-stale-takeover.md`;
+- `40-decisions/uxd/UXD-0006-widget-ai-negation-mixed-intent.md`.
+
+The package above is a `Proposed` decision workspace, not an installable harness or implementation
+authority. This plan adopts only the directions explicitly approved by the owner and re-verified
+against current code.
+
 Repo rules/current truth:
 
 - `docs/AGENT_WORKFLOW.md`;
@@ -82,7 +126,16 @@ Repo rules/current truth:
   <https://learn.chatgpt.com/docs/auth>, <https://learn.chatgpt.com/docs/codex-sdk>,
   <https://learn.chatgpt.com/docs/non-interactive-mode>;
 - code, schema, tests and evidence at `granit-operations` commit
-  `6666a0b06c46b29ec764c3403b60153125fe125c`.
+  `6666a0b06c46b29ec764c3403b60153125fe125c`;
+- `granit-site-cms` inspected read-only at HEAD
+  `5c336109fc20549d0e618cb6834d24e0cc6b4ba0` (upstream
+  `23f2ee8c39ee2af30ca79cf9f2e5c4dd0229bf2a`): `README.md`,
+  `docs/HTML_IMPORT_AUDIT.md`, `docs/tasks/FULL_SITE_REDESIGN_BRANCH_RU.md`,
+  `apps/cms/README.md`, `apps/site/public/assets/js/main.js` and selected candidate content under
+  `apps/site/src/imported-pages/` (`index.html`, `vertikalnye-pamyatniki/index.html`,
+  `gorizontalnye-pamyatniki/index.html`, `dvoinye-pamyatniki/index.html`,
+  `memorialnye-kompleksy/index.html`, `blagoustroistvo-mogil/index.html`,
+  `ustanovka-pamyatnikov/index.html`).
 
 `AGENTS.md` is not tracked and was not present in this checkout. Therefore this plan follows the
 tracked rules above and does not invent missing instructions.
@@ -95,6 +148,9 @@ tracked rules above and does not invent missing instructions.
 | Context | `compactContext.messages` contains only the current inbound widget message; it is not yet a bounded recent-history loader. | `apps/api/src/modules/ai/ai-turn.ts`, `buildSiteWidgetAiTurnInput` in `apps/api/src/modules/conversations/repositories/postgres-intake-repository.ts` |
 | Candidate/applied contracts | `AiTurnDecision` aliases the current reply candidate; `AiTurnResult` is declared but not wired through persistence. | `apps/api/src/modules/ai/ai-turn.ts` |
 | AI cohesion | `WidgetAiService` still combines deterministic policy choice, prompt assembly, provider call, fallback and unsafe-output checks. | `apps/api/src/modules/ai/services/widget-ai-service.ts` |
+| Dialogue quality | Prompt describes an assistant for the first message, ignores persisted history/known slots, and broad manager/price/deadline/terms regexes perform primary semantic routing. Approved business facts are empty. | `apps/api/src/modules/ai/prompts/widget-ai-prompt.ts`, `apps/api/src/modules/ai/policy/widget-ai-policy.ts`, `apps/api/src/modules/ai/ai-turn.ts` |
+| Approved facts | Operations has no approved facts asset. Site catalog/process HTML contains candidate copy, but the site README identifies it as imported baseline awaiting owner corrections, so it cannot be consumed as runtime truth. | `apps/api/src/modules/ai/ai-turn.ts`, `granit-site-cms@5c33610:README.md`, selected `apps/site/src/imported-pages/**/index.html` files above |
+| Widget perceived latency | The consumer appends the visitor bubble only after the POST completes and aborts after 10 seconds, while the current provider budget may reach 15 seconds. No typing/pending state or token streaming exists. | `granit-site-cms@5c33610:apps/site/public/assets/js/main.js`, `apps/api/src/modules/ai/adapters/openai-widget-assistant-provider.ts` |
 | Direct rollback path | Direct OpenAI Responses API adapter exists, uses server-only `OPENAI_API_KEY`, defaults `OPENAI_MODEL` to `gpt-5.5`, requests `reasoning.effort=low` and uses `store: false`. This independent current profile must not be silently changed by the Mastra slice. | `apps/api/src/config.ts`, `apps/api/src/modules/ai/adapters/openai-widget-assistant-provider.ts`, `docs/ENVIRONMENT.md` |
 | App authority | Inbound is persisted before AI. `persistAiReplyWithSendGate` checks `agent_allowed_to_reply=true` inside the outbound transaction. Telegram AI outbound throws `TelegramOutboundBlockedError`. | `apps/api/src/modules/intake/use-cases/public-widget-intake-service.ts`, `apps/api/src/modules/conversations/repositories/postgres-intake-repository.ts` |
 | Runtime flags | `AI_WIDGET_ENABLED` defaults to false. There is no runtime selector, Mastra flag, trace-export flag or explicit staging tier. | `apps/api/src/config.ts`, `apps/api/src/index.ts`, `docs/ENVIRONMENT.md` |
@@ -109,9 +165,13 @@ Conclusion: Stage A and the app-owned send gate are real reusable seams. The app
 manager-visible quality state, recent-history context, approved asset package and explicit
 staging-only runtime selection are still prerequisites, not completed facts.
 
+The inspected `granit-site-cms` HEAD `5c33610` is one commit ahead of upstream `23f2ee8`. W0 must
+therefore be implemented later in a separate clean worktree/`codex/` branch; this planning task
+must not modify that checkout.
+
 ## Chosen architecture and rejected alternatives
 
-### Chosen: one app-owned turn port, two first-slice in-process runners
+### Chosen: one app-owned turn port, two operational runners with separate behavior profiles
 
 The app owns the turn lifecycle and selects one of two implementations behind the same typed
 boundary:
@@ -121,18 +181,44 @@ boundary:
 2. `mastra_openai_api` - in-process staging-only Mastra orchestration using server-only
    `OPENAI_API_KEY`, explicit `gpt-5.6-sol`, requested `reasoning.effort=medium` and `store:false`.
 
-Both paths use the same app-owned input builder, policy/prompt/assets, candidate validation,
-run recorder, send-time gate, persistence and public response mapping.
+Both paths use the same app-owned execution envelope, normalized action/result boundary, base
+safety checks, run recorder, send-time gate, persistence and public response mapping. Candidate
+schemas and semantic validators are profile-versioned: `mastra_openai_api` consumes P1Q
+`live_v2`, while `direct_openai` remains on its frozen, already evidenced S05 prompt/policy and
+legacy candidate validator during this slice.
 
 The OpenAI API key used by the Mastra runner must never enter prompts, tools, traces, logs,
 evidence, browser responses or
 persisted state. The direct and Mastra model profiles intentionally remain independent so the
-known direct rollback behavior is preserved. Therefore M3 proves contract, persistence,
-observability and rollback compatibility; it must not describe the two modes as a controlled
-model-quality A/B test. Model-quality promotion belongs to later sanitized eval/regression work.
+known direct rollback behavior is preserved. A rollback may deliberately reduce dialogue quality,
+but restores the previously tested path without depending on Mastra. Therefore M3 proves contract,
+persistence, observability and rollback compatibility; it must not describe the two modes as a
+controlled model-quality A/B test. Model-quality promotion belongs to later sanitized
+eval/regression work.
 
 `direct_openai` is not a user-facing product choice or a second long-term orchestration strategy.
-It is an operations-only emergency bypass for failures introduced by the new Mastra layer.
+It is an operations-only emergency bypass for failures introduced by the new Mastra layer. Do not
+port `live_v2` into it in M1-M3 and do not create two competing quality implementations.
+
+### Live Dialog Core exists before Mastra
+
+P1Q owns the provider-neutral dialogue contract: bounded history, known slots, structured actions,
+versioned tone/facts and app validation. It is implemented and tested with fakes before any Mastra
+dependency. Mastra is the only first-slice runner authorized to execute that contract against a
+live model, and does so first in M3; it does not own memory, policy, facts, handoff or publication.
+
+For rollback compatibility, an app-owned legacy adapter performs only this structural mapping:
+
+- legacy `reply_candidate` with `agentAllowedToReplyAfterSend=false` -> normalized
+  `handoff_to_manager`;
+- every other legacy `reply_candidate` -> normalized `answer`;
+- legacy `no_reply` -> normalized `no_reply` with the existing controlled reason;
+- legacy never emits `ask_clarifying_question`, and the adapter never parses text/punctuation to
+  infer an action.
+
+The mapped result remains tagged `decision_profile=legacy_s05` and passes the frozen legacy
+validator before the common apply/send gate. `live_v2` uses its own strict four-action validator.
+This gives the direct provider no `live_v2` prompt/facts or new semantic-routing responsibility.
 
 ### Rejected for the first slice: Mastra as a separate service
 
@@ -169,10 +255,11 @@ account lifecycle and automation quotas before any server authentication.
 POST /public/intake/site-widget/messages
   -> validate site_widget.v1
   -> acceptInboundMessage (Postgres commit)
+  -> load bounded recent history + known slots + approved assets
   -> build app-owned execution context + bounded AiTurnInput
   -> create app-owned ai_run + trace_id
-  -> deterministic prechecks
-  -> selected runner: direct_openai OR in-process mastra_openai_api
+  -> deterministic hard-safety prechecks
+  -> selected runner/profile: frozen direct S05 OR in-process Mastra live_v2
   -> untrusted AiTurnDecision candidate
   -> app schema/policy/source validation
   -> app-owned send-time gate
@@ -200,9 +287,11 @@ external reference on that app record, not the primary business identifier.
 | Gate | Must be true | Evidence needed | Blocks |
 |---|---|---|---|
 | G0 `site_widget.v1` acceptance | Owner links the accepted cross-repo contract/provider/staging evidence; no backend or AI scope expansion is needed to obtain it. | Accepted evidence/PR link and exact contract version. | All prerequisite implementation. |
-| G1 neutral boundary complete | Bounded recent history, internal execution IDs, typed candidate/applied result and cohesive app-owned orchestration exist without Mastra. | Focused tests + prerequisite task/evidence. | DB/run recorder work. |
+| G0W Live Widget UX | Consumer shows local pending visitor state and typing immediately, preserves idempotency/retry truth and obeys the timeout invariant without changing `site_widget.v1`. It may run in a separate repo PR after G0. | Consumer unit/browser smoke, exact consumer SHA and timing evidence. | Honest live-UX claim; does not block backend-only P1/P1Q work. |
+| G1 neutral boundary complete | Bounded recent history, internal execution IDs, typed candidate/applied result and cohesive app-owned orchestration exist without Mastra. | Focused tests + prerequisite task/evidence. | P1Q and DB/run recorder work. |
+| G1Q Live Dialog Core | Strict four-action `live_v2` candidate, separate app validator, tone/facts assets and 15-20 synthetic acceptance fixtures pass with no live provider; legacy S05 golden tests remain byte/behavior compatible. | Context/schema/validator/apply tests, versioned assets, fixture report and direct golden baseline. | App observability completion and Mastra package work. |
 | G2 app-owned run/quality state | Direct path writes linked run, gate and manager-visible degradation/handoff records. | Migration review, DB tests, manager API/UI tests, direct-path smoke. | Mastra package work. |
-| G3 privacy/assets/rollback ready | Approved repo asset bundle, redaction allowlist, retention cleanup, route baseline and direct rollback path pass. No runtime Sheet read exists. | Tests, sanitized evidence and owner review. | Mastra package work. |
+| G3 privacy/assets/rollback ready | Approved `live_v2` repo assets, redaction allowlist, retention cleanup, route baseline and frozen direct rollback path pass. No runtime Sheet read exists. | Tests, sanitized evidence and owner review. | Mastra package work. |
 | G4 package/API review | Implementation agent re-checks current official Mastra and OpenAI docs, package names, supported Node runtime, tracing hooks, license, documented API-key availability of `gpt-5.6-sol` and provider request/response-shape support for `reasoning.effort=medium`, `store:false` and model identity; exact versions are pinned. No live provider call occurs before G6. | Source links, date, selected versions, package/type/request-shape review and lockfile diff in implementation PR. | Mastra adapter code. |
 | G5 code review | Mastra code is disabled by default; route inventory, no-direct-send/DB and rollback tests pass. | Reviewed PR and full local checks. | Staging enablement. |
 | G6 staging approval | Owner explicitly approves enabling the exact reviewed SHA only in staging. | Owner sign-off. | Any staging config change/smoke. |
@@ -219,8 +308,11 @@ Conceptual groups:
   channel, app `traceId`, idempotency key and input fingerprint;
 - `AiTurnInput`: bounded recent messages, safe known slots, gate snapshot and selected versioned
   assets; no secrets, contact values or unrestricted metadata;
-- `AiTurnDecision`: explicit `reply_candidate`, `handoff`, `blocked` or `no_reply` candidate with
-  reason codes and evidence; still untrusted;
+- `AiTurnDecision`: a versioned app union. `legacy_s05` preserves the existing
+  `reply_candidate|no_reply` schema; `live_v2` contains exactly one action - `answer`,
+  `ask_clarifying_question`, `handoff_to_manager` or `no_reply` - plus nullable `replyDraft`,
+  controlled reason, `missingSlots`, short evidence, negation/mixed-intent fields and used
+  approved-source IDs. Both are untrusted and dispatch to their named app validator;
 - `AiTurnResult`: app-applied `persisted`, `handed_off`, `blocked`, `fallback_unavailable` or
   `failed`, plus send-gate result and safe evidence references.
 
@@ -241,15 +333,17 @@ Required columns:
 - `lead_id`, `conversation_id`, required `inbound_message_id`, nullable `outbound_message_id`;
 - `channel`, `runtime_mode` (`direct_openai` or `mastra_openai_api`) and optional
   `runtime_run_id`;
+- `decision_profile` (`legacy_s05` or `live_v2`) and controlled normalized action;
 - unique turn `idempotency_key` and `input_fingerprint`;
 - `status`: `running`, `persisted`, `handed_off`, `blocked`, `fallback_unavailable` or `failed`;
-- `policy_version`, `prompt_version`, `tool_version`, nullable `asset_version`,
-  `disclosure_version`;
+- `policy_version`, `prompt_version`, `tool_version`, nullable `asset_version`, nullable
+  `tone_version`, nullable `facts_version`, `disclosure_version`;
 - `model_provider`, `requested_model_name`, nullable `provider_model_name`, controlled
   `reasoning_effort`, `model_profile_version` and nullable exact package/runtime version;
 - input/output/total tokens, versioned `cost_estimate_microunits` and `cost_rate_version`;
 - `send_gate_result`: `not_checked`, `allowed` or `blocked`, plus `send_gate_checked_at`;
 - controlled `outcome_reason`, `failure_code`, `started_at`, `completed_at`, `latency_ms`;
+- controlled profile-validator result; never raw model reasoning;
 - allowlisted `sanitized_metadata` only; no raw message/provider payload.
 
 Indexes: unique trace and idempotency indexes; conversation/time, inbound message and
@@ -360,14 +454,19 @@ Rollback order:
 3. do not delete inbound messages, outbound evidence, `ai_runs`, spans or quality events;
 4. do not drop the additive migration during runtime rollback.
 
+This is an explicit operator rollback, not an automatic per-turn retry through a second provider.
+Automatic cross-runner retry would make latency, cost, idempotency and the actual reply profile
+harder to prove.
+
 `apps/api/src/app.ts` must continue to register routes explicitly. Add a route-inventory test and
 capture `Fastify.printRoutes()` output in sanitized evidence. No path may contain `mastra`,
 `codex`, `studio`, `workflow`, `trace` or an unauthenticated AI diagnostic endpoint.
 
 ## Implementation slices
 
-Each slice is a separate reviewable PR/commit group with its own task/evidence update. Do not
-start the next slice until its exit gate passes.
+Each slice is a separate reviewable PR/commit group with its own task/evidence update. The
+operations backend chain is sequential. W0 is the one explicit cross-repo exception: after G0 it
+may run in parallel with P1/P1Q, but it cannot satisfy any backend gate.
 
 ### Slice P0 - record `site_widget.v1` acceptance gate
 
@@ -381,6 +480,37 @@ Files: this task's evidence links/status only; any consumer evidence remains in 
 
 Exit: owner marks G0 accepted. No operations runtime change.
 
+### Slice W0 - Live Widget UX (cross-repo consumer-only)
+
+External handoff target and verified current entry point:
+
+- `granit-site-cms` at inspected HEAD `5c33610`;
+- `apps/site/public/assets/js/main.js` plus the owning widget styles/tests discovered in the future
+  clean implementation worktree.
+
+The requirements below are an external interface/evidence dependency, not implementation
+authority for this repo. Create the actual W0 task/PR in `granit-site-cms` after G0; do not modify
+the currently inspected ahead-of-upstream checkout. It may run in parallel with operations
+P1/P1Q.
+
+Work:
+
+1. On submit, append the local visitor bubble immediately with `pending` state and show a separate
+   typing/loading indicator before awaiting the network.
+2. Keep message text and idempotency key until the server returns accepted/replayed truth.
+3. On accepted response, mark the local visitor bubble `saved` and render only the persisted AI
+   reply returned by unchanged `site_widget.v1`.
+4. On transport/server failure, retain a visible `not_confirmed/retryable` visitor message; do not
+   fabricate an AI bubble or silently discard input.
+5. Enforce and test `browser deadline > backend/provider deadline + bounded persistence/network
+   allowance`; the current 10-second browser versus up-to-15-second provider inversion must not
+   survive.
+6. Preserve current idempotency, escaping and public response/privacy behavior.
+
+Exit: consumer tests and a browser smoke prove pending/typing appears no later than 300 ms after
+submit, accepted/replayed mapping remains correct, and failures remain honest. There is no API
+schema, operations runtime, SSE/WebSocket or token-streaming change.
+
 ### Slice P1 - finish the app-owned neutral turn boundary
 
 Modify:
@@ -391,7 +521,8 @@ Modify:
 - `apps/api/src/modules/conversations/repositories/postgres-intake-repository.ts`;
 - `apps/api/src/modules/intake/use-cases/public-widget-intake-service.ts`;
 - `apps/api/test/helpers/memory-intake-repository.ts`;
-- `apps/api/test/public-intake.test.ts`.
+- `apps/api/test/public-intake.test.ts`;
+- new direct S05 golden/compatibility tests under `apps/api/test/`.
 
 Create focused AI ports/services under `apps/api/src/modules/ai/` for execution context, bounded
 recent-message context and typed candidate/application orchestration. Keep the existing
@@ -403,17 +534,76 @@ Work:
 1. Return internal inbound/outbound message IDs to app services without exposing them publicly.
 2. Load bounded recent messages from Postgres by conversation with explicit count/character
    limits and stable ordering; exclude unnecessary PII/media payloads.
-3. Make `AiTurnDecision` and `AiTurnResult` real application contracts.
+3. Make the versioned legacy/live `AiTurnDecision` union and common `AiTurnResult` real
+   application contracts; implement the exact structural legacy mapping defined above.
 4. Split orchestration from existing widget policy/prompt/provider functions while preserving
-   exact S05/S06 behavior.
+   S05/S06 inbound-first persistence, candidate validation, unsafe-output checks and send-time
+   takeover behavior. This safety compatibility does not require P1Q to preserve broad
+   regex/canned semantic routing.
 5. Keep approved price/business sources empty and fail-closed until an owner-approved asset
    package exists.
+6. Freeze the direct golden baseline: S05 prompt/policy/disclosure versions and generated text,
+   direct request `gpt-5.5`/low/`store:false`, deterministic policy candidates, the three legacy
+   mapping cases and public response/send-gate outcomes. P1/P1Q must not change this baseline.
 
 Exit: direct path passes all existing tests; AI core has no `@granit/contracts`, Fastify,
 Telegram update or provider payload dependency; compact context includes bounded persisted
 history and current inbound exactly once.
 
-### Slice P2 - add app-owned run, span and quality persistence
+### Slice P1Q - Live Dialog Core (provider-neutral, no live model)
+
+Create only inside the app-owned AI boundary:
+
+- context/history mapping around `apps/api/src/modules/ai/ai-turn.ts`;
+- separate provider-neutral `live_v2` decision/validator/orchestrator/profile modules under a new
+  app-owned subtree such as `apps/api/src/modules/ai/profiles/live-v2/`;
+- versioned `live_v2` prompt, tone and facts assets inside that subtree;
+- focused context/schema/validator/apply tests plus a fixed synthetic acceptance fixture suite
+  under `apps/api/test/`.
+
+P1Q must not modify `apps/api/src/modules/ai/prompts/widget-ai-prompt.ts`,
+`apps/api/src/modules/ai/policy/widget-ai-policy.ts` or their S05 version constants. Those modules
+remain owned by the frozen direct rollback profile. Shared hard-safety primitives may be extracted
+only if the direct golden suite proves byte/behavior compatibility.
+
+Work:
+
+1. Bound recent context to 6-8 relevant text messages and a separately named character cap, in
+   stable order, with the current inbound exactly once. Include the last AI question and controlled
+   known slots; exclude unnecessary contacts, transport DTOs and unrestricted metadata.
+2. Define the separate `live_v2` provider port and strict candidate containing exactly one action:
+   `answer`, `ask_clarifying_question`, `handoff_to_manager` or `no_reply`.
+3. Validate candidate schema, reason, reply/action consistency, approved-source IDs, forbidden
+   claims, negation/mixed-intent flags and handoff semantics in app code before any apply/send.
+4. Keep deterministic checks for hard output safety and explicit state gates. Text that mentions a
+   manager, price or deadline is not by itself a state transition.
+5. Add versioned `live_v2` behavior: acknowledge meaning without empty echo, give concrete domain
+   value, ask at most one useful next question, reuse known slots and avoid questionnaire tone,
+   fake empathy and premature phone pressure.
+6. Add a schema-validated owner-approved facts snapshot for safe product types, materials,
+   decoration options and process facts. Exclude prices, deadlines, availability, discounts,
+   payments, contracts, warranties and legal promises.
+7. Build 15-20 fixed synthetic acceptance fixtures covering context construction and predefined
+   candidate/apply outcomes for continuation/no-repeat, typo/paraphrase, negated and explicit
+   manager requests, mixed intent, safe general choice, missing fact, unsafe promise and takeover.
+
+P1Q proves model-safe context, schema rejection, source/claim checks, structural negation flags,
+action-to-apply mapping, blocked send and real handoff state for predefined candidates. Fakes do
+not prove that a model understands negation/mixed intent or produces a natural tone. Those
+input-to-decision and soft-quality claims are measured by the authenticated fixed corpus only in
+M3. This is a repo-authored synthetic acceptance fixture suite, not a promotion of real customer
+transcripts; bad-dialog sanitization/promotion remains S10. P1Q makes no OpenAI/Mastra call and
+adds no provider package. The frozen direct golden suite must also remain green.
+
+Candidate source material for item 6 is the inspected site catalog, благоустройство and установка
+HTML listed in `Sources checked`. Because that bundle is an imported baseline awaiting owner
+corrections, an implementation agent must extract a small normalized proposal, cite source path
+and content hash for every fact, and obtain explicit owner approval before committing the
+versioned operations snapshot. Use a 15-20-row review table with `candidate fact`, `source
+path/line`, `allowed customer wording`, `forbidden extrapolation`, `owner approved`, `source
+version`, `valid from` and `review by`. There is no runtime cross-repo, CMS, Sheet or HTML read.
+
+### Slice P2 - add minimum app-owned run, span and quality persistence
 
 Create/modify:
 
@@ -430,15 +620,19 @@ Work:
 1. Create `ai_run` only after inbound persistence and before runner invocation.
 2. Generate app `trace_id`; never trust runtime-provided ID as canonical.
 3. Complete direct path outcomes for success, handoff, blocked, unavailable and failure.
-4. Record the final send-gate result. For a persisted reply, link outbound message and run in the
+4. Record only enum/version/timing direct-path spans before G3; no text, provider payload or
+   arbitrary metadata may enter span storage without the centralized sanitizer.
+5. Record a controlled quality event for tested handoff, degradation, blocked and failure paths.
+6. Record the final send-gate result. For a persisted reply, link outbound message and run in the
    same DB transaction; a process crash must not leave a sent/persisted reply falsely recorded as
    an unlinked successful run.
-5. Make recorder failure fail closed to saved inbound + manager review, never false AI success.
-6. Prove idempotency: replay reuses the existing terminal run/outbound and does not create a
+7. Make recorder failure fail closed to saved inbound + manager review, never false AI success.
+8. Prove idempotency: replay reuses the existing terminal run/outbound and does not create a
    duplicate run or provider call.
 
-Exit: `direct_openai` writes complete app-owned evidence for every tested outcome before any
-Mastra dependency is added.
+Exit: `direct_openai` writes the minimum complete app-owned evidence for every tested outcome
+before any Mastra dependency is added. This proves the recorder independently; it does not enable
+`live_v2` on the frozen direct profile.
 
 ### Slice P3 - manager quality visibility, approved assets, redaction and retention
 
@@ -457,13 +651,15 @@ Work:
 
 1. Show latest unresolved AI degradation/handoff/blocked reason, run status and timestamp in the
    protected manager conversation view; do not show raw traces or hidden reasoning.
-2. Load AI policy/prompt/disclosure/tool/asset versions only from versioned repo files validated
+2. Load AI policy/prompt/tone/facts/disclosure/tool/asset versions only from versioned repo files validated
    at startup/test time. Google Sheet/TSV may be an offline approval input but is never read at
    runtime.
 3. Apply the same allowlist sanitizer before DB span storage and any export adapter.
 4. Implement bounded dry-run cleanup for expired spans and prove non-expired run/business state
    is untouched.
-5. Add a forward linkage contract documenting that S10 `review_labels`/`eval_cases` will reference
+5. Surface only the minimum operational quality state needed before Mastra; keep P1Q synthetic
+   fixture results in repo evidence rather than turning them into manager mutation workflow.
+6. Add a forward linkage contract documenting that S10 `review_labels`/`eval_cases` will reference
    run/quality IDs; do not implement S10 mutation or promotion UI now.
 
 Exit: direct path failure produces a manager-visible quality state, redaction canary tests pass,
@@ -471,8 +667,10 @@ approved asset versions appear on runs and expired spans can be cleaned safely.
 
 ### Owner gate before Mastra packages
 
-Owner reviews G0-G3 evidence, schema/migration result, manager visibility, privacy/retention,
-approved asset snapshot and rollback smoke. Only an explicit approval starts the next slice.
+Owner reviews G0/G1/G1Q-G3 evidence, schema/migration result, manager visibility,
+privacy/retention, `live_v2` assets/synthetic fixtures and direct rollback smoke. W0 evidence is reviewed here
+if its separate consumer PR is complete; otherwise it remains required before a combined live-UX
+claim. Only an explicit approval starts the next slice.
 
 ### Slice M1 - verify and pin Mastra, then add the in-process adapter disabled
 
@@ -500,10 +698,14 @@ Constraints:
 - the provider call must preserve `store:false`; record requested profile and sanitized returned
   model identity without raw provider payloads;
 - Mastra receives bounded input/assets and constrained app-approved tools only;
+- Mastra is the only first-slice runner allowed to execute P1Q `live_v2` against a live model,
+  first in M3; it does not recreate history, tone, fact selection or policy inside
+  framework-owned code;
 - first slice exposes no business-mutating tool; read-only tools, if any, return approved data;
 - Mastra cannot import conversation repositories, Drizzle schema, delivery providers, Fastify or
   route modules;
-- output is parsed as untrusted `AiTurnDecision` and goes through the same app validator;
+- output is parsed as an untrusted `live_v2` member of `AiTurnDecision` and goes through the
+  named `live_v2` app validator plus shared base safety/apply gates;
 - no Codex SDK/CLI dependency, ChatGPT login or server-skill discovery is added;
 - direct OpenAI classes remain assembled and tested;
 - `AI_RUNTIME_MODE` remains `direct_openai` by default and `mastra_openai_api` cannot run outside
@@ -520,12 +722,15 @@ Work:
 2. Record sanitized runtime/model/tool/validation/send-gate spans with versions and latency.
 3. Record token usage and a cost estimate based on a dated, versioned provider pricing snapshot;
    do not silently use stale or hard-coded unversioned rates.
-4. Run the same candidate validator, handoff/degradation flow and persistence path as direct mode.
-   Do not claim model-quality parity because the preserved direct model profile differs.
-5. Add one repo-owned sanitized regression fixture that predates this runtime integration. This
-   proves runner wiring only; manager-driven bad-dialog promotion remains S10.
-6. Prove switching back to direct mode reuses the same public contract and does not lose or
-   duplicate messages.
+4. Run the profile-specific candidate validator, then the same normalized action,
+   handoff/degradation and persistence path as direct mode. Do not claim model-quality parity
+   because the candidate schemas and preserved direct model profile differ.
+5. Run the fixed P1Q 15-20-case synthetic fixture suite through the Mastra adapter with
+   deterministic candidates/request-shape fixtures. This proves contract wiring and app gates
+   locally; it is not an input-to-decision or live-model quality claim. Manager-driven bad-dialog
+   promotion remains S10.
+6. Prove switching back to the frozen direct mode reuses the same public contract and does not
+   lose or duplicate messages.
 
 Exit: focused and full local suites pass in both runtime modes, route inventory has no new public
 surface, and the direct rollback test passes.
@@ -541,11 +746,16 @@ After G5 and explicit G6 only:
    and test identities.
 5. Make the first approved authenticated Mastra call, verify API-key entitlement and allowlisted
    returned model identity, and stop immediately on mismatch.
-6. Run success, manager-request handoff, forced runtime/model failure, takeover-during-work and
-   redaction canary scenarios.
+6. Run the approved fixed 15-20-input live corpus plus success, manager-request handoff, forced
+   runtime/model failure, takeover-during-work and redaction canary scenarios; record semantic and
+   app hard-gate pass/fail, soft labels, fallback rate, p50/p95 full-response latency, token/cost
+   summary and returned identity. Any hard-gate failure stops the remaining run and starts direct
+   rollback; do not average a safety failure into a pass rate.
 7. Switch back to `direct_openai`, restart, and prove a new turn succeeds without replay/duplicate
    writes.
-8. Disable customer AI after evidence unless the owner separately approves continued staging use.
+8. If W0 is complete, record its consumer SHA and pending-state timing against the same staging
+   flow; otherwise state explicitly that backend evidence does not prove live widget UX.
+9. Disable customer AI after evidence unless the owner separately approves continued staging use.
 
 Write sanitized proof to
 `docs/release/evidence/AI_DIALOG_MASTRA_OBSERVABILITY_FIRST_SLICE_RU.md`. Update this task's
@@ -555,9 +765,21 @@ checks/evidence status only after the evidence exists.
 
 | Given | When | Then | Primary test location |
 |---|---|---|---|
+| accepted widget contract | visitor submits | local visitor bubble and typing/pending state appear before network result; accepted response marks it saved | `granit-site-cms` widget consumer tests/browser smoke |
+| widget POST fails or times out | consumer settles request | visitor text remains retryable/not-confirmed and no fake AI bubble appears | `granit-site-cms` widget consumer tests |
+| configured browser/backend/provider budgets | timeout invariant is checked | browser deadline exceeds the complete bounded server budget | consumer config/unit test + operations config test |
 | valid `site_widget.v1`, AI disabled | inbound is accepted | inbound persists; no run/provider call; public response stays compatible | `apps/api/test/public-intake.test.ts` |
+| frozen direct S05 golden inputs | direct service/request is assembled | prompt/policy/disclosure text+versions, `gpt-5.5`/low/`store:false`, candidates and public outcomes remain unchanged | direct golden + adapter request-shape tests |
+| the three legacy candidate shapes | compatibility adapter normalizes | stop-AI reply maps to `handoff_to_manager`, other reply maps to `answer`, no-reply maps to `no_reply`; no text parsing occurs | legacy adapter table test |
 | direct mode | safe turn runs | one app run links lead/conversation/inbound/outbound, versions, usage and allowed send gate | focused AI/repository tests + public intake |
 | persisted recent history | next turn input is built | bounded ordered context includes history and current inbound once, without raw contact data | context builder/repository tests |
+| previous 6-8 messages, last AI question and known slots | next decision input is built | ordered model-safe fields include them exactly as allowed and character/count caps hold; no model-quality claim is made | P1Q context/orchestrator tests |
+| negated-manager fixture supplies predefined `answer` candidate | app validates/applies | no handoff state is created | P1Q synthetic fixture + apply tests |
+| explicit-manager fixture supplies predefined `handoff_to_manager` candidate | app validates/applies | app state enters handoff/AI-stop behavior | P1Q synthetic fixture + apply tests |
+| mixed-intent fixture supplies valid/invalid candidate variants | app validates | schema/source/claim/action consistency is deterministic and invalid variant is blocked | P1Q synthetic fixture + validator tests |
+| fake returns invalid action/reply/evidence combination | app validates | candidate is blocked before persistence; controlled quality reason is recorded | P1Q validator tests |
+| code before M1 | dependency/source inventory runs | no Mastra package, runner or `live_v2` provider assembly exists | dependency/modular-boundary tests |
+| Mastra config is absent, disabled or non-staging | app assembles | direct remains default and non-staging Mastra is rejected without a provider call | config/app-context tests |
 | same inbound idempotency key replay | request repeats | same terminal run/reply returns; no duplicate run, span or provider call | public intake/repository tests |
 | invalid/unsafe candidate in either runner | app validates | no outbound; run becomes blocked/fallback; manager-visible quality event exists | runner contract + public intake |
 | model/Mastra/tool throws | turn fails | inbound remains, public safe fallback returns, run failure and quality reason are visible | runner contract + public intake |
@@ -567,6 +789,8 @@ checks/evidence status only after the evidence exists.
 | `mastra_openai_api` lacks API key | config loads | startup fails before serving routes; no secret value appears in the error | config tests |
 | configured model/effort is outside the first-slice allowlist | config loads | startup fails locally without a provider call; no silent model, effort, endpoint or auth substitution occurs | config tests |
 | authenticated staging response reports an unexpected model identity | candidate run returns | run fails closed, outbound is blocked, degradation is recorded, further Mastra evidence stops and direct rollback begins | runner contract + M3 staging evidence |
+| authenticated M3 fixed inputs cover negation, explicit handoff and mixed intent | Mastra model returns decisions | input-to-decision semantic hard gates pass with recorded failures/fallbacks; app still validates every candidate | M3 sanitized staging evidence |
+| authenticated M3 fixed inputs cover continuation and tone | replies are reviewed with stable labels | context retention, useful next step, no-repeat, natural tone/dryness/questionnaire labels and latency are recorded; fakes are not cited as this proof | M3 sanitized staging evidence |
 | Mastra mode outside staging | config loads | startup fails before serving routes | config tests |
 | Mastra mode disabled | app assembles | direct adapter remains selected with its preserved independent profile | app-context tests |
 | unknown runtime value is selected | config loads | ordinary enum validation rejects it; only the two implemented first-slice modes exist | config tests |
@@ -593,7 +817,9 @@ upgrade paths, and records schema/index/FK results without DB URL or row content
 
 The evidence file must contain:
 
-- exact git SHA, `site_widget.v1`, AI boundary, policy, prompt, tool, asset, requested
+- exact operations git SHA and, when W0 is complete, exact widget consumer SHA plus browser
+  pending-state timing and timeout invariant;
+- exact `site_widget.v1`, AI boundary, policy, prompt, tone, facts, tool and asset versions, requested
   `gpt-5.6-sol`/`medium`, sanitized returned model identity and pinned Mastra versions;
 - exact runtime mode and config names; API-key presence may be recorded only as boolean, with the
   value and all other secrets redacted;
@@ -601,8 +827,11 @@ The evidence file must contain:
 - route inventory before/after and proof of no Studio/public Mastra or Codex routes;
 - direct-path baseline run with its preserved profile and `mastra_openai_api` run linked to
   app-owned IDs; label this contract/rollback evidence, not a model-quality A/B comparison;
-- success, failure, handoff and takeover/send-gate outcomes;
-- sanitized token/cost/latency/span summary;
+- P1Q 15-20-case synthetic fixture-suite ID/version and structural schema/source/apply results;
+- M3 fixed live-corpus ID/version, case-level semantic/soft labels and 100% hard-gate result for
+  schema, prohibited promises, blocked send, explicit handoff and negation;
+- success, failure, fallback, handoff and takeover/send-gate outcomes;
+- sanitized token/cost/span summary plus full-response p50/p95 and fallback rate;
 - redaction canary result and 30-day expiry/cleanup proof;
 - kill-switch switch to direct mode and no-loss/no-duplicate result;
 - dependency/source/config/route inventory confirming that no Codex SDK/CLI or subscription/skills
@@ -619,6 +848,9 @@ Immediate switch to `direct_openai`, followed by `AI_WIDGET_ENABLED=false` if ne
 when any of these occurs:
 
 - AI reply persists after takeover or with send gate blocked;
+- any M3 live-corpus hard gate fails, including a prohibited promise, false/missed handoff,
+  negation failure or reply-after-blocked-gate; stop the remaining corpus immediately and begin
+  direct rollback;
 - inbound or outbound message is lost/duplicated across runtime selection;
 - public API leaks internal run/trace/business identifiers;
 - trace/span/evidence contains a redaction canary, secret or raw customer content;
@@ -638,16 +870,16 @@ but does not authorize production tuning or rollout.
 
 Rollback is code/config-forward: preserve app-owned rows and return to the reviewed direct path.
 Do not drop tables, erase traces, rewrite message outcomes or fabricate completion statuses.
+The direct path remains on the frozen S05 behavior profile; rollback restores availability/safety,
+not `live_v2` quality. If W0 itself must roll back, revert only its consumer deployment and keep
+server-accepted messages/business state unchanged. P1Q cannot require a runtime rollback before
+M1 because it has no live provider or customer enablement.
 
 ## Planned implementation file inventory
 
 Existing files that will likely change across approved slices:
 
 - `apps/api/src/modules/ai/ai-turn.ts`;
-- `apps/api/src/modules/ai/services/widget-ai-service.ts`;
-- `apps/api/src/modules/ai/adapters/openai-widget-assistant-provider.ts`;
-- `apps/api/src/modules/ai/policy/widget-ai-policy.ts`;
-- `apps/api/src/modules/ai/prompts/widget-ai-prompt.ts`;
 - `apps/api/src/modules/intake/ports/public-widget-ai-reply-generator.ts`;
 - `apps/api/src/modules/intake/use-cases/public-widget-intake-service.ts`;
 - conversation/public/manager repository contracts and Postgres adapter under
@@ -661,6 +893,24 @@ Existing files that will likely change across approved slices:
   slices;
 - `docs/ENVIRONMENT.md`, task/evidence indexes and the new evidence file.
 
+Frozen direct baseline files are inspected and golden-tested but not changed by P1Q/M1-M3:
+
+- `apps/api/src/modules/ai/services/widget-ai-service.ts`;
+- `apps/api/src/modules/ai/adapters/openai-widget-assistant-provider.ts`;
+- `apps/api/src/modules/ai/policy/widget-ai-policy.ts`;
+- `apps/api/src/modules/ai/prompts/widget-ai-prompt.ts`.
+
+If implementation cannot preserve them, it stops for owner review instead of weakening rollback.
+
+Cross-repo W0 is owned separately by
+`granit-site-cms@5c33610:apps/site/public/assets/js/main.js` and its discovered styles/tests. It
+is not part of a `granit-operations` implementation PR.
+
+Proposed new operations paths are provider-neutral decision/context/validator services, versioned
+`live_v2` tone/facts assets and fixed synthetic fixtures under the existing AI/test module
+structure. Exact filenames are selected in the P1Q task after checking then-current conventions;
+Mastra types must not leak into them.
+
 New module paths in this plan are proposed boundaries, not pre-created files. The implementation
 agent must preserve the repo's modular-monolith rules and record an ADR only if a meaningful
 operations boundary decision changes.
@@ -669,6 +919,9 @@ operations boundary decision changes.
 
 - production enablement or production approval;
 - continued staging enablement without a separate owner decision;
+- token streaming, SSE or WebSocket transport in the first slice;
+- vector RAG, long-term semantic memory, full catalog ingestion or a runtime Google Sheet;
+- arbitrary tools, external browsing, skill/layer execution or autonomous multi-step workflows;
 - Telegram AI outbound or S08 implementation;
 - S10 manager review-label mutation, bad-dialog sanitization/promotion or full eval corpus;
 - direct customer sends, delivery/outbox writes or business-table writes from Mastra;
@@ -687,7 +940,12 @@ operations boundary decision changes.
 
 | Risk | Mitigation / proof |
 |---|---|
-| Two runtime paths drift | Same input/candidate validator/persistence tests run against both; direct remains default. |
+| Pending UI masks a failed save | Distinct `pending`, `saved` and `not_confirmed/retryable` states; never show fake AI text. |
+| Browser timeout fires before bounded server work ends | Explicit cross-repo timeout invariant and tests before live UX evidence. |
+| Recent history leaks or grows without bound | Separate message-count/character caps and model-safe field allowlist with PII canaries. |
+| New model/framework still sounds robotic | P1Q removes context/schema/tone/facts wiring defects; only M3 live-corpus labels can prove model semantics and natural tone. |
+| Two runtime paths drift | Same normalized result/apply/persistence tests run against both; candidate validators stay profile-specific and direct golden behavior stays frozen. |
+| Quality logic is duplicated in direct and Mastra adapters | `live_v2` remains in its app-owned profile subtree and Mastra only executes its port; direct stays a legacy emergency bypass. |
 | Different direct/Mastra model profiles are misreported as a quality A/B | Preserve and record each profile independently; M3 proves wiring/rollback only, while quality comparison waits for sanitized evals. |
 | Trace becomes second CRM | Only IDs, versions, metrics and sanitized spans; business state remains existing tables/services. |
 | Run/message partial write | Complete persisted outcome and outbound linkage in one DB transaction; test crash/error edges. |
@@ -696,6 +954,7 @@ operations boundary decision changes.
 | Runtime enabled in production | Explicit deployment tier guard plus default direct mode and owner staging gate. |
 | Mastra API research is stale | Dated official-doc verification immediately before pinning packages. |
 | OpenAI model alias/provider fallback drifts | Request explicit `gpt-5.6-sol`/`medium`, record sanitized returned identity and stop on unsupported or unexpected substitution. |
+| `medium` reasoning misses acceptable latency | Record p50/p95 and fallback rate; stop for owner review rather than silently switching effort/model. |
 | Codex is accidentally nested under Mastra | Dependency/source/config/route inventory proves no Codex implementation exists in M1-M3. |
 | Installed server Codex credentials or skills leak into app execution | Future runner requires isolated identity/`CODEX_HOME`/allowlists; first slice contains no integration path that reads them. |
 | Manager-visible degradation becomes noisy | Controlled event/reason/severity set; show unresolved relevant events, not raw spans. |
@@ -706,6 +965,7 @@ operations boundary decision changes.
 
 - `docs/tasks/AI_DIALOG_MASTRA_OBSERVABILITY_FIRST_SLICE_RU.md`
 - `docs/tasks/README.md`
+- `docs/superpowers/specs/2026-07-14-live-widget-ai-design.md`
 
 ## Checks Run For This Plan
 
@@ -714,7 +974,10 @@ operations boundary decision changes.
 | `git status --short --branch` | reviewed | Clean detached baseline before creating a dedicated `codex/` branch. |
 | `ast-index rebuild --no-deps`, `ast-index conventions`, `ast-index map` | passed | Indexed current TypeScript code and verified repository/module patterns. |
 | Targeted AST/file/source inspection | passed | Verified AI boundary, direct adapter, send gate, schema, manager view, routes and tests listed above. |
+| `granit-ops-decisions` read-only audit | passed | Confirmed proposed structured-decision/eval sequence and that the repo is decision evidence, not an accepted harness. |
+| `granit-site-cms` read-only inspection | passed | Verified delayed bubble/current 10-second timeout, candidate content/import caveat and the ahead-of-upstream checkout; future W0 needs a separate clean worktree. |
 | `gh pr view 5`, branch/doc inspection at `cf04541` | passed | Verified draft PR metadata, owner-sequenced branch and source documents. |
+| Independent plan delta review | passed after fixes | Reconciled two-lane sequencing, frozen S05/live_v2 isolation, M3-only semantic proof, SHA-pinned external evidence, G0 authority and fail-fast hard gates. |
 | Placeholder/consistency/scope self-review | passed | No `TBD`/`TODO`; prerequisites, Mastra integration, S08/S10 and Studio scopes remain separated. |
 | Official OpenAI latest-model verification | passed for planning; repeat at G4 | On 2026-07-14 official docs identify `gpt-5.6-sol` and support `medium`; no package/runtime capability is assumed from this planning check. |
 | `git diff --check` | passed | No whitespace errors in the planning diff. |
@@ -722,6 +985,8 @@ operations boundary decision changes.
 ## Evidence Links
 
 - Source decision: <https://github.com/monaxovdulov/granit-plan-app/pull/5>
+- Owner-approved accelerated design:
+  `docs/superpowers/specs/2026-07-14-live-widget-ai-design.md`
 - Owner-selected OpenAI profile source, checked 2026-07-14:
   <https://developers.openai.com/api/docs/guides/latest-model>
 - Future Codex runner feasibility sources, not implementation approval:
@@ -740,6 +1005,7 @@ operations boundary decision changes.
 - G0 owner-linked `site_widget.v1` acceptance is not recorded in this repo.
 - App-owned run/quality state, manager-visible degradation, approved asset bundle and retention
   enforcement are not implemented.
+- W0 consumer pending/error UX and P1Q Live Dialog Core are designed but not implemented.
 - Official Mastra packages/docs have intentionally not been selected or pinned in this planning
   session.
 - All schema, AI behavior, environment, staging and production changes require owner review under
@@ -749,17 +1015,26 @@ operations boundary decision changes.
 
 Owner should review and either approve or request changes to:
 
-1. separation of G0/P1-P3 prerequisites from M1-M3 Mastra integration;
-2. the three-table app-owned storage shape and no-backfill strategy;
-3. `direct_openai` default/rollback and explicit staging-tier guard;
-4. redaction allowlist and retention defaults;
-5. manager-visible quality scope now versus S10 review/eval workflow later;
-6. first runtime profile `mastra_openai_api` + server API key + explicit
+1. two-lane order after G0: external W0 in parallel, and sequential operations
+   P1 -> P1Q -> P2 -> P3 -> M1 disabled -> M2 local/fake -> G6 -> M3 authenticated staging;
+2. W0 as a separate `granit-site-cms` task with unchanged `site_widget.v1` and no streaming;
+3. P1Q four-action contract, 6-8-message bounded context, `live_v2` tone/facts and fixed
+   15-20-case synthetic fixture suite before a live model, followed by semantic/soft-quality proof
+   only in M3;
+4. the three-table app-owned storage shape and no-backfill strategy;
+5. frozen `direct_openai` emergency rollback, exact structural legacy mapping and explicit
+   staging-tier guard, accepting that rollback restores legacy quality rather than `live_v2`;
+6. redaction allowlist, retention defaults and minimum manager-visible quality state now versus
+   S10 review/eval workflow later;
+7. first runtime profile `mastra_openai_api` + server API key + explicit
    `gpt-5.6-sol`/`medium`, with no silent substitution;
-7. preserved direct adapter as an emergency rollback with its independent current profile;
 8. future isolated `codex_subscription` runner as architecture-only scope outside M1-M3;
-9. explicit exclusion of separate/public Mastra Studio.
+9. explicit exclusion of separate/public Mastra Studio and exact staging latency acceptance after
+   the first representative baseline.
 
-After approval, create a new implementation task for Slice P0/P1 only. Do not install Mastra,
-write migration/runtime code, change staging config or start any later slice from this planning
-commit.
+After this plan is approved, obtain explicit owner acceptance/linkage for the paired provider,
+consumer and staging evidence and record it through P0. Neither W0 nor P1 starts before that G0.
+Once G0 is recorded, create separate W0 (`granit-site-cms`, clean worktree) and P1
+(`granit-operations`) tasks; they may proceed in parallel. P1Q starts only after P1 evidence. Do
+not install Mastra, write the P2 migration/runtime code, change staging config or start M1-M3 from
+this planning commit.
