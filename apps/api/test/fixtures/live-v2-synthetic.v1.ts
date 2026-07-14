@@ -22,7 +22,7 @@ import {
   type LiveV2Slot
 } from "../../src/modules/ai/profiles/live-v2/live-v2-contract.js";
 
-const SOURCE_COMMIT = "5c336109fc20549d0e618cb6834d24e0cc6b4ba0";
+const SOURCE_COMMIT = "23f2ee8c39ee2af30ca79cf9f2e5c4dd0229bf2a";
 export const TEST_LIVE_V2_AS_OF_DATE = "2026-07-14";
 
 export function buildLiveV2TestGateReader(

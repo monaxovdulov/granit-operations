@@ -47,6 +47,9 @@ Current evidence records:
   at `78c9947`; this records `core_local_checks_passed`, not G1Q sign-off, deployment or runtime
   enablement. G1Q/P2 remain pending explicit owner approval of all 15 facts rows, production
   `facts.v1.ts` and repeated checks.
+- `AI_DIALOG_P1Q_FACTS_SOURCE_AUDIT_RU.md` - exact-object source and semantic audit of the
+  corrected 15-row P1Q facts proposal pinned to remote-resolvable `granit-site-cms@23f2ee8...`;
+  this is proposal evidence, not owner approval or a production snapshot.
 - `P0_CHANNEL_NEUTRAL_CONVERSATION_FOUNDATION_RU.md` - channel-neutral widget/Telegram-ready conversation foundation evidence.
 - `TELEGRAM_INBOUND_MANAGER_MINI_PANEL_RU.md` - Telegram inbound webhook, manager binding, takeover/reply mini-panel, and no-direct-send evidence.
 - `TELEGRAM_OUTBOUND_DELIVERY_SENDER_RU.md` - Telegram delivery sender path, retry/failure status and manager-visible delivery evidence.

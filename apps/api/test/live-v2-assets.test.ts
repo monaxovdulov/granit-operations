@@ -13,7 +13,7 @@ import {
   TEST_LIVE_V2_FACTS
 } from "./fixtures/live-v2-synthetic.v1.js";
 
-const SOURCE_COMMIT_FOR_ASSERTION = "5c336109fc20549d0e618cb6834d24e0cc6b4ba0";
+const SOURCE_COMMIT_FOR_ASSERTION = "23f2ee8c39ee2af30ca79cf9f2e5c4dd0229bf2a";
 
 describe("live_v2 versioned assets", () => {
   it("keeps prompt and tone behavior explicit and versioned", () => {

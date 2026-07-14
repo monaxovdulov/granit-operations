@@ -6,6 +6,7 @@ Repo: `granit-operations`
 Slice: P1Q core before G1Q/P2
 Task link: `docs/tasks/AI_DIALOG_LIVE_V2_CORE_P1Q_RU.md`
 Facts review: `docs/tasks/AI_DIALOG_LIVE_V2_FACTS_P1Q_REVIEW_RU.md`
+Facts source audit: `docs/release/evidence/AI_DIALOG_P1Q_FACTS_SOURCE_AUDIT_RU.md`
 Implementation commit: `78c9947`
 Profile: `live_v2`; `runtimeEnabled: false`; `provider: null`
 Contracts: `granit_live_v2_candidate.v1`, `granit_live_v2_turn_view.v1`,
@@ -50,6 +51,7 @@ Contracts: `granit_live_v2_candidate.v1`, `granit_live_v2_turn_view.v1`,
 | `npm run build` | passed | Повторный typecheck и manager Vite build. |
 | `git diff --check` | passed | До code commit и после review-fixes. |
 | independent adversarial review | passed after fixes | Закрыты обходы hard-safety и PII в city; повторный review новых blockers не нашёл. |
+| independent facts source review | passed after proposal fixes | Все 15 строк и пять blob SHA подтверждены на `23f2ee8...`; это не owner approval. |
 
 ## No-Live-Call Proof
 
@@ -68,8 +70,10 @@ Contracts: `granit_live_v2_candidate.v1`, `granit_live_v2_turn_view.v1`,
 projection и validator. Это **не** решение владельца, не production `facts.v1.ts` и не runtime
 snapshot.
 
-Все 15 строк owner review table остаются `no — pending`, поэтому G1Q не пройден и P2 пока не
-разблокирован.
+Повторный exact-object source audit подтвердил все cited paths/blobs, перепривязал proposal к
+remote-resolvable source commit `23f2ee8c39ee2af30ca79cf9f2e5c4dd0229bf2a` и исправил две
+слишком широкие парафразы до owner review. Все 15 строк owner review table по-прежнему остаются
+`no — pending`, поэтому это не owner approval: G1Q не пройден и P2 пока не разблокирован.
 
 ## Evidence Limits
 
