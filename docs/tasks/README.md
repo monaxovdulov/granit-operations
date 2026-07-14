@@ -18,8 +18,9 @@ Current task records:
 - `S04_WIDGET_PERSISTENCE_RU.md` - website widget message persistence before AI replies.
 - `SERIOUS_AI_LAYER_RU.md` - preparation plan for the serious backend AI layer after S05 website safe AI.
 - `AI_DIALOG_BOUNDARY_STAGE_A_RU.md` - local Stage A implementation of the neutral AI turn boundary before Mastra runtime, Telegram AI outbound or production AI approval.
-- `AI_DIALOG_APP_TURN_BOUNDARY_P1_RU.md` - active P1 implementation of bounded app-owned history,
-  structural legacy decision compatibility and frozen direct OpenAI golden checks before P1Q.
+- `AI_DIALOG_APP_TURN_BOUNDARY_P1_RU.md` - locally passed G1/P1 implementation of bounded causal
+  history, app-owned identity, structural legacy decision orchestration and frozen direct S05
+  golden checks before P1Q.
 - `AI_DIALOG_MASTRA_OBSERVABILITY_FIRST_SLICE_RU.md` - active implementation plan: G0 is accepted;
   external W0 widget UX may run in parallel with the operations lane
   `P1 -> P1Q -> P2 -> P3 -> M1 disabled -> M2 local/fake -> G6 owner gate -> M3 authenticated

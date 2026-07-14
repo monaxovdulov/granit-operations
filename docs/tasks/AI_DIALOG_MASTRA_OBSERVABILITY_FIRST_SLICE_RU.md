@@ -1,6 +1,6 @@
 # Task: AI-DIALOG-MASTRA-OBSERVABILITY-FIRST-SLICE - implementation plan первого staging-only Mastra + observability slice
 
-Status: in_progress; G0 accepted; P1 authorized
+Status: in_progress; G0 accepted; G1/P1 local implementation passed; P1Q authorized
 Created: 2026-07-13
 Updated: 2026-07-14
 Repo: `granit-operations`
@@ -311,6 +311,11 @@ G0 status on 2026-07-14: `accepted`. Exact artifacts, current preview integrity,
 scope limits and the distinction from the unrelated historical channel-neutral P0 are recorded in
 `docs/release/evidence/SITE_WIDGET_V1_CROSS_REPO_ACCEPTANCE_RU.md`.
 
+G1/P1 status on 2026-07-14: `local_implementation_passed` at code head `84e61de`. Bounded causal
+history, app-only IDs, structural legacy orchestration, frozen direct golden checks and the two
+independent-review fixes are recorded in
+`docs/release/evidence/AI_DIALOG_APP_TURN_BOUNDARY_P1_RU.md`.
+
 ## Data contracts to finish before Mastra
 
 Keep `AiTurnInput` model-safe and channel-neutral. Do not add raw Fastify, widget request or
@@ -576,6 +581,10 @@ Work:
 Exit: direct path passes all existing tests; AI core has no `@granit/contracts`, Fastify,
 Telegram update or provider payload dependency; compact context includes bounded persisted
 history and current inbound exactly once.
+
+Result 2026-07-14: passed locally at code head `84e61de`; full suite 99/99 and build/typecheck
+passed under bounded memory. Evidence:
+`docs/release/evidence/AI_DIALOG_APP_TURN_BOUNDARY_P1_RU.md`.
 
 ### Slice P1Q - Live Dialog Core (provider-neutral, no live model)
 
@@ -1064,8 +1073,8 @@ Owner approved the plan and ordered implementation on 2026-07-14. The accepted d
 9. explicit exclusion of separate/public Mastra Studio and exact staging latency acceptance after
    the first representative baseline.
 
-G0 is recorded and P1 is the next backend slice. A separate W0 may proceed from the actual current
-widget source/integration repos, but it does not block P1/P1Q. P1Q starts only after P1 evidence.
+G0 and G1/P1 are recorded; P1Q is the next backend slice. A separate W0 may proceed from the actual
+current widget source/integration repos, but it does not block P1Q.
 Mastra packages remain forbidden until P1/P1Q/P2/P3 and G4; staging config and the first
 authenticated `live_v2` call remain forbidden until the exact-SHA G6 approval immediately before
 M3.

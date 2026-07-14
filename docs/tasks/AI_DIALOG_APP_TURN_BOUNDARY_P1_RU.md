@@ -1,6 +1,6 @@
 # Task: AI-DIALOG-APP-TURN-BOUNDARY-P1 - App-owned context and legacy compatibility
 
-Status: in_progress
+Status: local_implementation_passed; G1 passed; not deployed
 Created: 2026-07-14
 Repo: `granit-operations`
 Slice: P1 before Live Dialog Core P1Q
@@ -69,18 +69,21 @@ Owner/agent: owner-approved sequence / Codex implementation agent
 | `npm run smoke:api` | passed, 44 tests | Pre-P1 public intake baseline; providers are injected fakes. |
 | `npm test` | passed, 84 tests | Pre-P1 full Vitest baseline; no production adapter import/call path. |
 | `npm run build` | passed | Pre-P1 manager production build. |
+| final full Vitest, one worker | passed, 12 files / 99 tests | Post-P1 local suite. |
+| final build with 512 MiB Node heap cap | passed | Includes full typecheck and manager Vite build. |
+| independent adversarial review | two findings addressed | Causal replay and internal-ID consistency findings fixed; bounded post-fix checks passed before sign-off. |
 
 ## Evidence Links
 
 - Parent plan: `docs/tasks/AI_DIALOG_MASTRA_OBSERVABILITY_FIRST_SLICE_RU.md`.
 - G0 evidence: `docs/release/evidence/SITE_WIDGET_V1_CROSS_REPO_ACCEPTANCE_RU.md`.
-- P1 evidence: to be created after implementation checks pass.
+- P1 evidence: `docs/release/evidence/AI_DIALOG_APP_TURN_BOUNDARY_P1_RU.md`.
 
 ## Blockers
 
-- None for P1. P1Q remains gated on reviewed P1 evidence.
+- None for P1. G1 evidence passed; P1Q may start.
 
 ## Next Action
 
-Implement bounded context and structural compatibility, integrate through the app-owned use case,
-then run focused/full checks and record exact P1 evidence SHA.
+Start P1Q from reviewed P1 code head `84e61de`; keep direct S05 golden tests green and do not add
+Mastra packages or live model calls.
