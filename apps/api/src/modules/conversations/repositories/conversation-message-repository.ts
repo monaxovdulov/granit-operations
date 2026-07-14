@@ -1,6 +1,6 @@
 import type { SiteWidgetUtm } from "@granit/contracts";
 
-import type { AiTurnInput } from "../../ai/ai-turn.js";
+import type { AiTurnExecutionContext, AiTurnInput } from "../../ai/ai-turn.js";
 import type {
   AiState,
   ChannelProvider,
@@ -10,6 +10,7 @@ import type {
 } from "./lead-conversation-types.js";
 
 export type SiteWidgetStoredAiReply = {
+  internalMessageId: string;
   publicMessageId: string;
   body: string;
   createdAt: string;
@@ -68,6 +69,7 @@ export type AcceptInboundMessageResult = {
   conversationId: string;
   publicConversationId: string;
   channelIdentityId: string;
+  inboundMessageId: string;
   publicMessageId: string;
   widgetPublicSessionId?: string;
   agentAllowedToReply: boolean;
@@ -75,6 +77,7 @@ export type AcceptInboundMessageResult = {
   replayed: boolean;
   existingAiReply?: SiteWidgetStoredAiReply;
   aiTurnInput?: AiTurnInput;
+  aiTurnExecutionContext?: AiTurnExecutionContext;
 };
 
 export type PersistAiReplyWithSendGateInput = {

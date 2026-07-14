@@ -6,7 +6,9 @@ import {
 } from "@granit/contracts";
 
 import {
+  buildSiteWidgetAiTurnExecutionContext,
   buildStageASiteWidgetAiTurnInput,
+  type AiTurnContextMessage,
   type AiTurnInput
 } from "../../src/modules/ai/ai-turn.js";
 import {
@@ -49,6 +51,12 @@ import {
   type TakeoverSiteWidgetConversationInput
 } from "../../src/repositories/intake-repository.js";
 
+type MemoryAiContextMessage = {
+  internalMessageId: string;
+  createdAt: string;
+  message: AiTurnContextMessage;
+};
+
 export class MemoryIntakeRepository implements IntakeRepository {
   saveCalls = 0;
   aiSaveCalls = 0;
@@ -67,6 +75,7 @@ export class MemoryIntakeRepository implements IntakeRepository {
     {
       leadId: string;
       publicSessionId: string;
+      inboundMessageId: string;
       publicMessageId: string;
       requestFingerprint: string;
     }
@@ -74,6 +83,7 @@ export class MemoryIntakeRepository implements IntakeRepository {
   private readonly widgetAiIdempotency = new Map<
     string,
     {
+      internalMessageId: string;
       publicMessageId: string;
       body: string;
       createdAt: string;
@@ -87,6 +97,7 @@ export class MemoryIntakeRepository implements IntakeRepository {
       conversationId: string;
       publicConversationId: string;
       channelIdentityId: string;
+      inboundMessageId: string;
       publicMessageId: string;
       requestFingerprint: string;
     }
@@ -147,6 +158,8 @@ export class MemoryIntakeRepository implements IntakeRepository {
       requestFingerprint: string;
     }
   >();
+  private readonly aiContextMessages = new Map<string, MemoryAiContextMessage[]>();
+  private lastAiContextCreatedAtMs = 0;
 
   constructor(
     private readonly options: { failPersistence?: boolean; failAiPersistence?: boolean } = {}
@@ -164,6 +177,47 @@ export class MemoryIntakeRepository implements IntakeRepository {
     }
 
     return lead;
+  }
+
+  private appendAiContextMessage(
+    conversationId: string,
+    message: AiTurnContextMessage,
+    internalMessageId = randomUUID()
+  ): string {
+    const createdAtMs = Math.max(Date.now(), this.lastAiContextCreatedAtMs + 1);
+    this.lastAiContextCreatedAtMs = createdAtMs;
+    const messages = this.aiContextMessages.get(conversationId) ?? [];
+    messages.push({
+      internalMessageId,
+      createdAt: new Date(createdAtMs).toISOString(),
+      message
+    });
+    this.aiContextMessages.set(conversationId, messages);
+    return internalMessageId;
+  }
+
+  private previousAiContextMessagesNewestFirst(
+    conversationId: string,
+    throughInboundMessageId: string
+  ): AiTurnContextMessage[] {
+    const messages = [...(this.aiContextMessages.get(conversationId) ?? [])].sort(
+      (left, right) => {
+        const createdAtOrder = left.createdAt.localeCompare(right.createdAt);
+        return createdAtOrder || left.internalMessageId.localeCompare(right.internalMessageId);
+      }
+    );
+    const anchorIndex = messages.findIndex(
+      (candidate) => candidate.internalMessageId === throughInboundMessageId
+    );
+
+    if (anchorIndex < 0) {
+      throw new Error("memory accepted inbound message anchor not found for AI turn context");
+    }
+
+    return messages
+      .slice(0, anchorIndex)
+      .reverse()
+      .map((candidate) => candidate.message);
   }
 
   async saveAcceptedSiteFormSubmission(
@@ -250,13 +304,15 @@ export class MemoryIntakeRepository implements IntakeRepository {
         conversationId: saved.conversationId,
         publicConversationId: saved.publicConversationId,
         channelIdentityId: saved.channelIdentityId,
+        inboundMessageId: saved.inboundMessageId,
         publicMessageId: saved.publicMessageId,
         widgetPublicSessionId: saved.publicSessionId,
         agentAllowedToReply: saved.agentAllowedToReply,
         aiState: saved.aiState,
         replayed: saved.replayed,
         existingAiReply: saved.aiReply,
-        aiTurnInput: saved.aiTurnInput
+        aiTurnInput: saved.aiTurnInput,
+        aiTurnExecutionContext: saved.aiTurnExecutionContext
       };
     }
 
@@ -285,6 +341,7 @@ export class MemoryIntakeRepository implements IntakeRepository {
         conversationId: existing.conversationId,
         publicConversationId: existing.publicConversationId,
         channelIdentityId: existing.channelIdentityId,
+        inboundMessageId: existing.inboundMessageId,
         publicMessageId: existing.publicMessageId,
         agentAllowedToReply: conversation?.agentAllowedToReply ?? false,
         aiState: conversation?.aiState ?? "needs_manager",
@@ -399,11 +456,13 @@ export class MemoryIntakeRepository implements IntakeRepository {
       this.leads.set(leadId, lead);
     }
 
+    const inboundMessageId = randomUUID();
     this.telegramIdempotency.set(input.idempotencyKey, {
       leadId,
       conversationId,
       publicConversationId,
       channelIdentityId,
+      inboundMessageId,
       publicMessageId: input.publicMessageId,
       requestFingerprint: input.requestFingerprint
     });
@@ -421,6 +480,7 @@ export class MemoryIntakeRepository implements IntakeRepository {
       conversationId,
       publicConversationId,
       channelIdentityId,
+      inboundMessageId,
       publicMessageId: input.publicMessageId,
       agentAllowedToReply: conversation?.agentAllowedToReply ?? false,
       aiState: conversation?.aiState ?? (needsManager ? "needs_manager" : "ai_collecting_info"),
@@ -458,12 +518,17 @@ export class MemoryIntakeRepository implements IntakeRepository {
         );
       const agentAllowedToReply = conversation?.agentAllowedToReply ?? false;
       const aiState = conversation?.aiState ?? "ai_collecting_info";
+      const previousMessagesNewestFirst = this.previousAiContextMessagesNewestFirst(
+        conversationId,
+        existing.inboundMessageId
+      );
 
       return {
         leadId: existing.leadId,
         conversationId,
         publicConversationId,
         channelIdentityId,
+        inboundMessageId: existing.inboundMessageId,
         publicSessionId: existing.publicSessionId,
         publicMessageId: existing.publicMessageId,
         agentAllowedToReply,
@@ -471,16 +536,29 @@ export class MemoryIntakeRepository implements IntakeRepository {
         replayed: true,
         aiReply: aiReply
           ? {
+              internalMessageId: aiReply.internalMessageId,
               publicMessageId: aiReply.publicMessageId,
               body: aiReply.body,
               createdAt: aiReply.createdAt
             }
           : undefined,
-        aiTurnInput: buildMemorySiteWidgetAiTurnInput(input, {
+        aiTurnInput: buildMemorySiteWidgetAiTurnInput(
+          input,
+          {
+            publicConversationId,
+            publicMessageId: existing.publicMessageId,
+            agentAllowedToReply,
+            aiState
+          },
+          previousMessagesNewestFirst
+        ),
+        aiTurnExecutionContext: buildSiteWidgetAiTurnExecutionContext({
+          leadId: existing.leadId,
+          conversationId,
+          inboundMessageId: existing.inboundMessageId,
           publicConversationId,
-          publicMessageId: existing.publicMessageId,
-          agentAllowedToReply,
-          aiState
+          publicInboundMessageId: existing.publicMessageId,
+          requestFingerprint: input.requestFingerprint
         })
       };
     }
@@ -558,9 +636,18 @@ export class MemoryIntakeRepository implements IntakeRepository {
       this.leads.set(leadId, lead);
     }
 
+    const inboundMessageId = this.appendAiContextMessage(conversationId, {
+      publicMessageId: input.publicMessageId,
+      direction: "inbound",
+      senderRole: "visitor",
+      contentType: "text",
+      submittedAt: input.request.submitted_at,
+      text: input.request.message.text
+    });
     this.widgetIdempotency.set(input.request.idempotency_key, {
       leadId,
       publicSessionId,
+      inboundMessageId,
       publicMessageId: input.publicMessageId,
       requestFingerprint: input.requestFingerprint
     });
@@ -580,16 +667,29 @@ export class MemoryIntakeRepository implements IntakeRepository {
       conversationId,
       publicConversationId,
       channelIdentityId,
+      inboundMessageId,
       publicSessionId,
       publicMessageId: input.publicMessageId,
       agentAllowedToReply,
       aiState,
       replayed: false,
-      aiTurnInput: buildMemorySiteWidgetAiTurnInput(input, {
+      aiTurnInput: buildMemorySiteWidgetAiTurnInput(
+        input,
+        {
+          publicConversationId,
+          publicMessageId: input.publicMessageId,
+          agentAllowedToReply,
+          aiState
+        },
+        this.previousAiContextMessagesNewestFirst(conversationId, inboundMessageId)
+      ),
+      aiTurnExecutionContext: buildSiteWidgetAiTurnExecutionContext({
+        leadId,
+        conversationId,
+        inboundMessageId,
         publicConversationId,
-        publicMessageId: input.publicMessageId,
-        agentAllowedToReply,
-        aiState
+        publicInboundMessageId: input.publicMessageId,
+        requestFingerprint: input.requestFingerprint
       })
     };
   }
@@ -623,6 +723,7 @@ export class MemoryIntakeRepository implements IntakeRepository {
       }
 
       return {
+        internalMessageId: existing.internalMessageId,
         publicMessageId: existing.publicMessageId,
         body: existing.body,
         createdAt: existing.createdAt
@@ -690,7 +791,16 @@ export class MemoryIntakeRepository implements IntakeRepository {
     };
 
     this.leads.set(lead.leadId, updatedLead);
+    const internalMessageId = this.appendAiContextMessage(input.conversationId, {
+      publicMessageId: input.publicMessageId,
+      direction: "outbound",
+      senderRole: "ai_assistant",
+      contentType: "text",
+      submittedAt: createdAt,
+      text: input.body
+    });
     this.widgetAiIdempotency.set(input.idempotencyKey, {
+      internalMessageId,
       publicMessageId: input.publicMessageId,
       body: input.body,
       createdAt,
@@ -698,6 +808,7 @@ export class MemoryIntakeRepository implements IntakeRepository {
     });
 
     return {
+      internalMessageId,
       publicMessageId: input.publicMessageId,
       body: input.body,
       createdAt
@@ -1372,7 +1483,8 @@ function buildMemorySiteWidgetAiTurnInput(
     publicMessageId: string;
     agentAllowedToReply: boolean;
     aiState: SaveAcceptedSiteWidgetMessageResult["aiState"];
-  }
+  },
+  previousMessagesNewestFirst: AiTurnContextMessage[]
 ): AiTurnInput {
   return buildStageASiteWidgetAiTurnInput({
     publicConversationId: accepted.publicConversationId,
@@ -1400,7 +1512,8 @@ function buildMemorySiteWidgetAiTurnInput(
     gate: {
       aiState: accepted.aiState,
       agentAllowedToReply: accepted.agentAllowedToReply
-    }
+    },
+    previousMessagesNewestFirst
   });
 }
 

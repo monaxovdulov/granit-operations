@@ -1,4 +1,4 @@
-import { and, desc, eq, or, type SQLWrapper } from "drizzle-orm";
+import { and, desc, eq, lt, or, type SQLWrapper } from "drizzle-orm";
 
 import {
   channelIdentities,
@@ -17,7 +17,10 @@ import {
 import type { SiteFormIntakeRequest, SiteWidgetMessageRequest } from "@granit/contracts";
 
 import {
+  AI_TURN_CONTEXT_MAX_MESSAGES,
+  buildSiteWidgetAiTurnExecutionContext,
   buildStageASiteWidgetAiTurnInput,
+  type AiTurnContextMessage,
   type AiTurnInput
 } from "../../ai/ai-turn.js";
 import {
@@ -401,23 +404,44 @@ export class PostgresIntakeRepository implements IntakeRepository {
           });
         }
 
-        return {
-          leadId: conversation.leadId,
-          conversationId: conversation.id,
-          publicConversationId: conversation.publicConversationId,
-          channelIdentityId: identity.id,
-          publicMessageId: message.publicMessageId,
-          widgetPublicSessionId: widgetSession?.publicSessionId ?? undefined,
-          agentAllowedToReply: conversation.agentAllowedToReply,
-          aiState: toAiState(conversation.aiState),
-          replayed: false,
-          aiTurnInput: buildSiteWidgetAiTurnInput(input, {
+        const previousMessagesNewestFirst =
+          input.channel === "site_widget"
+            ? await loadPreviousAiTurnContextMessages(tx, conversation.id, message.id)
+            : [];
+        const aiTurnInput = buildSiteWidgetAiTurnInput(
+          input,
+          {
             publicConversationId: conversation.publicConversationId,
             publicMessageId: message.publicMessageId,
             publicSessionId: widgetSession?.publicSessionId,
             agentAllowedToReply: conversation.agentAllowedToReply,
             aiState: toAiState(conversation.aiState)
-          })
+          },
+          previousMessagesNewestFirst
+        );
+
+        return {
+          leadId: conversation.leadId,
+          conversationId: conversation.id,
+          publicConversationId: conversation.publicConversationId,
+          channelIdentityId: identity.id,
+          inboundMessageId: message.id,
+          publicMessageId: message.publicMessageId,
+          widgetPublicSessionId: widgetSession?.publicSessionId ?? undefined,
+          agentAllowedToReply: conversation.agentAllowedToReply,
+          aiState: toAiState(conversation.aiState),
+          replayed: false,
+          aiTurnInput,
+          aiTurnExecutionContext: aiTurnInput
+            ? buildSiteWidgetAiTurnExecutionContext({
+                leadId: conversation.leadId,
+                conversationId: conversation.id,
+                inboundMessageId: message.id,
+                publicConversationId: conversation.publicConversationId,
+                publicInboundMessageId: message.publicMessageId,
+                requestFingerprint: input.requestFingerprint
+              })
+            : undefined
         };
       });
     } catch (error) {
@@ -475,13 +499,15 @@ export class PostgresIntakeRepository implements IntakeRepository {
       conversationId: result.conversationId,
       publicConversationId: result.publicConversationId,
       channelIdentityId: result.channelIdentityId,
+      inboundMessageId: result.inboundMessageId,
       publicSessionId: result.widgetPublicSessionId ?? input.publicSessionId,
       publicMessageId: result.publicMessageId,
       agentAllowedToReply: result.agentAllowedToReply,
       aiState: result.aiState,
       replayed: result.replayed,
       aiReply: result.existingAiReply,
-      aiTurnInput: result.aiTurnInput
+      aiTurnInput: result.aiTurnInput,
+      aiTurnExecutionContext: result.aiTurnExecutionContext
     };
   }
 
@@ -569,6 +595,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
             createdAt: now
           })
           .returning({
+            internalMessageId: conversationMessages.id,
             publicMessageId: conversationMessages.publicMessageId,
             body: conversationMessages.body,
             createdAt: conversationMessages.createdAt
@@ -598,6 +625,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
         );
 
         return {
+          internalMessageId: message.internalMessageId,
           publicMessageId: message.publicMessageId,
           body: message.body,
           createdAt: message.createdAt.toISOString()
@@ -1006,6 +1034,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
       .select({
         leadId: conversationMessages.leadId,
         conversationId: conversationMessages.conversationId,
+        inboundMessageId: conversationMessages.id,
         publicConversationId: conversations.publicConversationId,
         channel: conversations.channel,
         agentAllowedToReply: conversations.agentAllowedToReply,
@@ -1051,6 +1080,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
   ): Promise<SiteWidgetAiMessageLookupResult | null> {
     const [existing] = await this.db
       .select({
+        internalMessageId: conversationMessages.id,
         publicMessageId: conversationMessages.publicMessageId,
         body: conversationMessages.body,
         createdAt: conversationMessages.createdAt,
@@ -1062,6 +1092,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
 
     return existing
       ? {
+          internalMessageId: existing.internalMessageId,
           publicMessageId: existing.publicMessageId,
           body: existing.body,
           createdAt: existing.createdAt.toISOString(),
@@ -1187,6 +1218,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
     existing: {
       leadId: string;
       conversationId: string;
+      inboundMessageId: string;
       publicConversationId: string;
       channel: string;
       agentAllowedToReply: boolean;
@@ -1220,6 +1252,18 @@ export class PostgresIntakeRepository implements IntakeRepository {
     const existingAiReply = await this.findExistingAiMessageByIdempotencyKey(
       `ai:${existing.publicMessageId}`
     );
+    const previousMessagesNewestFirst =
+      existing.channel === "site_widget"
+        ? await loadPreviousAiTurnContextMessages(
+            this.db,
+            existing.conversationId,
+            existing.inboundMessageId
+          )
+        : [];
+    const aiTurnInput = buildPersistedSiteWidgetAiTurnInput(
+      existing,
+      previousMessagesNewestFirst
+    );
 
     return {
       leadId: existing.leadId,
@@ -1227,6 +1271,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
       publicConversationId: existing.publicConversationId,
       channelIdentityId:
         existing.messageChannelIdentityId ?? existing.conversationChannelIdentityId ?? "",
+      inboundMessageId: existing.inboundMessageId,
       publicMessageId: existing.publicMessageId,
       widgetPublicSessionId: existing.publicSessionId ?? undefined,
       agentAllowedToReply: existing.agentAllowedToReply,
@@ -1234,12 +1279,23 @@ export class PostgresIntakeRepository implements IntakeRepository {
       replayed: true,
       existingAiReply: existingAiReply
         ? {
+            internalMessageId: existingAiReply.internalMessageId,
             publicMessageId: existingAiReply.publicMessageId,
             body: existingAiReply.body,
             createdAt: existingAiReply.createdAt
           }
         : undefined,
-      aiTurnInput: buildPersistedSiteWidgetAiTurnInput(existing)
+      aiTurnInput,
+      aiTurnExecutionContext: aiTurnInput
+        ? buildSiteWidgetAiTurnExecutionContext({
+            leadId: existing.leadId,
+            conversationId: existing.conversationId,
+            inboundMessageId: existing.inboundMessageId,
+            publicConversationId: existing.publicConversationId,
+            publicInboundMessageId: existing.publicMessageId,
+            requestFingerprint: existing.requestFingerprint
+          })
+        : undefined
     };
   }
 
@@ -1252,6 +1308,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
     }
 
     return {
+      internalMessageId: existing.internalMessageId,
       publicMessageId: existing.publicMessageId,
       body: existing.body,
       createdAt: existing.createdAt
@@ -1279,7 +1336,8 @@ function buildSiteWidgetAiTurnInput(
     publicSessionId?: string;
     agentAllowedToReply: boolean;
     aiState: AiState;
-  }
+  },
+  previousMessagesNewestFirst: AiTurnContextMessage[]
 ): AiTurnInput | undefined {
   if (
     input.channel !== "site_widget" ||
@@ -1316,33 +1374,37 @@ function buildSiteWidgetAiTurnInput(
     gate: {
       aiState: accepted.aiState,
       agentAllowedToReply: accepted.agentAllowedToReply
-    }
+    },
+    previousMessagesNewestFirst
   });
 }
 
-function buildPersistedSiteWidgetAiTurnInput(input: {
-  channel: string;
-  publicConversationId: string;
-  agentAllowedToReply: boolean;
-  aiState: string;
-  publicSessionId: string | null;
-  publicMessageId: string;
-  messageBody: string;
-  sourcePageUrl: string | null;
-  conversationSourcePageUrl: string | null;
-  submittedAt: Date;
-  widgetInstanceId: string | null;
-  sessionWidgetInstanceId: string | null;
-  referrerUrl: string | null;
-  pageTitle: string | null;
-  visitorContext: Record<string, unknown> | null;
-  contactName: string;
-  contactPhone: string | null;
-  contactEmail: string | null;
-  contactPreferred: string | null;
-  contactCity: string | null;
-  requestFingerprint: string;
-}): AiTurnInput | undefined {
+function buildPersistedSiteWidgetAiTurnInput(
+  input: {
+    channel: string;
+    publicConversationId: string;
+    agentAllowedToReply: boolean;
+    aiState: string;
+    publicSessionId: string | null;
+    publicMessageId: string;
+    messageBody: string;
+    sourcePageUrl: string | null;
+    conversationSourcePageUrl: string | null;
+    submittedAt: Date;
+    widgetInstanceId: string | null;
+    sessionWidgetInstanceId: string | null;
+    referrerUrl: string | null;
+    pageTitle: string | null;
+    visitorContext: Record<string, unknown> | null;
+    contactName: string;
+    contactPhone: string | null;
+    contactEmail: string | null;
+    contactPreferred: string | null;
+    contactCity: string | null;
+    requestFingerprint: string;
+  },
+  previousMessagesNewestFirst: AiTurnContextMessage[]
+): AiTurnInput | undefined {
   const pageUrl = input.sourcePageUrl ?? input.conversationSourcePageUrl;
   const widgetInstanceId = input.widgetInstanceId ?? input.sessionWidgetInstanceId;
 
@@ -1381,7 +1443,98 @@ function buildPersistedSiteWidgetAiTurnInput(input: {
     gate: {
       aiState: toAiState(input.aiState),
       agentAllowedToReply: input.agentAllowedToReply
+    },
+    previousMessagesNewestFirst
+  });
+}
+
+type ConversationMessageReader = Pick<OperationsDb, "select">;
+
+async function loadPreviousAiTurnContextMessages(
+  reader: ConversationMessageReader,
+  conversationId: string,
+  throughInboundMessageId: string
+): Promise<AiTurnContextMessage[]> {
+  const [anchor] = await reader
+    .select({
+      id: conversationMessages.id,
+      createdAt: conversationMessages.createdAt
+    })
+    .from(conversationMessages)
+    .where(
+      and(
+        eq(conversationMessages.id, throughInboundMessageId),
+        eq(conversationMessages.conversationId, conversationId),
+        eq(conversationMessages.direction, "inbound"),
+        eq(conversationMessages.senderRole, "visitor"),
+        eq(conversationMessages.contentType, "text")
+      )
+    )
+    .limit(1);
+
+  if (!anchor) {
+    throw new Error("accepted inbound message anchor not found for AI turn context");
+  }
+
+  const rows = await reader
+    .select({
+      publicMessageId: conversationMessages.publicMessageId,
+      direction: conversationMessages.direction,
+      senderRole: conversationMessages.senderRole,
+      body: conversationMessages.body,
+      submittedAt: conversationMessages.submittedAt
+    })
+    .from(conversationMessages)
+    .where(
+      and(
+        eq(conversationMessages.conversationId, conversationId),
+        eq(conversationMessages.contentType, "text"),
+        or(
+          and(
+            eq(conversationMessages.direction, "inbound"),
+            eq(conversationMessages.senderRole, "visitor")
+          ),
+          and(
+            eq(conversationMessages.direction, "outbound"),
+            eq(conversationMessages.senderRole, "ai_assistant")
+          )
+        ),
+        or(
+          lt(conversationMessages.createdAt, anchor.createdAt),
+          and(
+            eq(conversationMessages.createdAt, anchor.createdAt),
+            lt(conversationMessages.id, anchor.id)
+          )
+        )
+      )
+    )
+    .orderBy(desc(conversationMessages.createdAt), desc(conversationMessages.id))
+    .limit(AI_TURN_CONTEXT_MAX_MESSAGES - 1);
+
+  return rows.map((row): AiTurnContextMessage => {
+    if (row.direction === "inbound" && row.senderRole === "visitor") {
+      return {
+        publicMessageId: row.publicMessageId,
+        direction: "inbound",
+        senderRole: "visitor",
+        contentType: "text",
+        submittedAt: row.submittedAt.toISOString(),
+        text: row.body
+      };
     }
+
+    if (row.direction === "outbound" && row.senderRole === "ai_assistant") {
+      return {
+        publicMessageId: row.publicMessageId,
+        direction: "outbound",
+        senderRole: "ai_assistant",
+        contentType: "text",
+        submittedAt: row.submittedAt.toISOString(),
+        text: row.body
+      };
+    }
+
+    throw new Error("unsafe conversation message reached AI turn context mapping");
   });
 }
 
@@ -1716,6 +1869,7 @@ async function findExistingProviderInbound(
     .select({
       leadId: conversationMessages.leadId,
       conversationId: conversationMessages.conversationId,
+      inboundMessageId: conversationMessages.id,
       publicConversationId: conversations.publicConversationId,
       channel: conversations.channel,
       agentAllowedToReply: conversations.agentAllowedToReply,

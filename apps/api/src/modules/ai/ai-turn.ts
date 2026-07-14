@@ -1,4 +1,7 @@
 export const AI_TURN_INPUT_VERSION = "granit_ai_turn_input.stage_a.v1";
+export const AI_TURN_EXECUTION_CONTEXT_VERSION = "granit_ai_turn_execution_context.v1";
+export const AI_TURN_CONTEXT_MAX_MESSAGES = 8;
+export const AI_TURN_CONTEXT_MAX_CHARACTERS = 8_000;
 
 export type AiReplyCapableChannel = "site_widget";
 
@@ -10,6 +13,38 @@ export type AiTurnAiState =
   | "closed";
 
 export type AiTurnPreferredContact = "phone" | "whatsapp" | "telegram" | "email";
+
+export type AiTurnContextMessage = {
+  publicMessageId: string;
+  direction: "inbound" | "outbound";
+  senderRole: "visitor" | "ai_assistant";
+  contentType: "text";
+  submittedAt: string;
+  text: string;
+};
+
+/**
+ * App-only persistence identity for one accepted turn. This context must never be passed to a
+ * model or mapped into a public site_widget.v1 response.
+ */
+export type AiTurnExecutionContext = {
+  version: typeof AI_TURN_EXECUTION_CONTEXT_VERSION;
+  channel: AiReplyCapableChannel;
+  internal: {
+    leadId: string;
+    conversationId: string;
+    inboundMessageId: string;
+  };
+  public: {
+    conversationId: string;
+    inboundMessageId: string;
+  };
+  turn: {
+    idempotencyKey: string;
+    acceptedRequestFingerprint: string;
+    inputFingerprint?: string;
+  };
+};
 
 export type AiTurnInput = {
   version: typeof AI_TURN_INPUT_VERSION;
@@ -55,14 +90,7 @@ export type AiTurnInput = {
     timezone?: string;
   };
   compactContext: {
-    messages: Array<{
-      publicMessageId: string;
-      direction: "inbound";
-      senderRole: "visitor";
-      contentType: "text";
-      submittedAt: string;
-      text: string;
-    }>;
+    messages: AiTurnContextMessage[];
   };
   knownSlots: {
     customerNameProvided: boolean;
@@ -156,11 +184,107 @@ export type BuildStageASiteWidgetAiTurnInput = {
     aiState: AiTurnAiState;
     agentAllowedToReply: boolean;
   };
+  previousMessagesNewestFirst?: AiTurnContextMessage[];
 };
+
+export type BuildBoundedAiTurnContextInput = {
+  currentInboundMessage: AiTurnContextMessage & {
+    direction: "inbound";
+    senderRole: "visitor";
+  };
+  previousMessagesNewestFirst: AiTurnContextMessage[];
+  maxMessages?: number;
+  maxCharacters?: number;
+};
+
+export function buildBoundedAiTurnContext(
+  input: BuildBoundedAiTurnContextInput
+): AiTurnContextMessage[] {
+  const maxMessages = input.maxMessages ?? AI_TURN_CONTEXT_MAX_MESSAGES;
+  const maxCharacters = input.maxCharacters ?? AI_TURN_CONTEXT_MAX_CHARACTERS;
+
+  if (!Number.isInteger(maxMessages) || maxMessages < 1) {
+    throw new Error("AI turn context maxMessages must be a positive integer");
+  }
+
+  if (!Number.isInteger(maxCharacters) || maxCharacters < 1) {
+    throw new Error("AI turn context maxCharacters must be a positive integer");
+  }
+
+  if (input.currentInboundMessage.text.length > maxCharacters) {
+    throw new Error("accepted inbound message exceeds the AI turn context character limit");
+  }
+
+  const selectedNewestFirst: AiTurnContextMessage[] = [input.currentInboundMessage];
+  const seenPublicMessageIds = new Set([input.currentInboundMessage.publicMessageId]);
+  let characterCount = input.currentInboundMessage.text.length;
+
+  for (const message of input.previousMessagesNewestFirst) {
+    if (selectedNewestFirst.length >= maxMessages) {
+      break;
+    }
+
+    if (seenPublicMessageIds.has(message.publicMessageId)) {
+      continue;
+    }
+
+    if (characterCount + message.text.length > maxCharacters) {
+      break;
+    }
+
+    selectedNewestFirst.push(message);
+    seenPublicMessageIds.add(message.publicMessageId);
+    characterCount += message.text.length;
+  }
+
+  return selectedNewestFirst.reverse();
+}
+
+export type BuildSiteWidgetAiTurnExecutionContextInput = {
+  leadId: string;
+  conversationId: string;
+  inboundMessageId: string;
+  publicConversationId: string;
+  publicInboundMessageId: string;
+  requestFingerprint: string;
+  inputFingerprint?: string;
+};
+
+export function buildSiteWidgetAiTurnExecutionContext(
+  input: BuildSiteWidgetAiTurnExecutionContextInput
+): AiTurnExecutionContext {
+  return {
+    version: AI_TURN_EXECUTION_CONTEXT_VERSION,
+    channel: "site_widget",
+    internal: {
+      leadId: input.leadId,
+      conversationId: input.conversationId,
+      inboundMessageId: input.inboundMessageId
+    },
+    public: {
+      conversationId: input.publicConversationId,
+      inboundMessageId: input.publicInboundMessageId
+    },
+    turn: {
+      idempotencyKey: `ai-turn:${input.publicInboundMessageId}`,
+      acceptedRequestFingerprint: input.requestFingerprint,
+      inputFingerprint: input.inputFingerprint
+    }
+  };
+}
 
 export function buildStageASiteWidgetAiTurnInput(
   input: BuildStageASiteWidgetAiTurnInput
 ): AiTurnInput {
+  const currentInboundMessage = {
+    publicMessageId: input.publicMessageId,
+    direction: "inbound" as const,
+    senderRole: "visitor" as const,
+    contentType: "text" as const,
+    submittedAt: input.submittedAt,
+    text: input.text
+  };
+
   return {
     version: AI_TURN_INPUT_VERSION,
     channel: "site_widget",
@@ -190,16 +314,10 @@ export function buildStageASiteWidgetAiTurnInput(
     customer: input.customer,
     visitor: input.visitor,
     compactContext: {
-      messages: [
-        {
-          publicMessageId: input.publicMessageId,
-          direction: "inbound",
-          senderRole: "visitor",
-          contentType: "text",
-          submittedAt: input.submittedAt,
-          text: input.text
-        }
-      ]
+      messages: buildBoundedAiTurnContext({
+        currentInboundMessage,
+        previousMessagesNewestFirst: input.previousMessagesNewestFirst ?? []
+      })
     },
     knownSlots: {
       customerNameProvided: Boolean(input.customer.name),
