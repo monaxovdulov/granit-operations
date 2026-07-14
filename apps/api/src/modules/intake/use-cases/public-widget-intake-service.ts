@@ -9,7 +9,8 @@ import {
 } from "@granit/contracts";
 import { sha256Hex, stableStringify } from "@granit/shared";
 
-import type { AiReplyCandidateEvidence, AiTurnInput } from "../../ai/ai-turn.js";
+import type { AiTurnInput } from "../../ai/ai-turn.js";
+import { executeLegacyS05Turn } from "../../ai/profiles/legacy-s05/legacy-s05-orchestrator.js";
 import {
   AgentReplyBlockedError,
   IdempotencyConflictError
@@ -33,10 +34,6 @@ export type PublicWidgetIntakeServiceOptions = {
     replyGenerator?: PublicWidgetAiReplyGenerator;
   };
 };
-
-// Stage A has no app-owned approved business fact or price sources yet.
-const STAGE_A_APPROVED_BUSINESS_FACT_SOURCE_IDS = new Set<string>();
-const STAGE_A_APPROVED_PRICE_SOURCE_IDS = new Set<string>();
 
 export class PublicWidgetIntakeService {
   constructor(
@@ -125,8 +122,22 @@ export class PublicWidgetIntakeService {
       }
 
       const aiTurnInput = saved.aiTurnInput;
+      const aiTurnExecutionContext = saved.aiTurnExecutionContext;
 
-      if (!isReplyCapableSiteWidgetTurn(aiTurnInput)) {
+      if (!isReplyCapableSiteWidgetTurn(aiTurnInput) || !aiTurnExecutionContext) {
+        return fallbackSuccess(
+          saved.replayed,
+          saved.publicSessionId,
+          saved.publicMessageId,
+          "ai_persistence_unconfirmed"
+        );
+      }
+
+      if (
+        aiTurnExecutionContext.internal.leadId !== saved.leadId ||
+        aiTurnExecutionContext.internal.conversationId !== saved.conversationId ||
+        aiTurnExecutionContext.internal.inboundMessageId !== saved.inboundMessageId
+      ) {
         return fallbackSuccess(
           saved.replayed,
           saved.publicSessionId,
@@ -152,65 +163,96 @@ export class PublicWidgetIntakeService {
           inputFingerprint: aiInputFingerprint
         }
       };
-      const aiReply = validateAiReplyCandidate(
-        await aiReplyGenerator.generateReply(aiTurnInputWithFingerprint)
-      );
+      const aiTurnExecutionContextWithFingerprint = {
+        ...aiTurnExecutionContext,
+        turn: {
+          ...aiTurnExecutionContext.turn,
+          inputFingerprint: aiInputFingerprint
+        }
+      };
+      const outcome = await executeLegacyS05Turn({
+        executionContext: aiTurnExecutionContextWithFingerprint,
+        turnInput: aiTurnInputWithFingerprint,
+        generator: aiReplyGenerator,
+        applier: {
+          persistReply: async (reply) => {
+            try {
+              const outboundFingerprint = sha256Hex(
+                stableStringify({
+                  outbound_kind: "site_widget_ai_reply",
+                  inbound_public_message_id: saved.publicMessageId,
+                  public_conversation_id: saved.publicConversationId,
+                  body: reply.replyDraft,
+                  metadata: reply.metadata
+                })
+              );
+              const persistedAiReply = await this.repository.saveSiteWidgetAiMessage({
+                leadId: reply.executionContext.internal.leadId,
+                conversationId: reply.executionContext.internal.conversationId,
+                publicMessageId: randomUUID(),
+                inboundPublicMessageId: saved.publicMessageId,
+                idempotencyKey: `ai:${saved.publicMessageId}`,
+                requestFingerprint: outboundFingerprint,
+                body: reply.replyDraft,
+                sourcePageUrl: aiTurnInputWithFingerprint.page.url,
+                agentAllowedToReplyAfterSend:
+                  reply.action === "handoff_to_manager" ? false : undefined,
+                metadata: {
+                  ...reply.metadata,
+                  channel: "site_widget",
+                  public_session_id: saved.publicSessionId,
+                  inbound_public_message_id: saved.publicMessageId,
+                  ai_input_fingerprint: aiInputFingerprint
+                }
+              });
 
-      if (aiReply.status === "unavailable") {
+              return {
+                status: "persisted" as const,
+                internalMessageId: persistedAiReply.internalMessageId,
+                publicMessageId: persistedAiReply.publicMessageId,
+                body: persistedAiReply.body
+              };
+            } catch (error) {
+              return {
+                status: "blocked" as const,
+                reason:
+                  error instanceof AgentReplyBlockedError
+                    ? ("agent_reply_blocked" as const)
+                    : ("ai_persistence_unconfirmed" as const)
+              };
+            }
+          }
+        }
+      });
+
+      if (outcome.decision.action === "no_reply") {
         return fallbackSuccess(
           saved.replayed,
           saved.publicSessionId,
           saved.publicMessageId,
-          aiReply.reason
+          outcome.decision.reason
         );
       }
 
-      try {
-        const outboundFingerprint = sha256Hex(
-          stableStringify({
-            outbound_kind: "site_widget_ai_reply",
-            inbound_public_message_id: saved.publicMessageId,
-            public_conversation_id: saved.publicConversationId,
-            body: aiReply.text,
-            metadata: aiReply.metadata
-          })
-        );
-        const persistedAiReply = await this.repository.saveSiteWidgetAiMessage({
-          leadId: saved.leadId,
-          conversationId: saved.conversationId,
-          publicMessageId: randomUUID(),
-          inboundPublicMessageId: saved.publicMessageId,
-          idempotencyKey: `ai:${saved.publicMessageId}`,
-          requestFingerprint: outboundFingerprint,
-          body: aiReply.text,
-          sourcePageUrl: aiTurnInputWithFingerprint.page.url,
-          agentAllowedToReplyAfterSend: aiReply.agentAllowedToReplyAfterSend,
-          metadata: {
-            ...aiReply.metadata,
-            channel: "site_widget",
-            public_session_id: saved.publicSessionId,
-            inbound_public_message_id: saved.publicMessageId,
-            ai_input_fingerprint: aiInputFingerprint
-          }
-        });
-
-        return aiReplySuccess(
-          saved.replayed,
-          saved.publicSessionId,
-          saved.publicMessageId,
-          persistedAiReply.publicMessageId,
-          persistedAiReply.body
-        );
-      } catch (error) {
+      if (!outcome.persistedReply) {
         return fallbackSuccess(
           saved.replayed,
           saved.publicSessionId,
           saved.publicMessageId,
-          error instanceof AgentReplyBlockedError
+          outcome.result.status === "blocked" &&
+            outcome.result.reason === "agent_reply_blocked"
             ? "agent_reply_blocked"
             : "ai_persistence_unconfirmed"
         );
       }
+
+      return aiReplySuccess(
+        saved.replayed,
+        saved.publicSessionId,
+        saved.publicMessageId,
+        outcome.persistedReply.publicMessageId,
+        outcome.persistedReply.body
+      );
     } catch (error) {
       if (error instanceof IdempotencyConflictError) {
         return validationError(
@@ -296,18 +338,6 @@ type PublicWidgetFallbackReason =
   | "agent_reply_blocked"
   | "ai_persistence_unconfirmed";
 
-type ValidatedAiReplyCandidate =
-  | {
-      status: "replied";
-      text: string;
-      agentAllowedToReplyAfterSend?: boolean;
-      metadata: Record<string, unknown>;
-    }
-  | {
-      status: "unavailable";
-      reason: PublicWidgetAiUnavailableReason;
-    };
-
 function aiReplySuccess(
   replayed: boolean,
   publicSessionId: string,
@@ -378,186 +408,4 @@ function isReplyCapableSiteWidgetTurn(input: AiTurnInput | undefined): input is 
     input?.channel === "site_widget" &&
     input.replyCapability === "site_widget_sync_reply"
   );
-}
-
-function validateAiReplyCandidate(value: unknown): ValidatedAiReplyCandidate {
-  if (!isRecord(value)) {
-    return unavailable("unsafe_model_response");
-  }
-
-  if (value.decision === "no_reply") {
-    return {
-      status: "unavailable",
-      reason: isPublicWidgetAiUnavailableReason(value.reason)
-        ? value.reason
-        : "unsafe_model_response"
-    };
-  }
-
-  if (value.decision !== "reply_candidate") {
-    return unavailable("unsafe_model_response");
-  }
-
-  if (!isRecord(value.metadata)) {
-    return unavailable("unsafe_model_response");
-  }
-
-  if (
-    "agentAllowedToReplyAfterSend" in value &&
-    value.agentAllowedToReplyAfterSend !== undefined &&
-    typeof value.agentAllowedToReplyAfterSend !== "boolean"
-  ) {
-    return unavailable("unsafe_model_response");
-  }
-
-  const text = typeof value.text === "string" ? normalizeCandidateText(value.text) : "";
-
-  if (!text) {
-    return unavailable(
-      typeof value.text === "string" ? "empty_model_response" : "unsafe_model_response"
-    );
-  }
-
-  const evidence = isRecord(value.evidence) ? readCandidateEvidence(value.evidence) : undefined;
-
-  if (hasBusinessFactWithoutAppApprovedSource(evidence)) {
-    return unavailable("unsafe_model_response");
-  }
-
-  const unsafeReason = unsafeCandidateReplyReason(text, evidence);
-
-  if (unsafeReason) {
-    return unavailable("unsafe_model_response");
-  }
-
-  return {
-    status: "replied",
-    text,
-    agentAllowedToReplyAfterSend:
-      typeof value.agentAllowedToReplyAfterSend === "boolean"
-        ? value.agentAllowedToReplyAfterSend
-        : undefined,
-    metadata: value.metadata
-  };
-}
-
-function unavailable(reason: PublicWidgetAiUnavailableReason): ValidatedAiReplyCandidate {
-  return {
-    status: "unavailable",
-    reason
-  };
-}
-
-function isPublicWidgetAiUnavailableReason(
-  value: unknown
-): value is PublicWidgetAiUnavailableReason {
-  return (
-    value === "missing_openai_config" ||
-    value === "model_error" ||
-    value === "empty_model_response" ||
-    value === "unsafe_model_response"
-  );
-}
-
-function normalizeCandidateText(value: string): string {
-  return value.trim().replace(/\n{3,}/g, "\n\n").slice(0, 900);
-}
-
-function readCandidateEvidence(value: Record<string, unknown>): AiReplyCandidateEvidence {
-  const businessFacts: AiReplyCandidateEvidence["businessFacts"] = Array.isArray(
-    value.businessFacts
-  )
-    ? value.businessFacts.map((fact) => {
-        if (!isRecord(fact)) {
-          return { kind: "business_fact" as const };
-        }
-
-        const kind: "price" | "business_fact" =
-          fact.kind === "price" ? "price" : "business_fact";
-        const approvedSourceId =
-          typeof fact.approvedSourceId === "string" && fact.approvedSourceId.trim()
-            ? fact.approvedSourceId
-            : undefined;
-
-        return {
-          kind,
-          approvedSourceId
-        };
-      })
-    : undefined;
-
-  return { businessFacts };
-}
-
-function hasBusinessFactWithoutAppApprovedSource(evidence: AiReplyCandidateEvidence | undefined) {
-  return Boolean(
-    evidence?.businessFacts?.some(
-      (fact) => !isAppApprovedBusinessFactSource(fact.kind, fact.approvedSourceId)
-    )
-  );
-}
-
-function unsafeCandidateReplyReason(
-  text: string,
-  evidence: AiReplyCandidateEvidence | undefined
-): string | null {
-  const normalized = text.toLocaleLowerCase("ru-RU");
-
-  if (hasStageAPriceAmountOrOrientation(normalized) && !hasAppApprovedPriceSource(evidence)) {
-    return "price_amount_without_approved_source";
-  }
-
-  if (/(?:за|через)\s+\d+\s*(?:дн|час|нед|месяц)|\d+\s*(?:дн|час|нед|месяц)|будет готов|точн(?:о|ые сроки)|к\s+\d{1,2}[./]\d{1,2}/i.test(normalized)) {
-    return "exact_deadline_promise";
-  }
-
-  if (/(гарантируем|предоставим гарантию|скидк[ауи]\s*\d|в наличии|заключим договор|подпишем договор|можно оплатить|рассрочк[ау])/i.test(normalized)) {
-    return "binding_terms_promise";
-  }
-
-  if (/(по закону|юридическ(?:ая консультация|ие советы|и можно|и нужно)|наследств|оформить захоронение|похоронные документы)/i.test(normalized)) {
-    return "legal_funeral_advice";
-  }
-
-  return null;
-}
-
-function hasStageAPriceAmountOrOrientation(normalized: string) {
-  if (/\d[\d\s]*(?:₽|руб|р\.)/i.test(normalized)) {
-    return true;
-  }
-
-  if (!/(цен|стоим|стоить|стоит|прайс|бюджет|сумм)/i.test(normalized)) {
-    return false;
-  }
-
-  return /(?:^|\s)(?:от|примерно|ориентир(?:овочно)?|порядка|около|в районе)\s+\d[\d\s]*(?:тыс|тысяч)?|\d[\d\s]*(?:[-–—]|\s+до\s+)\d[\d\s]*(?:тыс|тысяч)?|(?:^|\s)\d[\d\s]{3,}(?:[.,!?]|\s|$)|(?:^|\s)\d+\s*(?:тыс|тысяч)/i.test(
-    normalized
-  );
-}
-
-function hasAppApprovedPriceSource(evidence: AiReplyCandidateEvidence | undefined) {
-  return Boolean(
-    evidence?.businessFacts?.some(
-      (fact) =>
-        fact.kind === "price" && isAppApprovedBusinessFactSource(fact.kind, fact.approvedSourceId)
-    )
-  );
-}
-
-function isAppApprovedBusinessFactSource(
-  kind: "price" | "business_fact",
-  approvedSourceId: string | undefined
-) {
-  if (!approvedSourceId?.trim()) {
-    return false;
-  }
-
-  return kind === "price"
-    ? STAGE_A_APPROVED_PRICE_SOURCE_IDS.has(approvedSourceId.trim())
-    : STAGE_A_APPROVED_BUSINESS_FACT_SOURCE_IDS.has(approvedSourceId.trim());
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

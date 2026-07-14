@@ -15,7 +15,11 @@ import { AI_TURN_INPUT_VERSION, type AiTurnInput } from "../src/modules/ai/ai-tu
 import { WIDGET_AI_POLICY_VERSION } from "../src/modules/ai/policy/widget-ai-policy.js";
 import { WIDGET_AI_PROMPT_VERSION } from "../src/modules/ai/prompts/widget-ai-prompt.js";
 import { buildApi } from "../src/app.js";
-import { TelegramOutboundBlockedError } from "../src/repositories/intake-repository.js";
+import {
+  TelegramOutboundBlockedError,
+  type SaveAcceptedSiteWidgetMessageInput,
+  type SaveAcceptedSiteWidgetMessageResult
+} from "../src/repositories/intake-repository.js";
 import type { PublicWidgetAiReplyGenerator } from "../src/modules/intake/ports/public-widget-ai-reply-generator.js";
 import { FakeWidgetAiProvider } from "./helpers/fake-widget-ai-provider.js";
 import { MemoryIntakeRepository } from "./helpers/memory-intake-repository.js";
@@ -823,6 +827,46 @@ describe("public site_widget intake", () => {
     expect(JSON.stringify(seenInput)).not.toContain("event_type");
   });
 
+  it("fails closed before generation when app-internal execution identity is inconsistent", async () => {
+    const repository = new MismatchedAiExecutionContextRepository();
+    let generatorCalls = 0;
+    const app = track(
+      buildApi({
+        repository,
+        widgetAi: {
+          enabled: true,
+          replyGenerator: {
+            async generateReply() {
+              generatorCalls += 1;
+              return {
+                decision: "reply_candidate",
+                text: "Этот ответ не должен генерироваться.",
+                metadata: {}
+              };
+            }
+          }
+        }
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/public/intake/site-widget/messages",
+      payload: validWidgetRequest({ idempotencyKey: "widget-ai-internal-id-mismatch-0001" })
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toMatchObject({
+      automation: {
+        status: "fallback",
+        reason: "ai_persistence_unconfirmed"
+      }
+    });
+    expect(generatorCalls).toBe(0);
+    expect(repository.aiSaveCalls).toBe(0);
+    expectNoInternalPublicFields(response.json());
+  });
+
   it("replays a persisted AI reply without calling the generator again", async () => {
     const repository = new MemoryIntakeRepository();
     let generatorCalls = 0;
@@ -1151,6 +1195,10 @@ describe("public site_widget intake", () => {
     expect(response.json().automation.status).toBe("replied");
     expect(aiSaveInput).toBeDefined();
     expect(aiSaveInput?.idempotencyKey).toBe(`ai:${response.json().public_message_id}`);
+    expect(aiSaveInput?.metadata).toMatchObject({
+      decision_profile: "legacy_s05",
+      normalized_action: "answer"
+    });
     expect(typeof aiSaveInput?.metadata.ai_input_fingerprint).toBe("string");
     expect(aiSaveInput?.metadata.ai_input_fingerprint).not.toBe(aiSaveInput?.requestFingerprint);
     expect(aiSaveInput?.metadata.ai_input_fingerprint).not.toBe(aiSaveInput?.idempotencyKey);
@@ -1627,6 +1675,8 @@ describe("public site_widget intake", () => {
       model_name: "deterministic",
       fallback_mode: "manager_required",
       handoff_reason: "manager_requested",
+      decision_profile: "legacy_s05",
+      normalized_action: "handoff_to_manager",
       policy_version: WIDGET_AI_POLICY_VERSION,
       prompt_version: WIDGET_AI_PROMPT_VERSION
     });
@@ -2321,6 +2371,27 @@ function validRequest(): SiteFormIntakeRequest {
   };
 }
 
+class MismatchedAiExecutionContextRepository extends MemoryIntakeRepository {
+  override async saveAcceptedSiteWidgetMessage(
+    input: SaveAcceptedSiteWidgetMessageInput
+  ): Promise<SaveAcceptedSiteWidgetMessageResult> {
+    const saved = await super.saveAcceptedSiteWidgetMessage(input);
+
+    return saved.aiTurnExecutionContext
+      ? {
+          ...saved,
+          aiTurnExecutionContext: {
+            ...saved.aiTurnExecutionContext,
+            internal: {
+              ...saved.aiTurnExecutionContext.internal,
+              conversationId: randomUUID()
+            }
+          }
+        }
+      : saved;
+  }
+}
+
 function validWidgetRequest(
   overrides: { idempotencyKey?: string; messageText?: string; publicSessionId?: string } = {}
 ): SiteWidgetMessageRequest {
@@ -2364,7 +2435,15 @@ function validWidgetRequest(
 function expectNoInternalPublicFields(value: unknown) {
   const forbidden = new Set([
     "lead_id",
+    "leadId",
     "conversation_id",
+    "conversationId",
+    "internal_message_id",
+    "internalMessageId",
+    "inbound_message_id",
+    "inboundMessageId",
+    "ai_turn_execution_context",
+    "aiTurnExecutionContext",
     "publicConversationId",
     "public_conversation_id",
     "trace_id"
