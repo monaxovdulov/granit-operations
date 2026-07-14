@@ -97,6 +97,8 @@ Vitest дополнительно с `--maxWorkers=1 --minWorkers=1`.
 ## Evidence Links
 
 - `docs/tasks/AI_DIALOG_MASTRA_OBSERVABILITY_FIRST_SLICE_RU.md`
+- `docs/tasks/AI_DIALOG_LIVE_V2_FACTS_P1Q_REVIEW_RU.md` — точный facts proposal; pending owner
+  approval, не runtime snapshot.
 - `docs/release/evidence/AI_DIALOG_APP_TURN_BOUNDARY_P1_RU.md`
 - Планируемый evidence: `docs/release/evidence/AI_DIALOG_LIVE_V2_CORE_P1Q_RU.md`
 
