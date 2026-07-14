@@ -1,11 +1,11 @@
 # Task: AI-DIALOG-MASTRA-OBSERVABILITY-FIRST-SLICE - implementation plan первого staging-only Mastra + observability slice
 
-Status: needs_review; implementation not started
+Status: in_progress; G0 accepted; P1 authorized
 Created: 2026-07-13
 Updated: 2026-07-14
 Repo: `granit-operations`
 Slice: backend P1 -> P1Q -> P2 -> P3 -> M1 -> M2 -> M3; W0 parallel after G0
-Owner/agent: owner review required / Codex planning agent
+Owner/agent: owner approved implementation sequence / Codex implementation agent
 
 ## Результат этой planning-сессии
 
@@ -13,8 +13,10 @@ Owner/agent: owner review required / Codex planning agent
 packages, runtime-код, migrations, deploy config, staging/production flags, Telegram AI outbound
 или Mastra Studio.
 
-План заканчивается owner review gate. Реализация не должна начинаться только на основании
-наличия этого файла.
+Первоначальный planning commit заканчивался owner review gate. 2026-07-14 владелец явно разрешил
+выполнять backend chain по этому плану. G0 закрыт отдельной проверяемой записью
+`docs/release/evidence/SITE_WIDGET_V1_CROSS_REPO_ACCEPTANCE_RU.md`; дальнейшие slices все равно
+обязаны закрывать свои gates по порядку.
 
 Дополнительное owner decision от 2026-07-14 уточняет самый быстрый путь к живому website
 assistant, не меняя исходный порядок верхнего уровня. Его локальный design artifact находится в
@@ -127,6 +129,13 @@ Repo rules/current truth:
   <https://learn.chatgpt.com/docs/non-interactive-mode>;
 - code, schema, tests and evidence at `granit-operations` commit
   `6666a0b06c46b29ec764c3403b60153125fe125c`;
+- current staging provider checkout `2528e43f18b99144e28aa026d9695b5b666a9222` with contract
+  bytes identical to the reviewed baseline;
+- actual current widget source package `business-ai-web-widget` commit
+  `47481d5e6077a8d3ae9aa0d5134a1f5c2b4a530a` and Site Widget CI run `29281519476`;
+- actual preview integration `landing-granit-static` commit
+  `7007b9828b456c88c8c7b244d6b0b27cf73a3ede` and deploy run `29281570968`, whose deployed
+  loader/ESM hashes match the pinned manifest;
 - `granit-site-cms` inspected read-only at HEAD
   `5c336109fc20549d0e618cb6834d24e0cc6b4ba0` (upstream
   `23f2ee8c39ee2af30ca79cf9f2e5c4dd0229bf2a`): `README.md`,
@@ -150,7 +159,7 @@ tracked rules above and does not invent missing instructions.
 | AI cohesion | `WidgetAiService` still combines deterministic policy choice, prompt assembly, provider call, fallback and unsafe-output checks. | `apps/api/src/modules/ai/services/widget-ai-service.ts` |
 | Dialogue quality | Prompt describes an assistant for the first message, ignores persisted history/known slots, and broad manager/price/deadline/terms regexes perform primary semantic routing. Approved business facts are empty. | `apps/api/src/modules/ai/prompts/widget-ai-prompt.ts`, `apps/api/src/modules/ai/policy/widget-ai-policy.ts`, `apps/api/src/modules/ai/ai-turn.ts` |
 | Approved facts | Operations has no approved facts asset. Site catalog/process HTML contains candidate copy, but the site README identifies it as imported baseline awaiting owner corrections, so it cannot be consumed as runtime truth. | `apps/api/src/modules/ai/ai-turn.ts`, `granit-site-cms@5c33610:README.md`, selected `apps/site/src/imported-pages/**/index.html` files above |
-| Widget perceived latency | The consumer appends the visitor bubble only after the POST completes and aborts after 10 seconds, while the current provider budget may reach 15 seconds. No typing/pending state or token streaming exists. | `granit-site-cms@5c33610:apps/site/public/assets/js/main.js`, `apps/api/src/modules/ai/adapters/openai-widget-assistant-provider.ts` |
+| Widget perceived latency | The deployed widget already appends a local `pending` visitor bubble and separate sending indicator before awaiting the POST, retains text/idempotency for retry and does not fabricate an AI reply on failure. W0 remains partial: the default browser deadline is 15 seconds while the provider budget may also reach 15 seconds, no browser smoke proves the <=300 ms timing, and the consumer does not strictly validate root `accepted/replayed` truth. There is no token streaming. | `business-ai-web-widget@47481d5:packages/site-widget/src/components/granit-site-widget.ts`, `packages/site-widget/src/components/widget-message.ts`, `packages/site-widget/src/domain/config.ts`, `packages/site-widget/src/services/intake-client.ts`, `apps/api/src/modules/ai/adapters/openai-widget-assistant-provider.ts` |
 | Direct rollback path | Direct OpenAI Responses API adapter exists, uses server-only `OPENAI_API_KEY`, defaults `OPENAI_MODEL` to `gpt-5.5`, requests `reasoning.effort=low` and uses `store: false`. This independent current profile must not be silently changed by the Mastra slice. | `apps/api/src/config.ts`, `apps/api/src/modules/ai/adapters/openai-widget-assistant-provider.ts`, `docs/ENVIRONMENT.md` |
 | App authority | Inbound is persisted before AI. `persistAiReplyWithSendGate` checks `agent_allowed_to_reply=true` inside the outbound transaction. Telegram AI outbound throws `TelegramOutboundBlockedError`. | `apps/api/src/modules/intake/use-cases/public-widget-intake-service.ts`, `apps/api/src/modules/conversations/repositories/postgres-intake-repository.ts` |
 | Runtime flags | `AI_WIDGET_ENABLED` defaults to false. There is no runtime selector, Mastra flag, trace-export flag or explicit staging tier. | `apps/api/src/config.ts`, `apps/api/src/index.ts`, `docs/ENVIRONMENT.md` |
@@ -159,15 +168,17 @@ tracked rules above and does not invent missing instructions.
 | Tests | Tests cover persistence-before-AI, neutral input, invalid candidate/source fail-closed, fallback, takeover/stale draft, public privacy and Telegram AI outbound block. | `apps/api/test/public-intake.test.ts`, `apps/api/test/modular-boundaries.test.ts` |
 | Routes | Fastify registers health, public intake, manager auth/shell/leads and Telegram webhook routes. No Mastra/Studio route exists. | `apps/api/src/app.ts` and route modules under `apps/api/src/modules/**/routes/` |
 | Dependencies | Neither root nor `@granit/api` package currently declares Mastra. | `package.json`, `apps/api/package.json`, `package-lock.json` |
-| Acceptance gate | Operations has local/staging evidence for `site_widget.v1`, but this repo does not contain the owner-approved cross-repo acceptance record required by PR #5. | `docs/release/evidence/S04_WIDGET_PERSISTENCE_RU.md`, `S05_WEBSITE_SAFE_AI_RU.md`, `S06_MANAGER_TAKEOVER_RU.md` |
+| Acceptance gate | G0 is accepted with exact provider, widget source, landing integration, CI/deploy and deployed bundle hashes. | `docs/release/evidence/SITE_WIDGET_V1_CROSS_REPO_ACCEPTANCE_RU.md` |
 
 Conclusion: Stage A and the app-owned send gate are real reusable seams. The app-owned run/trace,
 manager-visible quality state, recent-history context, approved asset package and explicit
 staging-only runtime selection are still prerequisites, not completed facts.
 
-The inspected `granit-site-cms` HEAD `5c33610` is one commit ahead of upstream `23f2ee8`. W0 must
-therefore be implemented later in a separate clean worktree/`codex/` branch; this planning task
-must not modify that checkout.
+The May `granit-site-cms` consumer remains useful historical evidence, but it is not the current
+preview owner. The current deployed consumer comes from `business-ai-web-widget@47481d5...`,
+vendored and deployed by `landing-granit-static@7007b982...`. Any W0 implementation must therefore
+start from those owning repos and exact current branches rather than modifying the stale May
+`granit-site-cms` checkout.
 
 ## Chosen architecture and rejected alternatives
 
@@ -295,6 +306,10 @@ external reference on that app record, not the primary business identifier.
 | G4 package/API review | Implementation agent re-checks current official Mastra and OpenAI docs, package names, supported Node runtime, tracing hooks, license, documented API-key availability of `gpt-5.6-sol` and provider request/response-shape support for `reasoning.effort=medium`, `store:false` and model identity; exact versions are pinned. No live provider call occurs before G6. | Source links, date, selected versions, package/type/request-shape review and lockfile diff in implementation PR. | Mastra adapter code. |
 | G5 code review | Mastra code is disabled by default; route inventory, no-direct-send/DB and rollback tests pass. | Reviewed PR and full local checks. | Staging enablement. |
 | G6 staging approval | Owner explicitly approves enabling the exact reviewed SHA only in staging. | Owner sign-off. | Any staging config change/smoke. |
+
+G0 status on 2026-07-14: `accepted`. Exact artifacts, current preview integrity, owner sign-off,
+scope limits and the distinction from the unrelated historical channel-neutral P0 are recorded in
+`docs/release/evidence/SITE_WIDGET_V1_CROSS_REPO_ACCEPTANCE_RU.md`.
 
 ## Data contracts to finish before Mastra
 
@@ -480,31 +495,43 @@ Files: this task's evidence links/status only; any consumer evidence remains in 
 
 Exit: owner marks G0 accepted. No operations runtime change.
 
+Result 2026-07-14: passed. The accepted record is
+`docs/release/evidence/SITE_WIDGET_V1_CROSS_REPO_ACCEPTANCE_RU.md`; this P0 changed documentation
+only and authorizes P1 plus a separately owned W0.
+
 ### Slice W0 - Live Widget UX (cross-repo consumer-only)
 
-External handoff target and verified current entry point:
+External handoff targets and verified current entry points:
 
-- `granit-site-cms` at inspected HEAD `5c33610`;
-- `apps/site/public/assets/js/main.js` plus the owning widget styles/tests discovered in the future
-  clean implementation worktree.
+- widget source: `business-ai-web-widget@47481d5e6077a8d3ae9aa0d5134a1f5c2b4a530a`, package
+  `packages/site-widget`;
+- current preview integration: `landing-granit-static@7007b9828b456c88c8c7b244d6b0b27cf73a3ede`,
+  `vendor/granit/site-widget/v1.0.0/` and the loader tag in `index.html`.
 
 The requirements below are an external interface/evidence dependency, not implementation
-authority for this repo. Create the actual W0 task/PR in `granit-site-cms` after G0; do not modify
-the currently inspected ahead-of-upstream checkout. It may run in parallel with operations
-P1/P1Q.
+authority for this repo. Create the actual W0 task/PR in the `business-ai-web-widget` package
+source and update the `landing-granit-static` integration from an exact built artifact; do not
+modify the stale May `granit-site-cms` checkout. It may run in parallel with operations P1/P1Q.
+
+Exact-SHA audit result on 2026-07-14: `partial`. Immediate pending UI, a separate sending status,
+same-key retry, escaping and honest error state are implemented and unit/browser-tested at
+`business-ai-web-widget@47481d5...`; deployed ESM bytes match that source. W0 remains open for the
+strict response-truth mapping, timeout invariant and <=300 ms deferred-response browser timing
+evidence below.
 
 Work:
 
 1. On submit, append the local visitor bubble immediately with `pending` state and show a separate
    typing/loading indicator before awaiting the network.
 2. Keep message text and idempotency key until the server returns accepted/replayed truth.
-3. On accepted response, mark the local visitor bubble `saved` and render only the persisted AI
-   reply returned by unchanged `site_widget.v1`.
+3. Strictly validate root `accepted/replayed`, `show_widget_saved`, public message identity and the
+   persisted reply shape; then mark the local visitor bubble `saved` and render only the persisted
+   AI reply returned by unchanged `site_widget.v1`.
 4. On transport/server failure, retain a visible `not_confirmed/retryable` visitor message; do not
    fabricate an AI bubble or silently discard input.
 5. Enforce and test `browser deadline > backend/provider deadline + bounded persistence/network
-   allowance`; the current 10-second browser versus up-to-15-second provider inversion must not
-   survive.
+   allowance`; the current equal 15-second browser/provider budgets without that allowance must
+   not survive.
 6. Preserve current idempotency, escaping and public response/privacy behavior.
 
 Exit: consumer tests and a browser smoke prove pending/typing appears no later than 300 ms after
@@ -765,8 +792,8 @@ checks/evidence status only after the evidence exists.
 
 | Given | When | Then | Primary test location |
 |---|---|---|---|
-| accepted widget contract | visitor submits | local visitor bubble and typing/pending state appear before network result; accepted response marks it saved | `granit-site-cms` widget consumer tests/browser smoke |
-| widget POST fails or times out | consumer settles request | visitor text remains retryable/not-confirmed and no fake AI bubble appears | `granit-site-cms` widget consumer tests |
+| accepted widget contract | visitor submits | local visitor bubble and typing/pending state appear before network result; accepted response marks it saved | `business-ai-web-widget` package tests/browser smoke + exact `landing-granit-static` artifact |
+| widget POST fails or times out | consumer settles request | visitor text remains retryable/not-confirmed and no fake AI bubble appears | `business-ai-web-widget` package tests |
 | configured browser/backend/provider budgets | timeout invariant is checked | browser deadline exceeds the complete bounded server budget | consumer config/unit test + operations config test |
 | valid `site_widget.v1`, AI disabled | inbound is accepted | inbound persists; no run/provider call; public response stays compatible | `apps/api/test/public-intake.test.ts` |
 | frozen direct S05 golden inputs | direct service/request is assembled | prompt/policy/disclosure text+versions, `gpt-5.5`/low/`store:false`, candidates and public outcomes remain unchanged | direct golden + adapter request-shape tests |
@@ -902,9 +929,10 @@ Frozen direct baseline files are inspected and golden-tested but not changed by 
 
 If implementation cannot preserve them, it stops for owner review instead of weakening rollback.
 
-Cross-repo W0 is owned separately by
-`granit-site-cms@5c33610:apps/site/public/assets/js/main.js` and its discovered styles/tests. It
-is not part of a `granit-operations` implementation PR.
+Cross-repo W0 is owned separately by the
+`business-ai-web-widget@47481d5:packages/site-widget` source package and the exact
+`landing-granit-static@7007b982` vendored integration. It is not part of a `granit-operations`
+implementation PR.
 
 Proposed new operations paths are provider-neutral decision/context/validator services, versioned
 `live_v2` tone/facts assets and fixed synthetic fixtures under the existing AI/test module
@@ -975,7 +1003,8 @@ operations boundary decision changes.
 | `ast-index rebuild --no-deps`, `ast-index conventions`, `ast-index map` | passed | Indexed current TypeScript code and verified repository/module patterns. |
 | Targeted AST/file/source inspection | passed | Verified AI boundary, direct adapter, send gate, schema, manager view, routes and tests listed above. |
 | `granit-ops-decisions` read-only audit | passed | Confirmed proposed structured-decision/eval sequence and that the repo is decision evidence, not an accepted harness. |
-| `granit-site-cms` read-only inspection | passed | Verified delayed bubble/current 10-second timeout, candidate content/import caveat and the ahead-of-upstream checkout; future W0 needs a separate clean worktree. |
+| Actual deployed widget read-only audit | passed; W0 partial | Verified immediate pending/separate sending status, same-key retry and honest errors at `business-ai-web-widget@47481d5`, exact `landing-granit-static@7007b982` bundle provenance, plus the remaining strict response-truth, <=300 ms browser timing and 15-second timeout-invariant gaps. |
+| Historical `granit-site-cms` read-only inspection | passed | Verified candidate content/import caveat and that this stale May checkout is supporting history rather than current preview ownership. |
 | `gh pr view 5`, branch/doc inspection at `cf04541` | passed | Verified draft PR metadata, owner-sequenced branch and source documents. |
 | Independent plan delta review | passed after fixes | Reconciled two-lane sequencing, frozen S05/live_v2 isolation, M3-only semantic proof, SHA-pinned external evidence, G0 authority and fail-fast hard gates. |
 | Placeholder/consistency/scope self-review | passed | No `TBD`/`TODO`; prerequisites, Mastra integration, S08/S10 and Studio scopes remain separated. |
@@ -995,6 +1024,8 @@ operations boundary decision changes.
 - Existing Stage A evidence: `docs/release/evidence/AI_DIALOG_BOUNDARY_STAGE_A_RU.md`
 - Existing website AI/takeover evidence: `docs/release/evidence/S05_WEBSITE_SAFE_AI_RU.md`,
   `docs/release/evidence/S06_MANAGER_TAKEOVER_RU.md`
+- Accepted G0 cross-repo evidence:
+  `docs/release/evidence/SITE_WIDGET_V1_CROSS_REPO_ACCEPTANCE_RU.md`
 - Existing channel-neutral evidence:
   `docs/release/evidence/P0_CHANNEL_NEUTRAL_CONVERSATION_FOUNDATION_RU.md`
 - Planned implementation evidence:
@@ -1002,22 +1033,23 @@ operations boundary decision changes.
 
 ## Blockers
 
-- G0 owner-linked `site_widget.v1` acceptance is not recorded in this repo.
 - App-owned run/quality state, manager-visible degradation, approved asset bundle and retention
   enforcement are not implemented.
-- W0 consumer pending/error UX and P1Q Live Dialog Core are designed but not implemented.
+- W0 has working pending/error UX but still lacks strict accepted/replayed mapping, timeout-budget
+  correction and <=300 ms browser evidence; P1Q Live Dialog Core is not implemented.
 - Official Mastra packages/docs have intentionally not been selected or pinned in this planning
   session.
 - All schema, AI behavior, environment, staging and production changes require owner review under
   `docs/AGENT_WORKFLOW.md`.
 
-## Owner Review Gate / Next Action
+## Owner Decision / Next Action
 
-Owner should review and either approve or request changes to:
+Owner approved the plan and ordered implementation on 2026-07-14. The accepted decisions are:
 
 1. two-lane order after G0: external W0 in parallel, and sequential operations
    P1 -> P1Q -> P2 -> P3 -> M1 disabled -> M2 local/fake -> G6 -> M3 authenticated staging;
-2. W0 as a separate `granit-site-cms` task with unchanged `site_widget.v1` and no streaming;
+2. W0 as separate `business-ai-web-widget` source and `landing-granit-static` integration work,
+   with unchanged `site_widget.v1` and no streaming;
 3. P1Q four-action contract, 6-8-message bounded context, `live_v2` tone/facts and fixed
    15-20-case synthetic fixture suite before a live model, followed by semantic/soft-quality proof
    only in M3;
@@ -1032,9 +1064,8 @@ Owner should review and either approve or request changes to:
 9. explicit exclusion of separate/public Mastra Studio and exact staging latency acceptance after
    the first representative baseline.
 
-After this plan is approved, obtain explicit owner acceptance/linkage for the paired provider,
-consumer and staging evidence and record it through P0. Neither W0 nor P1 starts before that G0.
-Once G0 is recorded, create separate W0 (`granit-site-cms`, clean worktree) and P1
-(`granit-operations`) tasks; they may proceed in parallel. P1Q starts only after P1 evidence. Do
-not install Mastra, write the P2 migration/runtime code, change staging config or start M1-M3 from
-this planning commit.
+G0 is recorded and P1 is the next backend slice. A separate W0 may proceed from the actual current
+widget source/integration repos, but it does not block P1/P1Q. P1Q starts only after P1 evidence.
+Mastra packages remain forbidden until P1/P1Q/P2/P3 and G4; staging config and the first
+authenticated `live_v2` call remain forbidden until the exact-SHA G6 approval immediately before
+M3.

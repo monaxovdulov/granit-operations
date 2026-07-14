@@ -37,6 +37,9 @@ Current evidence records:
 - `S04_WIDGET_PERSISTENCE_RU.md` - widget message persistence and manager visibility evidence.
 - `S05_WEBSITE_SAFE_AI_RU.md` - local safe AI backend, persistence, manager visibility, and fallback evidence.
 - `S06_MANAGER_TAKEOVER_RU.md` - manager takeover, blocked follow-up AI, and stale draft send-time gate evidence.
+- `SITE_WIDGET_V1_CROSS_REPO_ACCEPTANCE_RU.md` - accepted G0/P0 record linking the exact
+  `site_widget.v1` provider, widget source, preview integration, CI/deploy runs and deployed bundle
+  hashes before P1/W0.
 - `AI_DIALOG_BOUNDARY_STAGE_A_RU.md` - neutral AI turn boundary implementation evidence before Mastra runtime, Telegram AI outbound or production AI approval.
 - `P0_CHANNEL_NEUTRAL_CONVERSATION_FOUNDATION_RU.md` - channel-neutral widget/Telegram-ready conversation foundation evidence.
 - `TELEGRAM_INBOUND_MANAGER_MINI_PANEL_RU.md` - Telegram inbound webhook, manager binding, takeover/reply mini-panel, and no-direct-send evidence.
