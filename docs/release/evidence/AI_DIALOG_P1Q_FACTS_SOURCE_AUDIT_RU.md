@@ -1,6 +1,6 @@
 # Evidence: AI-DIALOG-P1Q-FACTS-SOURCE-AUDIT
 
-Status: source_audit_passed; owner approval pending; no production snapshot
+Status: source_audit_passed; historical pre-approval evidence; superseded for gate status by G1Q evidence
 Date: 2026-07-14
 Repo: `granit-operations`
 Slice: P1Q source audit before G1Q/P2
@@ -39,10 +39,10 @@ HTML; ни один локальный remote-tracking ref не содержит
 | `P1Q-DECOR-001...003` | Source/semantics passed; `DECOR-003` received a literal terminology clarification. |
 | `P1Q-PROC-001...003` | Source/semantics passed; `PROC-003` citation excludes the adjacent price/deadline line. |
 
-The table contains exactly 15 unique IDs: 6 type, 3 material, 3 decor and 3 process. Every row
-remains `no — pending`, starts only `after approval` and has review date `2026-10-14`. Allowed
-wording contains no price, deadline, availability, payment, refund, warranty, contract, legal or
-other owner-only promise.
+The table contains exactly 15 unique IDs: 6 type, 3 material, 3 decor and 3 process. At audit
+time every row was `no — pending`, started only `after approval` and had review date
+`2026-10-14`. Allowed wording contains no price, deadline, availability, payment, refund,
+warranty, contract, legal or other owner-only promise.
 
 ## Проверки
 
@@ -65,15 +65,17 @@ other owner-only promise.
 
 - `TEST_LIVE_V2_FACTS` and its `ownerApproved: true` metadata remain test-only synthetic assets;
   their source commit was updated only to the remote-resolvable equivalent source.
-- Production `apps/api/src/modules/ai/profiles/live-v2/facts.v1.ts` does not exist.
+- At audit time production `apps/api/src/modules/ai/profiles/live-v2/facts.v1.ts` did not exist.
 - No runtime/config/package/provider wiring changed.
 - No OpenAI, Mastra or other model call was made.
 
-## Remaining G1Q Gate
+## Historical G1Q Gate And Subsequent Closure
 
 The owner must explicitly accept the current audited table before a production snapshot can be
 created. Exact all-row acceptance phrase:
 
 > Принимаю все 15 фактов P1Q из таблицы на source commit 23f2ee8c39ee2af30ca79cf9f2e5c4dd0229bf2a без изменений.
 
-Until that decision, G1Q remains pending and P2 must not start.
+The owner subsequently sent this exact phrase, the matching snapshot was committed at `1d737e0`,
+and post-snapshot checks passed. Authoritative closure:
+`docs/release/evidence/AI_DIALOG_LIVE_V2_FACTS_G1Q_RU.md`. G1Q is passed and P2 is unblocked.

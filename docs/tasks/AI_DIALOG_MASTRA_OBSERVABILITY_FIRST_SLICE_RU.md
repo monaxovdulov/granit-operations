@@ -1,6 +1,6 @@
 # Task: AI-DIALOG-MASTRA-OBSERVABILITY-FIRST-SLICE - implementation plan первого staging-only Mastra + observability slice
 
-Status: in_progress; G0/G1 passed; W0 consumer + preview integration passed; P1Q core local checks passed; G1Q owner facts approval pending
+Status: in_progress; G0/G1/W0/G1Q passed; P2 next
 Created: 2026-07-13
 Updated: 2026-07-14
 Repo: `granit-operations`
@@ -186,13 +186,12 @@ implementation status; completed work after that baseline is recorded immediatel
 | G0 | `passed` | Exact cross-repo acceptance is recorded in `docs/release/evidence/SITE_WIDGET_V1_CROSS_REPO_ACCEPTANCE_RU.md`. |
 | G1/P1 | `passed` | App-owned neutral turn boundary passed locally at `84e61de`; evidence is in `docs/release/evidence/AI_DIALOG_APP_TURN_BOUNDARY_P1_RU.md`. |
 | W0 consumer + preview integration | `passed` | Source `business-ai-web-widget@2982de06e6f767af549e9f59aa5bf2fc042da51e` passed CI [29358217137](https://github.com/monaxovdulov/business-ai-web-widget/actions/runs/29358217137), 81/81 local unit tests, package verification and 24/24 one-worker Playwright tests. Content-addressed landing integration `151062cb6d19c12a25edb6a8d226bea8d96c8d83` deployed through [run 29358660849](https://github.com/monaxovdulov/landing-granit-static/actions/runs/29358660849). Hardened loopback browser smoke measured pending at 15.0 ms; remote static bytes matched exact loader/ESM hashes. Evidence: `docs/release/evidence/AI_DIALOG_W0_WIDGET_UX_INTEGRATION_RU.md`. This is local UI/static preview proof, not staging backend/model latency. |
-| P1Q core | `local_checks_passed; source_audit_passed` | Provider-neutral core and fixed synthetic checks passed at code commit `78c9947`; the 15-row proposal was independently source-audited and corrected before approval. G1Q remains open: the owner has not accepted the current audited table, and no production `facts.v1.ts` snapshot exists. |
-| P2 onward | `not_started` | Continue only after G1Q in the fixed order P2 -> P3 -> M1 disabled -> M2 local/fake -> G6 -> M3 staging. |
+| P1Q/G1Q | `passed` | Provider-neutral core passed at `78c9947`; the exact 15-row owner-accepted snapshot and full-object parity tests passed at `1d737e0`. Evidence: `docs/release/evidence/AI_DIALOG_LIVE_V2_FACTS_G1Q_RU.md`. Runtime remains disabled and no model call occurred. |
+| P2 | `not_started; unblocked` | Next slice: minimum app-owned run/span/quality persistence, then P3 -> M1 disabled -> M2 local/fake -> G6 -> M3 staging. |
 
 Conclusion for the planning baseline: Stage A and the app-owned send gate were real reusable
-seams. Since then P1 and the provider-neutral P1Q core have been implemented locally, while the
-app-owned run/trace state, manager-visible quality state, owner-approved production facts asset
-and explicit staging-only runtime selection remain prerequisites for their later gates.
+seams. Since then P1 and G1Q have passed locally. App-owned run/trace state, manager-visible
+quality state and explicit staging-only runtime selection remain prerequisites for later gates.
 
 The May `granit-site-cms` consumer remains useful historical evidence, but it is not the current
 preview owner. W0 was implemented from the correct `business-ai-web-widget@47481d5...` baseline,
@@ -335,6 +334,11 @@ G1/P1 status on 2026-07-14: `local_implementation_passed` at code head `84e61de`
 history, app-only IDs, structural legacy orchestration, frozen direct golden checks and the two
 independent-review fixes are recorded in
 `docs/release/evidence/AI_DIALOG_APP_TURN_BOUNDARY_P1_RU.md`.
+
+G1Q status on 2026-07-14: `passed` at snapshot implementation commit `1d737e0`. Exact owner
+acceptance, 15-row parity, source metadata, approval window, bounded-memory rechecks and
+no-live-call proof are recorded in
+`docs/release/evidence/AI_DIALOG_LIVE_V2_FACTS_G1Q_RU.md`. P2 is unblocked.
 
 ## Data contracts to finish before Mastra
 
@@ -679,14 +683,12 @@ versioned operations snapshot. Use a 15-20-row review table with `candidate fact
 path/line`, `allowed customer wording`, `forbidden extrapolation`, `owner approved`, `source
 version`, `valid from` and `review by`. There is no runtime cross-repo, CMS, Sheet or HTML read.
 
-Core result on 2026-07-14: `local_checks_passed` at code commit `78c9947`. The provider-neutral
-context/schema/validator/apply implementation, fixed synthetic suite and frozen direct golden
-baseline pass locally without a model call or Mastra dependency. This does not close G1Q. The
-exact 15-row proposal in `docs/tasks/AI_DIALOG_LIVE_V2_FACTS_P1Q_REVIEW_RU.md` is now source-audited
-against remote-resolvable commit `23f2ee8c39ee2af30ca79cf9f2e5c4dd0229bf2a`; evidence is in
-`docs/release/evidence/AI_DIALOG_P1Q_FACTS_SOURCE_AUDIT_RU.md`. It still requires explicit owner
-approval, and no production `facts.v1.ts` is present. After approval, create the exact versioned
-snapshot, rerun the P1Q and frozen-direct checks, record G1Q evidence, and only then start P2.
+G1Q result on 2026-07-14: `passed`. The provider-neutral core remains at `78c9947`; the owner
+accepted all 15 source-audited rows at exact source commit
+`23f2ee8c39ee2af30ca79cf9f2e5c4dd0229bf2a`. Matching `facts.v1.ts`, full-object parity tests and
+post-snapshot checks passed at implementation commit `1d737e0`. Evidence:
+`docs/release/evidence/AI_DIALOG_LIVE_V2_FACTS_G1Q_RU.md`. No model call, Mastra dependency,
+runtime switch or deploy occurred. P2 is unblocked and next.
 
 ### Slice P2 - add minimum app-owned run, span and quality persistence
 
@@ -1064,7 +1066,7 @@ operations boundary decision changes.
 | `granit-ops-decisions` read-only audit | passed | Confirmed proposed structured-decision/eval sequence and that the repo is decision evidence, not an accepted harness. |
 | Planning-baseline deployed widget read-only audit | passed; W0 was partial | Verified immediate pending/separate sending status, same-key retry and honest errors at `business-ai-web-widget@47481d5`, exact `landing-granit-static@7007b982` bundle provenance, plus the baseline strict response-truth, <=300 ms browser timing and 15-second timeout-invariant gaps. |
 | W0 consumer + preview integration | passed | Source CI `29358217137`, local 81/81 unit and 24/24 browser tests, immutable landing commit `151062cb...`, deploy run `29358660849`, 15.0 ms loopback pending render and exact deployed hashes passed. No real intake/model request was made; see `docs/release/evidence/AI_DIALOG_W0_WIDGET_UX_INTEGRATION_RU.md`. |
-| P1Q provider-neutral core | local checks and source audit passed; G1Q pending | Core checks passed at `78c9947` without a model call or Mastra dependency. The corrected 15-row proposal is pinned to source `23f2ee8...`; exact owner approval and production `facts.v1.ts` are still absent. |
+| P1Q provider-neutral core / G1Q | passed | Core checks passed at `78c9947`; exact owner approval, production `facts.v1.ts`, 5/112 focused, 3/9 frozen-direct and 17/211 full checks passed at `1d737e0`. Runtime stayed disabled with no model call. |
 | Historical `granit-site-cms` read-only inspection | passed | Verified candidate content/import caveat and that this stale May checkout is supporting history rather than current preview ownership. |
 | `gh pr view 5`, branch/doc inspection at `cf04541` | passed | Verified draft PR metadata, owner-sequenced branch and source documents. |
 | Independent plan delta review | passed after fixes | Reconciled two-lane sequencing, frozen S05/live_v2 isolation, M3-only semantic proof, SHA-pinned external evidence, G0 authority and fail-fast hard gates. |
@@ -1093,6 +1095,8 @@ operations boundary decision changes.
   `docs/release/evidence/AI_DIALOG_LIVE_V2_CORE_P1Q_RU.md`
 - P1Q exact-object facts source audit, not owner approval:
   `docs/release/evidence/AI_DIALOG_P1Q_FACTS_SOURCE_AUDIT_RU.md`
+- Authoritative G1Q closure evidence:
+  `docs/release/evidence/AI_DIALOG_LIVE_V2_FACTS_G1Q_RU.md`
 - W0 consumer/preview integration evidence:
   `docs/release/evidence/AI_DIALOG_W0_WIDGET_UX_INTEGRATION_RU.md`
 - Planned implementation evidence:
@@ -1102,9 +1106,6 @@ operations boundary decision changes.
 
 - App-owned run/quality state, manager-visible degradation, approved asset bundle and retention
   enforcement are not implemented.
-- G1Q cannot close until the owner explicitly accepts the exact 15-row P1Q facts proposal and the
-  matching production `facts.v1.ts` snapshot is created and rechecked. The P1Q core itself has
-  passed local checks at `78c9947`.
 - Official Mastra packages/docs have intentionally not been selected or pinned in this planning
   session.
 - All schema, AI behavior, environment, staging and production changes require owner review under
@@ -1135,11 +1136,9 @@ Owner approved the plan and ordered implementation on 2026-07-14. The accepted d
 G0 and G1/P1 are recorded as passed. W0 consumer and content-addressed preview integration passed
 at source `2982de06...` and deployed landing commit `151062cb...`, including a 15.0 ms local
 pending-render measurement and exact remote static hashes. This does not claim staging
-backend/model latency. P1Q core checks passed at `78c9947`; the proposal source audit passed
-against exact commit `23f2ee8c39ee2af30ca79cf9f2e5c4dd0229bf2a`. The immediate backend
-action is exact owner review of all 15 corrected facts, creation of the matching production
-`facts.v1.ts`, focused and frozen-direct rechecks, and G1Q evidence. Only after G1Q closes does
-work proceed to P2, then P3, M1 disabled, M2 local/fake, G6 and M3 staging.
+backend/model latency. G1Q passed with exact owner acceptance and production snapshot at
+`1d737e0`; focused, frozen-direct, full, typecheck and build checks passed without a model call.
+The immediate backend action is P2, then P3, M1 disabled, M2 local/fake, G6 and M3 staging.
 
 Mastra packages remain forbidden until P1/P1Q/P2/P3 and G4; staging config and every real
 `live_v2`/model call remain forbidden until the exact-SHA G6 approval immediately before M3. The

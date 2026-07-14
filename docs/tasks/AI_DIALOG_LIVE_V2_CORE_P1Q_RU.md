@@ -1,6 +1,6 @@
 # Task: AI-DIALOG-P1Q — provider-neutral live_v2 dialog core
 
-Status: core_local_checks_passed; G1Q pending owner facts approval; not deployed
+Status: G1Q passed; repo-owned facts snapshot verified; runtime disabled; not deployed
 Created: 2026-07-14
 Repo: `granit-operations`
 Slice: P1Q / G1Q
@@ -56,8 +56,8 @@ fail-closed валидирует кандидат и детерминирова�
 
 ## Реализованная структура
 
-Локальное provider-neutral ядро зафиксировано коммитом `78c9947`. Оно не подключено к runtime и
-не развёрнуто.
+Локальное provider-neutral ядро зафиксировано коммитом `78c9947`; accepted production facts
+snapshot — коммитом `1d737e0`. Профиль не подключён к runtime и не развёрнут.
 
 - `apps/api/src/modules/ai/profiles/live-v2/live-v2-contract.ts` — версии, строгие типы и
   controlled enums.
@@ -75,6 +75,8 @@ fail-closed валидирует кандидат и детерминирова�
   orchestration, fail-closed context/generator handling и свежая gate-проверка перед apply.
 - `apps/api/src/modules/ai/profiles/live-v2/live-v2-profile.ts` — статически disabled профиль без
   runtime provider.
+- `apps/api/src/modules/ai/profiles/live-v2/facts.v1.ts` — принятый владельцем 15-row snapshot,
+  schema validation, exact source metadata и exclusive review boundary `2026-10-14`.
 - `apps/api/test/fixtures/live-v2-synthetic.v1.ts` — test-only facts fixture и фиксированный
   synthetic corpus.
 - `apps/api/test/live-v2-{context,assets,validator,apply-plan,synthetic-fixtures}.test.ts` — пять
@@ -94,8 +96,8 @@ fail-closed валидирует кандидат и детерминирова�
 - `docs/tasks/AI_DIALOG_LIVE_V2_CORE_P1Q_RU.md`
 - `docs/tasks/AI_DIALOG_LIVE_V2_FACTS_P1Q_REVIEW_RU.md`
 - `docs/tasks/README.md`
-- Новый subtree `apps/api/src/modules/ai/profiles/live-v2/`, включая `assets/prompt.v1.ts` и
-  `assets/tone.v1.ts`; production `facts.v1.ts` пока отсутствует.
+- Новый subtree `apps/api/src/modules/ai/profiles/live-v2/`, включая `assets/prompt.v1.ts`,
+  `assets/tone.v1.ts` и owner-approved `facts.v1.ts`.
 - `apps/api/test/fixtures/live-v2-synthetic.v1.ts`
 - Пять focused test-файлов `apps/api/test/live-v2-*.test.ts`.
 - Локальный evidence `docs/release/evidence/AI_DIALOG_LIVE_V2_CORE_P1Q_RU.md`; он фиксирует
@@ -109,9 +111,9 @@ fail-closed валидирует кандидат и детерминирова�
 
 | Command/check | Result | Notes |
 |---|---|---|
-| Focused P1Q tests | passed: 5 files / 108 tests | Context, assets, validator, apply/orchestration и ровно 18 synthetic cases |
+| Focused P1Q tests | passed: 5 files / 112 tests | Context, exact 15-row production asset, validator, apply/orchestration и ровно 18 synthetic cases |
 | Frozen legacy/direct golden tests | passed: 3 files / 9 tests | Активный `legacy_s05` не переключён |
-| Full API/unit suite | passed: 17 files / 207 tests | Один Vitest worker |
+| Full API/unit suite | passed: 17 files / 211 tests | Один Vitest worker; повторено на exact snapshot commit `1d737e0` |
 | Typecheck | passed | Heap limit 512 МБ |
 | Build | passed | Последовательно после тестов, heap limit 512 МБ |
 | Frozen direct diff/impact check | passed | Нет runtime wiring, provider dependency или изменения frozen direct файлов |
@@ -149,24 +151,19 @@ fail-closed валидирует кандидат и детерминирова�
 ## Evidence Links
 
 - `docs/tasks/AI_DIALOG_MASTRA_OBSERVABILITY_FIRST_SLICE_RU.md`
-- `docs/tasks/AI_DIALOG_LIVE_V2_FACTS_P1Q_REVIEW_RU.md` — точный facts proposal; pending owner
-  approval, не runtime snapshot.
+- `docs/tasks/AI_DIALOG_LIVE_V2_FACTS_P1Q_REVIEW_RU.md` — точная owner-accepted 15-row table.
 - `docs/release/evidence/AI_DIALOG_APP_TURN_BOUNDARY_P1_RU.md`
 - Local core evidence, не G1Q sign-off:
   `docs/release/evidence/AI_DIALOG_LIVE_V2_CORE_P1Q_RU.md`
+- Authoritative G1Q closure evidence:
+  `docs/release/evidence/AI_DIALOG_LIVE_V2_FACTS_G1Q_RU.md`
 
-## Blockers
+## Remaining Boundaries
 
-- G1Q остаётся pending: для runtime-approved facts snapshot нужна явная owner-проверка всех 15
-  строк точной нормализованной таблицы с source path/line, content hash, allowed wording,
-  forbidden extrapolation, source version, `valid from` и `review by`.
 - `core_local_checks_passed` не означает deploy, staging readiness или runtime enablement.
-- До owner decision нет production `facts.v1.ts`, P2 не начинается.
+- G1Q пройден, но real model/Mastra call, staging и production по-прежнему запрещены.
 
 ## Next Action
 
-Получить явное решение владельца по всем 15 строкам
-`AI_DIALOG_LIVE_V2_FACTS_P1Q_REVIEW_RU.md`: принять таблицу целиком либо перечислить ID для
-изменения/исключения. После принятия создать production `facts.v1.ts`, повторить focused,
-frozen legacy, full suite, typecheck, build и diff checks, затем оформить G1Q evidence. Только
-после G1Q переходить к P2.
+G1Q пройден на implementation commit `1d737e0`; перейти к P2 app-owned run/span/quality
+persistence без Mastra dependency, runtime switch или live model call.

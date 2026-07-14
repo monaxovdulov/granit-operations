@@ -1,12 +1,13 @@
 # Evidence: AI-DIALOG-LIVE-V2-CORE-P1Q
 
-Status: core_local_checks_passed; G1Q pending owner facts approval; not deployed
+Status: core_local_checks_passed; superseded for gate status by G1Q evidence; not deployed
 Date: 2026-07-14
 Repo: `granit-operations`
 Slice: P1Q core before G1Q/P2
 Task link: `docs/tasks/AI_DIALOG_LIVE_V2_CORE_P1Q_RU.md`
 Facts review: `docs/tasks/AI_DIALOG_LIVE_V2_FACTS_P1Q_REVIEW_RU.md`
 Facts source audit: `docs/release/evidence/AI_DIALOG_P1Q_FACTS_SOURCE_AUDIT_RU.md`
+Successor G1Q evidence: `docs/release/evidence/AI_DIALOG_LIVE_V2_FACTS_G1Q_RU.md`
 Implementation commit: `78c9947`
 Profile: `live_v2`; `runtimeEnabled: false`; `provider: null`
 Contracts: `granit_live_v2_candidate.v1`, `granit_live_v2_turn_view.v1`,
@@ -70,10 +71,12 @@ Contracts: `granit_live_v2_candidate.v1`, `granit_live_v2_turn_view.v1`,
 projection и validator. Это **не** решение владельца, не production `facts.v1.ts` и не runtime
 snapshot.
 
-Повторный exact-object source audit подтвердил все cited paths/blobs, перепривязал proposal к
+На момент этого core evidence повторный exact-object source audit подтвердил все cited
+paths/blobs, перепривязал proposal к
 remote-resolvable source commit `23f2ee8c39ee2af30ca79cf9f2e5c4dd0229bf2a` и исправил две
-слишком широкие парафразы до owner review. Все 15 строк owner review table по-прежнему остаются
-`no — pending`, поэтому это не owner approval: G1Q не пройден и P2 пока не разблокирован.
+слишком широкие парафразы до owner review. Тогда все 15 строк оставались `no — pending`; этот
+исторический файл не является G1Q sign-off. Последующее принятие, snapshot и rechecks записаны в
+`AI_DIALOG_LIVE_V2_FACTS_G1Q_RU.md`.
 
 ## Evidence Limits
 
@@ -93,6 +96,6 @@ Revert `78c9947`. Migration, package, environment, deploy и active direct-runti
 ## Sign-Off
 
 - Developer P1Q core: passed locally.
-- Owner facts approval: pending.
-- G1Q/P2: pending.
+- Owner facts approval at the time of this core evidence: pending; subsequently passed in G1Q evidence.
+- G1Q/P2 at the time of this core evidence: pending; G1Q subsequently passed and P2 was unblocked.
 - Staging/production: not approved.

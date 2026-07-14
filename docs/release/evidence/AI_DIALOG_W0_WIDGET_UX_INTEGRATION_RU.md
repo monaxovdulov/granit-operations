@@ -96,8 +96,8 @@ host не получил POST: API route был fulfilled browser harness, servi
 
 ## Remaining Gates
 
-- P1Q G1Q remains open until explicit owner acceptance of all 15 facts and a matching production
-  `facts.v1.ts` snapshot/recheck.
+- P1Q G1Q subsequently passed with exact owner acceptance, production `facts.v1.ts` and rechecks;
+  P2 is now the next backend slice.
 - P2 -> P3 -> M1 disabled -> M2 local/fake -> G6 -> M3 remains sequential.
 - M1/M2 are not started. The first real `live_v2` call remains M3 after G6, only through Mastra
   with server-only `OPENAI_API_KEY`.

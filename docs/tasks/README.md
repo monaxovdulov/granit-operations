@@ -22,16 +22,14 @@ Current task records:
   history, app-owned identity, structural legacy decision orchestration and frozen direct S05
   golden checks before P1Q.
 - `AI_DIALOG_LIVE_V2_CORE_P1Q_RU.md` - provider-neutral P1Q core at
-  `core_local_checks_passed` in `78c9947`: strict `live_v2` context, candidate validation,
-  deterministic apply semantics and fixed synthetic fixtures passed local checks; not deployed,
-  no model call, Mastra dependency or runtime switch, and G1Q remains pending owner facts
-  approval.
-- `AI_DIALOG_LIVE_V2_FACTS_P1Q_REVIEW_RU.md` - exact 15-row facts proposal at `needs_review`;
-  every row remains `no — pending` / `after approval`, and the test-only approved fixture is not
-  owner approval or a runtime snapshot.
+  `core_local_checks_passed` in `78c9947`, with accepted production facts snapshot at `1d737e0`:
+  strict `live_v2` context, candidate validation, deterministic apply semantics, exact 15-row
+  asset and fixed synthetic fixtures passed; G1Q passed, runtime remains disabled/not deployed.
+- `AI_DIALOG_LIVE_V2_FACTS_P1Q_REVIEW_RU.md` - exact accepted 15-row facts table pinned to
+  `granit-site-cms@23f2ee8...`, materialized as schema-validated `facts.v1.ts` with review boundary
+  `2026-10-14`.
 - `AI_DIALOG_MASTRA_OBSERVABILITY_FIRST_SLICE_RU.md` - active implementation plan: G0/G1 passed,
-  W0 consumer and P1Q core passed local checks, while G1Q awaits exact owner facts approval;
-  remaining operations lane
+  W0 and G1Q passed; P2 app-owned observability is next in the remaining operations lane
   `P1 -> P1Q -> P2 -> P3 -> M1 disabled -> M2 local/fake -> G6 owner gate -> M3 authenticated
   staging` (`OPENAI_API_KEY`, `gpt-5.6-sol`, medium), with frozen direct OpenAI emergency rollback
   and future `codex_subscription` outside the slice.

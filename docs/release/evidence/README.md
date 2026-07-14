@@ -45,11 +45,13 @@ Current evidence records:
   app-only persistence identity, structural legacy orchestration and frozen direct S05 checks.
 - `AI_DIALOG_LIVE_V2_CORE_P1Q_RU.md` - local evidence for the disabled provider-neutral P1Q core
   at `78c9947`; this records `core_local_checks_passed`, not G1Q sign-off, deployment or runtime
-  enablement. G1Q/P2 remain pending explicit owner approval of all 15 facts rows, production
-  `facts.v1.ts` and repeated checks.
+  enablement. Its later gate status is superseded by the G1Q evidence below.
 - `AI_DIALOG_P1Q_FACTS_SOURCE_AUDIT_RU.md` - exact-object source and semantic audit of the
   corrected 15-row P1Q facts proposal pinned to remote-resolvable `granit-site-cms@23f2ee8...`;
-  this is proposal evidence, not owner approval or a production snapshot.
+  this remains historical pre-approval proposal evidence.
+- `AI_DIALOG_LIVE_V2_FACTS_G1Q_RU.md` - authoritative G1Q closure: exact owner acceptance,
+  schema-validated 15-row production snapshot at `1d737e0`, repeated checks, runtime still
+  disabled/not deployed and P2 unblocked.
 - `P0_CHANNEL_NEUTRAL_CONVERSATION_FOUNDATION_RU.md` - channel-neutral widget/Telegram-ready conversation foundation evidence.
 - `TELEGRAM_INBOUND_MANAGER_MINI_PANEL_RU.md` - Telegram inbound webhook, manager binding, takeover/reply mini-panel, and no-direct-send evidence.
 - `TELEGRAM_OUTBOUND_DELIVERY_SENDER_RU.md` - Telegram delivery sender path, retry/failure status and manager-visible delivery evidence.
