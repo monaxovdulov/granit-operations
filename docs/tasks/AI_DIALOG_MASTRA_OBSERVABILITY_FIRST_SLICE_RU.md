@@ -2,6 +2,7 @@
 
 Status: needs_review; implementation not started
 Created: 2026-07-13
+Updated: 2026-07-14
 Repo: `granit-operations`
 Slice: app-owned AI quality/trace prerequisites -> staging-only in-process Mastra + observability
 Owner/agent: owner review required / Codex planning agent
@@ -33,6 +34,26 @@ site-widget.v1 acceptance
 Sequencing утвержден, но не является разрешением на package install, schema change, staging
 enablement или production.
 
+## Owner-selected first runtime profile
+
+Owner follow-up decision on 2026-07-14 narrows the first Mastra implementation to:
+
+- runtime mode `mastra_openai_api`: in-process Mastra orchestration in staging only;
+- server-side OpenAI API authentication through existing `OPENAI_API_KEY`;
+- explicit model `gpt-5.6-sol` with requested `reasoning.effort=medium`;
+- no ChatGPT subscription, Codex SDK/CLI, inherited server Codex session or skills harness in
+  M1-M3.
+
+The current official OpenAI latest-model guide identifies `gpt-5.6-sol` as the flagship model,
+states that the `gpt-5.6` alias routes to it, and supports `medium` reasoning effort. The explicit
+`gpt-5.6-sol` model name is used here to avoid relying on the family alias. If dated G4
+verification cannot prove API-key access and exact parameter support through the selected Mastra
+integration, implementation stops for owner review; it must not substitute another model,
+reasoning level, API surface or authentication mode silently.
+
+This decision is architecture approval only. It does not approve packages, code, secrets,
+staging enablement or production use.
+
 ## Sources checked
 
 Planning/source-of-truth:
@@ -55,6 +76,11 @@ Repo rules/current truth:
 - `docs/tasks/TEMPLATE_RU.md`;
 - `docs/release/evidence/TEMPLATE_RU.md`;
 - `.agents/state/granit-dev-workflow.json`;
+- OpenAI latest-model guide, checked 2026-07-14:
+  <https://developers.openai.com/api/docs/guides/latest-model>;
+- official Codex authentication, SDK and non-interactive-mode docs, checked 2026-07-14:
+  <https://learn.chatgpt.com/docs/auth>, <https://learn.chatgpt.com/docs/codex-sdk>,
+  <https://learn.chatgpt.com/docs/non-interactive-mode>;
 - code, schema, tests and evidence at `granit-operations` commit
   `6666a0b06c46b29ec764c3403b60153125fe125c`.
 
@@ -69,7 +95,7 @@ tracked rules above and does not invent missing instructions.
 | Context | `compactContext.messages` contains only the current inbound widget message; it is not yet a bounded recent-history loader. | `apps/api/src/modules/ai/ai-turn.ts`, `buildSiteWidgetAiTurnInput` in `apps/api/src/modules/conversations/repositories/postgres-intake-repository.ts` |
 | Candidate/applied contracts | `AiTurnDecision` aliases the current reply candidate; `AiTurnResult` is declared but not wired through persistence. | `apps/api/src/modules/ai/ai-turn.ts` |
 | AI cohesion | `WidgetAiService` still combines deterministic policy choice, prompt assembly, provider call, fallback and unsafe-output checks. | `apps/api/src/modules/ai/services/widget-ai-service.ts` |
-| Direct rollback path | Direct OpenAI Responses API adapter exists and uses `store: false`. | `apps/api/src/modules/ai/adapters/openai-widget-assistant-provider.ts` |
+| Direct rollback path | Direct OpenAI Responses API adapter exists, uses server-only `OPENAI_API_KEY`, defaults `OPENAI_MODEL` to `gpt-5.5`, requests `reasoning.effort=low` and uses `store: false`. This independent current profile must not be silently changed by the Mastra slice. | `apps/api/src/config.ts`, `apps/api/src/modules/ai/adapters/openai-widget-assistant-provider.ts`, `docs/ENVIRONMENT.md` |
 | App authority | Inbound is persisted before AI. `persistAiReplyWithSendGate` checks `agent_allowed_to_reply=true` inside the outbound transaction. Telegram AI outbound throws `TelegramOutboundBlockedError`. | `apps/api/src/modules/intake/use-cases/public-widget-intake-service.ts`, `apps/api/src/modules/conversations/repositories/postgres-intake-repository.ts` |
 | Runtime flags | `AI_WIDGET_ENABLED` defaults to false. There is no runtime selector, Mastra flag, trace-export flag or explicit staging tier. | `apps/api/src/config.ts`, `apps/api/src/index.ts`, `docs/ENVIRONMENT.md` |
 | Schema | Latest migration is `0009_telegram_delivery_processing_uncertain.sql`. Current schema has leads, channel identities, conversations, messages, deliveries and manager state, but no `ai_runs`, trace spans, quality events, review labels or eval cases. | `packages/db/migrations/`, `packages/db/src/schema.ts` |
@@ -85,16 +111,28 @@ staging-only runtime selection are still prerequisites, not completed facts.
 
 ## Chosen architecture and rejected alternatives
 
-### Chosen: one app-owned turn port, two in-process runners
+### Chosen: one app-owned turn port, two first-slice in-process runners
 
 The app owns the turn lifecycle and selects one of two implementations behind the same typed
 boundary:
 
-1. `direct_openai` - existing behavior-preserving path and rollback default;
-2. `mastra` - in-process staging-only runner that returns the same untrusted typed candidate.
+1. `direct_openai` - existing behavior-preserving path, independently configured and the rollback
+   default;
+2. `mastra_openai_api` - in-process staging-only Mastra orchestration using server-only
+   `OPENAI_API_KEY`, explicit `gpt-5.6-sol`, requested `reasoning.effort=medium` and `store:false`.
 
 Both paths use the same app-owned input builder, policy/prompt/assets, candidate validation,
 run recorder, send-time gate, persistence and public response mapping.
+
+The OpenAI API key used by the Mastra runner must never enter prompts, tools, traces, logs,
+evidence, browser responses or
+persisted state. The direct and Mastra model profiles intentionally remain independent so the
+known direct rollback behavior is preserved. Therefore M3 proves contract, persistence,
+observability and rollback compatibility; it must not describe the two modes as a controlled
+model-quality A/B test. Model-quality promotion belongs to later sanitized eval/regression work.
+
+`direct_openai` is not a user-facing product choice or a second long-term orchestration strategy.
+It is an operations-only emergency bypass for failures introduced by the new Mastra layer.
 
 ### Rejected for the first slice: Mastra as a separate service
 
@@ -107,6 +145,24 @@ Public or staging-accessible Mastra/Studio routes broaden the attack surface and
 access, redaction, retention and lifecycle decisions. They remain a separate future task. The
 first slice proves their absence through route inventory.
 
+### Reserved future runner, outside the first slice: `codex_subscription`
+
+The same app-owned turn port may later gain a separately reviewed `codex_subscription` runner
+backed by Codex SDK/CLI and ChatGPT subscription authentication. It is not a Mastra provider,
+Mastra tool, Mastra workflow or child process spawned by Mastra.
+
+That future slice must define a dedicated OS/container identity, separate `CODEX_HOME`, isolated
+subscription credentials, ephemeral or read-only workspace, explicit network and skill/layer
+allowlists, resource/concurrency/time limits and typed input/output IPC. It must inherit no app
+secrets and receive no direct Postgres, outbox, delivery or customer-send authority. M1-M3 must
+not install, authenticate, spawn, configure or test this harness. First-slice config reserves the
+name only in this architecture document; the implemented enum contains only first-slice modes,
+so this and every other unknown value fail normal config validation. Official Codex docs
+establish that ChatGPT and API-key authentication plus server-side SDK/non-interactive surfaces
+exist; they do not by themselves approve reuse of a personal subscription as an application
+service credential. The future task must re-check workspace/admin policy, provider terms,
+account lifecycle and automation quotas before any server authentication.
+
 ## Target authority and data flow
 
 ```text
@@ -116,7 +172,7 @@ POST /public/intake/site-widget/messages
   -> build app-owned execution context + bounded AiTurnInput
   -> create app-owned ai_run + trace_id
   -> deterministic prechecks
-  -> selected runner: direct_openai OR in-process mastra
+  -> selected runner: direct_openai OR in-process mastra_openai_api
   -> untrusted AiTurnDecision candidate
   -> app schema/policy/source validation
   -> app-owned send-time gate
@@ -125,7 +181,7 @@ POST /public/intake/site-widget/messages
   -> map to unchanged public site_widget.v1 response
 ```
 
-| Responsibility | App/Postgres | Mastra |
+| Responsibility | App/Postgres | Mastra OpenAI runner |
 |---|---:|---:|
 | Lead, conversation, message, takeover and delivery truth | owns | no write authority |
 | App `trace_id` / `ai_run` / quality outcome | owns | may return runtime IDs/metadata |
@@ -147,7 +203,7 @@ external reference on that app record, not the primary business identifier.
 | G1 neutral boundary complete | Bounded recent history, internal execution IDs, typed candidate/applied result and cohesive app-owned orchestration exist without Mastra. | Focused tests + prerequisite task/evidence. | DB/run recorder work. |
 | G2 app-owned run/quality state | Direct path writes linked run, gate and manager-visible degradation/handoff records. | Migration review, DB tests, manager API/UI tests, direct-path smoke. | Mastra package work. |
 | G3 privacy/assets/rollback ready | Approved repo asset bundle, redaction allowlist, retention cleanup, route baseline and direct rollback path pass. No runtime Sheet read exists. | Tests, sanitized evidence and owner review. | Mastra package work. |
-| G4 package/API review | Implementation agent re-checks current official Mastra docs, package names, supported Node runtime, tracing hooks and license; exact versions are pinned. | Source links, date, selected versions and lockfile diff in implementation PR. | Mastra adapter code. |
+| G4 package/API review | Implementation agent re-checks current official Mastra and OpenAI docs, package names, supported Node runtime, tracing hooks, license, documented API-key availability of `gpt-5.6-sol` and provider request/response-shape support for `reasoning.effort=medium`, `store:false` and model identity; exact versions are pinned. No live provider call occurs before G6. | Source links, date, selected versions, package/type/request-shape review and lockfile diff in implementation PR. | Mastra adapter code. |
 | G5 code review | Mastra code is disabled by default; route inventory, no-direct-send/DB and rollback tests pass. | Reviewed PR and full local checks. | Staging enablement. |
 | G6 staging approval | Owner explicitly approves enabling the exact reviewed SHA only in staging. | Owner sign-off. | Any staging config change/smoke. |
 
@@ -183,12 +239,14 @@ Required columns:
 
 - `id` UUID primary key and app-generated unique `trace_id`;
 - `lead_id`, `conversation_id`, required `inbound_message_id`, nullable `outbound_message_id`;
-- `channel`, `runtime_mode` (`direct_openai` or `mastra`) and optional `runtime_run_id`;
+- `channel`, `runtime_mode` (`direct_openai` or `mastra_openai_api`) and optional
+  `runtime_run_id`;
 - unique turn `idempotency_key` and `input_fingerprint`;
 - `status`: `running`, `persisted`, `handed_off`, `blocked`, `fallback_unavailable` or `failed`;
 - `policy_version`, `prompt_version`, `tool_version`, nullable `asset_version`,
   `disclosure_version`;
-- `model_provider`, `model_name`, nullable exact package/runtime version;
+- `model_provider`, `requested_model_name`, nullable `provider_model_name`, controlled
+  `reasoning_effort`, `model_profile_version` and nullable exact package/runtime version;
 - input/output/total tokens, versioned `cost_estimate_microunits` and `cost_rate_version`;
 - `send_gate_result`: `not_checked`, `allowed` or `blocked`, plus `send_gate_checked_at`;
 - controlled `outcome_reason`, `failure_code`, `started_at`, `completed_at`, `latency_ms`;
@@ -254,7 +312,8 @@ sanitization workflow or eval promotion early.
 
 - message bodies, raw prompts containing customer text and full conversation snapshots;
 - name, phone, email, external chat/user IDs or unmasked provider identifiers;
-- cookies, auth headers, API keys, bot tokens, DB URLs and environment values;
+- cookies, auth headers, API keys, bot tokens, DB URLs, subscription identity, `CODEX_HOME`
+  contents and environment values;
 - raw provider/Mastra payloads, arbitrary exception objects and full logs;
 - chain-of-thought or hidden model reasoning;
 - generic tool input/output without a tool-specific sanitizer.
@@ -276,21 +335,34 @@ Retention:
 Planned config, all default-safe:
 
 - existing `AI_WIDGET_ENABLED=false` remains the global customer-AI switch;
-- add `AI_RUNTIME_MODE=direct_openai|mastra`, default `direct_openai`;
+- add `AI_RUNTIME_MODE=direct_openai|mastra_openai_api`, default `direct_openai`;
+- keep `OPENAI_API_KEY` server-only and require its presence when
+  `AI_RUNTIME_MODE=mastra_openai_api`; never persist or expose its value;
+- add `MASTRA_OPENAI_MODEL`, with the only first-slice accepted value `gpt-5.6-sol`, and
+  `MASTRA_OPENAI_REASONING_EFFORT`, with the only first-slice accepted value `medium`;
+- keep the current direct adapter's independent `OPENAI_MODEL`/low-effort behavior unchanged in
+  M1-M3 so rollback remains behavior-preserving;
 - add `DEPLOYMENT_TIER=local|test|staging|production|unknown`, default `unknown`;
-- allow `AI_RUNTIME_MODE=mastra` only when `DEPLOYMENT_TIER=staging`; reject startup otherwise;
+- allow `AI_RUNTIME_MODE=mastra_openai_api` only when `DEPLOYMENT_TIER=staging`; reject startup
+  otherwise;
+- reject missing API key, unsupported model/effort and every value outside the implemented
+  two-mode runtime enum at startup; never downgrade or substitute silently;
 - add `AI_TRACE_EXPORT_ENABLED=false`; first-slice acceptance requires it to remain false.
+
+The first slice adds no Codex SDK/CLI dependency, runtime implementation, config value or
+Codex/skills route. Future runner selection must be a new reviewed config/schema change, not an
+environment value that dormant first-slice code already accepts.
 
 Rollback order:
 
-1. switch `AI_RUNTIME_MODE` from `mastra` to `direct_openai` and restart the API;
+1. switch `AI_RUNTIME_MODE` from `mastra_openai_api` to `direct_openai` and restart the API;
 2. if direct AI is also unsafe, set `AI_WIDGET_ENABLED=false` and restart;
 3. do not delete inbound messages, outbound evidence, `ai_runs`, spans or quality events;
 4. do not drop the additive migration during runtime rollback.
 
 `apps/api/src/app.ts` must continue to register routes explicitly. Add a route-inventory test and
 capture `Fastify.printRoutes()` output in sanitized evidence. No path may contain `mastra`,
-`studio`, `workflow`, `trace` or an unauthenticated AI diagnostic endpoint.
+`codex`, `studio`, `workflow`, `trace` or an unauthenticated AI diagnostic endpoint.
 
 ## Implementation slices
 
@@ -406,8 +478,12 @@ approved asset snapshot and rollback smoke. Only an explicit approval starts the
 
 First action is a dated official-doc/package verification. Do not copy package/API assumptions
 from archived research. Record exact official links, package names, versions, Node compatibility,
-tracing hooks and any storage/network defaults. Pin exact versions in `apps/api/package.json` and
-`package-lock.json`; no ranges for the first staging experiment.
+tracing hooks, OpenAI provider transport, support for `gpt-5.6-sol`, requested
+`reasoning.effort=medium`, `store:false`, returned model identity and any storage/network defaults.
+Pin exact versions in `apps/api/package.json` and `package-lock.json`; no ranges for the first
+staging experiment. If the exact profile cannot be expressed and verified, stop at G4 rather than
+falling back to another model, effort, endpoint or auth mode. G4 uses docs, package types and
+request-shape tests only; it must not make a live OpenAI request before G6.
 
 Create/modify only after G4:
 
@@ -419,18 +495,24 @@ Create/modify only after G4:
 
 Constraints:
 
+- the first implemented Mastra provider uses server-only `OPENAI_API_KEY` and the app-owned
+  `gpt-5.6-sol`/`medium` model profile; the key is injected only at the provider boundary;
+- the provider call must preserve `store:false`; record requested profile and sanitized returned
+  model identity without raw provider payloads;
 - Mastra receives bounded input/assets and constrained app-approved tools only;
 - first slice exposes no business-mutating tool; read-only tools, if any, return approved data;
 - Mastra cannot import conversation repositories, Drizzle schema, delivery providers, Fastify or
   route modules;
 - output is parsed as untrusted `AiTurnDecision` and goes through the same app validator;
+- no Codex SDK/CLI dependency, ChatGPT login or server-skill discovery is added;
 - direct OpenAI classes remain assembled and tested;
-- `AI_RUNTIME_MODE` remains `direct_openai` by default and Mastra cannot run outside staging.
+- `AI_RUNTIME_MODE` remains `direct_openai` by default and `mastra_openai_api` cannot run outside
+  staging.
 
 Exit: local/test contract tests exercise the adapter with fakes; no staging or production is
 enabled; route inventory is unchanged.
 
-### Slice M2 - connect app-owned observability and prove parity locally
+### Slice M2 - connect app-owned observability and prove contract parity locally
 
 Work:
 
@@ -439,6 +521,7 @@ Work:
 3. Record token usage and a cost estimate based on a dated, versioned provider pricing snapshot;
    do not silently use stale or hard-coded unversioned rates.
 4. Run the same candidate validator, handoff/degradation flow and persistence path as direct mode.
+   Do not claim model-quality parity because the preserved direct model profile differs.
 5. Add one repo-owned sanitized regression fixture that predates this runtime integration. This
    proves runner wiring only; manager-driven bad-dialog promotion remains S10.
 6. Prove switching back to direct mode reuses the same public contract and does not lose or
@@ -454,12 +537,15 @@ After G5 and explicit G6 only:
 1. Apply the reviewed additive migration and verify schema/indexes with sanitized output.
 2. Run one `direct_openai` staging turn first and prove app-owned run/quality linkage.
 3. Capture route inventory before Mastra enablement.
-4. Enable `mastra` only for the exact reviewed staging SHA and test identities.
-5. Run success, manager-request handoff, forced runtime/model failure, takeover-during-work and
+4. Enable `mastra_openai_api` with `gpt-5.6-sol`/`medium` only for the exact reviewed staging SHA
+   and test identities.
+5. Make the first approved authenticated Mastra call, verify API-key entitlement and allowlisted
+   returned model identity, and stop immediately on mismatch.
+6. Run success, manager-request handoff, forced runtime/model failure, takeover-during-work and
    redaction canary scenarios.
-6. Switch back to `direct_openai`, restart, and prove a new turn succeeds without replay/duplicate
+7. Switch back to `direct_openai`, restart, and prove a new turn succeeds without replay/duplicate
    writes.
-7. Disable customer AI after evidence unless the owner separately approves continued staging use.
+8. Disable customer AI after evidence unless the owner separately approves continued staging use.
 
 Write sanitized proof to
 `docs/release/evidence/AI_DIALOG_MASTRA_OBSERVABILITY_FIRST_SLICE_RU.md`. Update this task's
@@ -477,11 +563,16 @@ checks/evidence status only after the evidence exists.
 | model/Mastra/tool throws | turn fails | inbound remains, public safe fallback returns, run failure and quality reason are visible | runner contract + public intake |
 | manager takes over while runner works | candidate returns later | send gate blocks outbound; run records blocked gate; no AI message exists | existing stale-draft test extended to both modes |
 | policy asks for manager | safe handoff reply/outcome applies | app owns `needs_manager`, quality event and gate state | policy/orchestrator tests |
+| `mastra_openai_api` + staging + valid key/profile | provider adapter is invoked | request uses explicit `gpt-5.6-sol`, requested effort `medium` and `store:false`; app records sanitized requested/returned identity | runner contract + config tests |
+| `mastra_openai_api` lacks API key | config loads | startup fails before serving routes; no secret value appears in the error | config tests |
+| configured model/effort is outside the first-slice allowlist | config loads | startup fails locally without a provider call; no silent model, effort, endpoint or auth substitution occurs | config tests |
+| authenticated staging response reports an unexpected model identity | candidate run returns | run fails closed, outbound is blocked, degradation is recorded, further Mastra evidence stops and direct rollback begins | runner contract + M3 staging evidence |
 | Mastra mode outside staging | config loads | startup fails before serving routes | config tests |
-| Mastra mode disabled | app assembles | direct adapter remains selected and functional | app-context tests |
-| secret/PII canary in error, prompt or tool payload | sanitizer records/exports | forbidden values are absent; unknown keys are dropped | observability sanitizer tests |
+| Mastra mode disabled | app assembles | direct adapter remains selected with its preserved independent profile | app-context tests |
+| unknown runtime value is selected | config loads | ordinary enum validation rejects it; only the two implemented first-slice modes exist | config tests |
+| secret/PII canary in error, prompt or tool payload | sanitizer records/exports | API key and other forbidden values are absent from DB, trace, logs, evidence and response; unknown keys are dropped | observability sanitizer tests |
 | expired and non-expired spans | cleanup dry-run/run executes | only expired spans are reported/deleted in bounded batches | retention repository/script tests |
-| API route inventory | Mastra package is present | no Mastra/Studio/trace/workflow public route appears | new route inventory test |
+| API route inventory | Mastra package is present | no Mastra/Codex/Studio/trace/workflow public route appears | new route inventory test |
 | Telegram inbound exists | AI persistence is attempted | Telegram AI outbound remains blocked | `apps/api/test/public-intake.test.ts` |
 | public response is inspected | any outcome occurs | no internal trace/run/lead/conversation/manager/eval fields leak | existing recursive privacy assertion |
 
@@ -502,16 +593,20 @@ upgrade paths, and records schema/index/FK results without DB URL or row content
 
 The evidence file must contain:
 
-- exact git SHA, `site_widget.v1`, AI boundary, policy, prompt, tool, asset, model and pinned Mastra
-  versions;
-- config names/modes only, with all values/secrets redacted;
+- exact git SHA, `site_widget.v1`, AI boundary, policy, prompt, tool, asset, requested
+  `gpt-5.6-sol`/`medium`, sanitized returned model identity and pinned Mastra versions;
+- exact runtime mode and config names; API-key presence may be recorded only as boolean, with the
+  value and all other secrets redacted;
 - migration applied/fresh-schema results and explicit no-historical-backfill statement;
-- route inventory before/after and proof of no Studio/public Mastra routes;
-- direct-path baseline run and Mastra run linked to app-owned IDs;
+- route inventory before/after and proof of no Studio/public Mastra or Codex routes;
+- direct-path baseline run with its preserved profile and `mastra_openai_api` run linked to
+  app-owned IDs; label this contract/rollback evidence, not a model-quality A/B comparison;
 - success, failure, handoff and takeover/send-gate outcomes;
 - sanitized token/cost/latency/span summary;
 - redaction canary result and 30-day expiry/cleanup proof;
 - kill-switch switch to direct mode and no-loss/no-duplicate result;
+- dependency/source/config/route inventory confirming that no Codex SDK/CLI or subscription/skills
+  integration was added;
 - confirmation that Telegram AI outbound, trace export and production remained disabled;
 - owner/developer sign-off fields from the evidence template.
 
@@ -527,8 +622,11 @@ when any of these occurs:
 - inbound or outbound message is lost/duplicated across runtime selection;
 - public API leaks internal run/trace/business identifiers;
 - trace/span/evidence contains a redaction canary, secret or raw customer content;
-- Mastra/Studio/trace/workflow route becomes reachable;
+- Mastra/Codex/Studio/trace/workflow route becomes reachable;
 - Mastra gains direct DB write, outbox/delivery or customer-send authority;
+- requested `gpt-5.6-sol`/`medium`/`store:false` cannot be proven or any silent provider/model
+  substitution occurs;
+- a Codex SDK/CLI dependency, runtime/config path, subscription integration or skills route appears;
 - app `ai_run` cannot be linked to the actual message outcome;
 - direct rollback mode does not pass its smoke;
 - Mastra starts outside explicit staging tier;
@@ -576,8 +674,10 @@ operations boundary decision changes.
 - direct customer sends, delivery/outbox writes or business-table writes from Mastra;
 - Mastra channels for widget/Telegram transport;
 - Mastra schedules for cleanup, delivery or critical background work;
-- separate AI runtime service;
+- separate AI runtime service in this first slice;
 - any local, staging or public Mastra Studio;
+- `codex_subscription`, Codex SDK/CLI harness, ChatGPT subscription auth, reuse of an installed
+  server CLI/session, skill/layer execution and all related isolation/deployment configuration;
 - external trace export or Mastra Cloud as source of truth;
 - Google Sheet/TSV runtime reads;
 - pricing, final deadline, contract, warranty, discount, availability, legal or payment authority;
@@ -588,12 +688,16 @@ operations boundary decision changes.
 | Risk | Mitigation / proof |
 |---|---|
 | Two runtime paths drift | Same input/candidate validator/persistence tests run against both; direct remains default. |
+| Different direct/Mastra model profiles are misreported as a quality A/B | Preserve and record each profile independently; M3 proves wiring/rollback only, while quality comparison waits for sanitized evals. |
 | Trace becomes second CRM | Only IDs, versions, metrics and sanitized spans; business state remains existing tables/services. |
 | Run/message partial write | Complete persisted outcome and outbound linkage in one DB transaction; test crash/error edges. |
 | Historical backfill invents evidence | No backfill; record only baseline counts. |
 | PII/secret leakage | Central allowlist sanitizer, canary tests, export off, no raw evidence. |
 | Runtime enabled in production | Explicit deployment tier guard plus default direct mode and owner staging gate. |
 | Mastra API research is stale | Dated official-doc verification immediately before pinning packages. |
+| OpenAI model alias/provider fallback drifts | Request explicit `gpt-5.6-sol`/`medium`, record sanitized returned identity and stop on unsupported or unexpected substitution. |
+| Codex is accidentally nested under Mastra | Dependency/source/config/route inventory proves no Codex implementation exists in M1-M3. |
+| Installed server Codex credentials or skills leak into app execution | Future runner requires isolated identity/`CODEX_HOME`/allowlists; first slice contains no integration path that reads them. |
 | Manager-visible degradation becomes noisy | Controlled event/reason/severity set; show unresolved relevant events, not raw spans. |
 | S10 pulled forward | Only stable run/quality IDs and forward linkage are created; label/eval workflow remains deferred. |
 | Studio sneaks into first slice | Dependency/route inventory and explicit no-Studio acceptance test. |
@@ -612,11 +716,17 @@ operations boundary decision changes.
 | Targeted AST/file/source inspection | passed | Verified AI boundary, direct adapter, send gate, schema, manager view, routes and tests listed above. |
 | `gh pr view 5`, branch/doc inspection at `cf04541` | passed | Verified draft PR metadata, owner-sequenced branch and source documents. |
 | Placeholder/consistency/scope self-review | passed | No `TBD`/`TODO`; prerequisites, Mastra integration, S08/S10 and Studio scopes remain separated. |
+| Official OpenAI latest-model verification | passed for planning; repeat at G4 | On 2026-07-14 official docs identify `gpt-5.6-sol` and support `medium`; no package/runtime capability is assumed from this planning check. |
 | `git diff --check` | passed | No whitespace errors in the planning diff. |
 
 ## Evidence Links
 
 - Source decision: <https://github.com/monaxovdulov/granit-plan-app/pull/5>
+- Owner-selected OpenAI profile source, checked 2026-07-14:
+  <https://developers.openai.com/api/docs/guides/latest-model>
+- Future Codex runner feasibility sources, not implementation approval:
+  <https://learn.chatgpt.com/docs/auth>, <https://learn.chatgpt.com/docs/codex-sdk>,
+  <https://learn.chatgpt.com/docs/non-interactive-mode>
 - Existing Stage A evidence: `docs/release/evidence/AI_DIALOG_BOUNDARY_STAGE_A_RU.md`
 - Existing website AI/takeover evidence: `docs/release/evidence/S05_WEBSITE_SAFE_AI_RU.md`,
   `docs/release/evidence/S06_MANAGER_TAKEOVER_RU.md`
@@ -644,7 +754,11 @@ Owner should review and either approve or request changes to:
 3. `direct_openai` default/rollback and explicit staging-tier guard;
 4. redaction allowlist and retention defaults;
 5. manager-visible quality scope now versus S10 review/eval workflow later;
-6. explicit exclusion of separate/public Mastra Studio.
+6. first runtime profile `mastra_openai_api` + server API key + explicit
+   `gpt-5.6-sol`/`medium`, with no silent substitution;
+7. preserved direct adapter as an emergency rollback with its independent current profile;
+8. future isolated `codex_subscription` runner as architecture-only scope outside M1-M3;
+9. explicit exclusion of separate/public Mastra Studio.
 
 After approval, create a new implementation task for Slice P0/P1 only. Do not install Mastra,
 write migration/runtime code, change staging config or start any later slice from this planning

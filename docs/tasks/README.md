@@ -18,7 +18,7 @@ Current task records:
 - `S04_WIDGET_PERSISTENCE_RU.md` - website widget message persistence before AI replies.
 - `SERIOUS_AI_LAYER_RU.md` - preparation plan for the serious backend AI layer after S05 website safe AI.
 - `AI_DIALOG_BOUNDARY_STAGE_A_RU.md` - local Stage A implementation of the neutral AI turn boundary before Mastra runtime, Telegram AI outbound or production AI approval.
-- `AI_DIALOG_MASTRA_OBSERVABILITY_FIRST_SLICE_RU.md` - owner-review implementation plan that separates `site_widget.v1` and app-owned AI quality/trace prerequisites from the first staging-only in-process Mastra + observability slice.
+- `AI_DIALOG_MASTRA_OBSERVABILITY_FIRST_SLICE_RU.md` - owner-review plan separating prerequisites from the first staging-only `mastra_openai_api` slice (`OPENAI_API_KEY`, `gpt-5.6-sol`, medium reasoning), preserving direct OpenAI rollback and reserving an isolated future `codex_subscription` runner outside the slice.
 - `MODULAR_MONOLITH_REFACTOR_RU.md` - planned refactor to make `ops-api` a clearer modular monolith without changing runtime topology, public contracts, DB schema or production state.
 - `OPS_API_THICK_MODULE_REFACTOR_NEXT_TASKS_RU.md` - ordered next refactor slices after the thick-module audit, with mandatory explicit ADRs for boundary-changing work.
 - `P0_CHANNEL_NEUTRAL_CONVERSATION_FOUNDATION_RU.md` - implementation handoff for channel-neutral widget/Telegram conversation foundation before Telegram adapter and production.
