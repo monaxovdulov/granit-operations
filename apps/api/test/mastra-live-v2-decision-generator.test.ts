@@ -15,7 +15,7 @@ import { LIVE_V2_PROMPT_ASSET } from "../src/modules/ai/profiles/live-v2/assets/
 import { LIVE_V2_TONE_ASSET } from "../src/modules/ai/profiles/live-v2/assets/tone.v1.js";
 import { toLiveV2ModelFactsAsset } from "../src/modules/ai/profiles/live-v2/live-v2-assets.js";
 import { buildLiveV2TurnView } from "../src/modules/ai/profiles/live-v2/live-v2-context.js";
-import { liveV2CandidateSchema } from "../src/modules/ai/profiles/live-v2/live-v2-validator.js";
+import { liveV2ProviderCandidateSchema } from "../src/modules/ai/profiles/live-v2/live-v2-validator.js";
 import {
   TEST_LIVE_V2_FACTS,
   answerCandidate,
@@ -118,7 +118,7 @@ describe("M1 disabled Mastra live_v2 adapter", () => {
           transport: "fetch"
         }
       },
-      structuredOutput: { schema: liveV2CandidateSchema }
+      structuredOutput: { schema: liveV2ProviderCandidateSchema }
     });
     expect(options.abortSignal).toBeInstanceOf(AbortSignal);
     expect(options.abortSignal.aborted).toBe(false);
@@ -388,6 +388,11 @@ describe("M1 disabled Mastra live_v2 adapter", () => {
         reasoning: { effort: "medium" },
         store: false
       });
+      const responseSchema = (
+        (requestBody.text as Record<string, unknown>).format as Record<string, unknown>
+      ).schema as Record<string, unknown>;
+      expect(responseSchema.type).toBe("object");
+      expect(responseSchema).not.toHaveProperty("anyOf");
       expect(categories).toEqual(["auth_or_entitlement"]);
       expect(thrown).toBeInstanceOf(MastraLiveV2GenerationError);
       expect((thrown as MastraLiveV2GenerationError).failureCategory).toBe(

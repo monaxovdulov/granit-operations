@@ -92,6 +92,28 @@ export const liveV2CandidateSchema = z.discriminatedUnion("action", [
 ]);
 
 /**
+ * OpenAI Structured Outputs requires the root JSON Schema to be an object rather than `anyOf`.
+ * This provider-facing schema keeps every field required and applies only shape-level bounds;
+ * `liveV2CandidateSchema` remains the authoritative action-specific app-owned validator.
+ */
+export const liveV2ProviderCandidateSchema = z
+  .object({
+    ...candidateBase,
+    action: actionSchema,
+    replyDraft: replyDraftSchema.nullable(),
+    reason: z.enum([
+      "answer_ready",
+      "missing_required_slot",
+      "explicit_manager_request",
+      "manager_required",
+      "no_safe_answer",
+      "missing_approved_fact"
+    ]),
+    missingSlots: z.array(slotSchema).max(1)
+  })
+  .strict();
+
+/**
  * P1Q validates a provider-neutral candidate's shape and deterministic safety invariants.
  * It intentionally does not claim to infer the visitor's intent from prose or prove semantic
  * entailment between arbitrary reply prose and a declared fact ID; those remain model-evaluation

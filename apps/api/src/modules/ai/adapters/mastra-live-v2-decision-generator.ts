@@ -8,7 +8,7 @@ import {
   type DeploymentTier
 } from "../../../config.js";
 import type { LiveV2GeneratorInput } from "../profiles/live-v2/live-v2-orchestrator.js";
-import { liveV2CandidateSchema } from "../profiles/live-v2/live-v2-validator.js";
+import { liveV2ProviderCandidateSchema } from "../profiles/live-v2/live-v2-validator.js";
 import { isSafeWidgetAiModelName } from "../widget-ai-model-name.js";
 
 export const MASTRA_LIVE_V2_MAX_INPUT_CHARACTERS = 64_000;
@@ -95,7 +95,7 @@ export type MastraLiveV2GenerateOptions = AgentExecutionOptionsBase<unknown> & {
     };
   };
   structuredOutput: {
-    schema: typeof liveV2CandidateSchema;
+    schema: typeof liveV2ProviderCandidateSchema;
   };
 };
 
@@ -371,7 +371,7 @@ function buildGenerateOptions(
       }
     },
     structuredOutput: {
-      schema: liveV2CandidateSchema
+      schema: liveV2ProviderCandidateSchema
     }
   };
 }
