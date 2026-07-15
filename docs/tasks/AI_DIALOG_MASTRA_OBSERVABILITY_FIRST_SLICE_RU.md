@@ -1,6 +1,6 @@
 # Task: AI-DIALOG-MASTRA-OBSERVABILITY-FIRST-SLICE - implementation plan первого staging-only Mastra + observability slice
 
-Status: in_progress; G0/G1/W0/G1Q/P2/P3/G4/M1/M2 passed; G6 exact-SHA owner approval next
+Status: in_progress; G0/G1/W0/G1Q/P2/P3/G4/M1/M2/G5/G6 passed; M3 single-call staging smoke in progress
 Created: 2026-07-13
 Updated: 2026-07-15
 Repo: `granit-operations`
@@ -858,28 +858,40 @@ bounded full checks and final no-P0/P1 review are recorded in
 until trusted evidence can rule out the documented cache-write premium. Environment-selected
 Mastra remains disabled, and no real provider/model call occurred.
 
+G5/G6 result on 2026-07-15: `passed`. The reviewed M2 candidate and its evidence are committed at
+exact SHA `ad40c27ad2cb97b5f2249f263a64073feaea1fcf`; the owner explicitly approved that exact SHA
+for transition into M3 staging. The same owner instruction authorizes only the first controlled
+real `live_v2` call through Mastra with the server-only `OPENAI_API_KEY`. It does not authorize a
+pre-Mastra direct provider call, a multi-call live corpus, continued staging enablement or
+production.
+
 ### Slice M3 - controlled staging evidence
 
 After G5 and explicit G6 only:
 
 1. Apply the reviewed additive migration and verify schema/indexes with sanitized output.
-2. Run one `direct_openai` staging turn first and prove app-owned run/quality linkage.
-3. Capture route inventory before Mastra enablement.
-4. Enable `mastra_openai_api` with `gpt-5.6-sol`/`medium` only for the exact reviewed staging SHA
-   and test identities.
-5. Make the first approved authenticated Mastra call, verify API-key entitlement and allowlisted
-   returned model identity, and stop immediately on mismatch.
-6. Run the approved fixed 15-20-input live corpus plus success, manager-request handoff, forced
-   runtime/model failure, takeover-during-work and redaction canary scenarios; record semantic and
-   app hard-gate pass/fail, soft labels, fallback rate, p50/p95 full-response latency, token/cost
-   summary and returned identity. Any hard-gate failure stops the remaining run and starts direct
-   rollback; do not average a safety failure into a pass rate.
-7. Switch back to `direct_openai`, restart, and prove a new turn succeeds without replay/duplicate
-   writes.
-8. Reuse the verified W0 source/integration SHAs, but record a new pending-state measurement
+2. Capture route, dependency and config-name inventory before Mastra enablement. Do not run a
+   real `direct_openai` turn first: the current owner instruction requires the first real
+   `live_v2`/model call to go only through Mastra.
+3. Enable `mastra_openai_api` with `gpt-5.6-sol`/`medium` only for the reviewed M3 descendant of
+   approved G6 base `ad40c27ad2cb97b5f2249f263a64073feaea1fcf` and synthetic test identity.
+4. Make exactly one approved authenticated Mastra call, verify API-key entitlement, app-owned
+   run/outcome linkage and allowlisted returned model identity, and stop immediately on mismatch.
+   Evidence may contain only sanitized enums, counts, latency, versions and identities; it must
+   contain neither input/output text nor provider payloads.
+5. Switch back to `direct_openai` with customer AI disabled, restart, and prove the frozen
+   `legacy_s05` rollback path through no-network tests and health/config checks. A second real
+   direct-provider turn is not authorized by this G6 instruction.
+6. Reuse the verified W0 source/integration SHAs, but record a new pending-state measurement
    against the same approved M3 staging flow; do not present the W0 local 15.0 ms render as
    staging backend/model latency.
-9. Disable customer AI after evidence unless the owner separately approves continued staging use.
+7. Keep customer AI disabled after evidence unless the owner separately approves continued
+   staging use.
+
+The fixed 15-20-input authenticated live corpus, provider-backed failure/handoff/takeover cases
+and p50/p95 multi-call statistics remain the next M3 gate and require separate explicit authority
+to spend additional provider calls. The single-call smoke must not be reported as full semantic,
+tone, corpus or M3 completion evidence.
 
 Write sanitized proof to
 `docs/release/evidence/AI_DIALOG_MASTRA_OBSERVABILITY_FIRST_SLICE_RU.md`. Update this task's
@@ -1142,10 +1154,11 @@ operations boundary decision changes.
 
 ## Blockers
 
-- App-owned run/quality state, manager-visible degradation, approved asset bundle and retention
-  enforcement are not implemented.
-- Official Mastra packages/docs have intentionally not been selected or pinned in this planning
-  session.
+- App-owned run/quality state, manager visibility, approved assets, retention, pinned Mastra
+  packages and the disabled/local-fake adapter are implemented and evidenced through M2/G5.
+- Full M3 semantic/tone closure remains blocked on separate authority for the 15-20-input
+  authenticated corpus; the current G6 follow-up permits exactly one synthetic staging call.
+- Continued staging enablement and every production change remain unapproved.
 - All schema, AI behavior, environment, staging and production changes require owner review under
   `docs/AGENT_WORKFLOW.md`.
 
@@ -1176,11 +1189,12 @@ at source `2982de06...` and deployed landing commit `151062cb...`, including a 1
 pending-render measurement and exact remote static hashes. This does not claim staging
 backend/model latency. G1Q passed with exact owner acceptance and production snapshot at
 `1d737e0`; P2, P3, G4, M1 and M2 passed with focused, PostgreSQL, frozen-direct, full, typecheck,
-build and independent review checks without a model call. The immediate backend action is G6
-exact-SHA owner approval. M3 staging remains forbidden before that approval.
+build and independent review checks without a model call. G6 exact-SHA owner approval passed on
+2026-07-15 for `ad40c27ad2cb97b5f2249f263a64073feaea1fcf`; the immediate backend action is the
+bounded M3 single-call staging smoke described above.
 
-Mastra packages remain forbidden until P1/P1Q/P2/P3 and G4; staging config and every real
-`live_v2`/model call remain forbidden until the exact-SHA G6 approval immediately before M3. The
-first real call must go only through Mastra with the server-only `OPENAI_API_KEY`. The frozen
-direct OpenAI path remains a manual emergency rollback without `live_v2` and without automatic
-cross-provider retries.
+Mastra packages were admitted only after P1/P1Q/P2/P3 and G4. G6 now authorizes the bounded M3
+staging transition from its exact approved base. The first and, under the current instruction,
+only real call must go through Mastra with the server-only `OPENAI_API_KEY`. The frozen direct
+OpenAI path remains a manual emergency rollback without `live_v2` and without automatic
+cross-provider retries; production and continued staging enablement remain forbidden.

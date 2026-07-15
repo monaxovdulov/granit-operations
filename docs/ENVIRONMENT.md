@@ -17,12 +17,12 @@ Future environment/config names:
 | `PUBLIC_INTAKE_ALLOWED_ORIGINS` | Allowed public site origins | server only | future |
 | `PUBLIC_INTAKE_CONTRACT_VERSION` | Published intake contract version | server/client config | documented as `site_form.v1` |
 | `AI_WIDGET_ENABLED` | Enables website widget AI replies only after S05 checks/staging smoke | server only | S05 runtime, default `false` |
-| `AI_RUNTIME_MODE` | Selects exact `direct_openai` or `mastra_openai_api`; default is frozen direct rollback | server only | M1 config; Mastra adapter disabled until later gate |
+| `AI_RUNTIME_MODE` | Selects exact `direct_openai` or `mastra_openai_api`; default is frozen direct rollback | server only | M3 staging-only selection after exact-SHA G6 approval |
 | `DEPLOYMENT_TIER` | Exact `local`, `test`, `staging`, `production` or `unknown`; Mastra OpenAI mode is valid only for staging | server only | M1 runtime guard, default `unknown` |
-| `OPENAI_API_KEY` | OpenAI Responses API access; injected only at the selected server-side provider boundary | server only | S05 direct runtime; future Mastra M3 only after G6 |
+| `OPENAI_API_KEY` | OpenAI Responses API access; injected only at the selected server-side provider boundary | server only | S05 direct rollback or G6-approved M3 Mastra staging boundary; never client-side |
 | `OPENAI_MODEL` | OpenAI model for website widget AI, default `gpt-5.5` | server only | S05 runtime |
-| `MASTRA_OPENAI_MODEL` | Exact first-slice Mastra model, only `gpt-5.6-sol` | server only | M1 pinned config; no call before G6 |
-| `MASTRA_OPENAI_REASONING_EFFORT` | Exact first-slice reasoning effort, only `medium` | server only | M1 pinned config; no call before G6 |
+| `MASTRA_OPENAI_MODEL` | Exact first-slice Mastra model, only `gpt-5.6-sol` | server only | G6-approved M3 staging profile |
+| `MASTRA_OPENAI_REASONING_EFFORT` | Exact first-slice reasoning effort, only `medium` | server only | G6-approved M3 staging profile |
 | `AI_TRACE_EXPORT_ENABLED` | External AI trace export switch; first slice accepts only `false` | server only | P3/M1 guard, default `false` |
 | `MASTRA_TELEMETRY_DISABLED` | Required exact `true` before the real Mastra module can be imported | server only | M1 network opt-out |
 | `MASTRA_AUTO_REFRESH_PROVIDERS` | Required exact `false` to forbid background provider-registry refresh | server only | M1 network opt-out |

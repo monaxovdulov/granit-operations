@@ -148,3 +148,11 @@ P0/P1.
 This evidence closes M2 local/fake only. It does not approve M3. The owner must explicitly approve
 the exact reviewed G6 candidate SHA before any staging config/deploy or authenticated provider/model
 call. The first real `live_v2` call remains M3 through Mastra plus server-only `OPENAI_API_KEY`.
+
+## Post-evidence G6 transition
+
+On 2026-07-15 the owner explicitly approved exact candidate SHA
+`ad40c27ad2cb97b5f2249f263a64073feaea1fcf` for the bounded M3 staging transition. This dated
+note does not rewrite the historical M2 no-call result. The current authorization permits one
+synthetic real `live_v2` call through Mastra only; it does not permit a pre-Mastra direct call,
+the full live corpus, continued staging enablement or production.

@@ -1,6 +1,6 @@
 # Live Widget AI - ускоренный staging-only дизайн
 
-Status: owner-confirmed design; W0/G1Q/P2 passed; P3 next; runtime not enabled
+Status: owner-confirmed design; W0/G1Q/P2/P3/G4/M1/M2/G5/G6 passed; bounded M3 staging smoke in progress
 Date: 2026-07-14
 Repo: `granit-operations`
 Related plan: `docs/tasks/AI_DIALOG_MASTRA_OBSERVABILITY_FIRST_SLICE_RU.md`
@@ -253,3 +253,8 @@ only. Canonical cross-repo sequencing remains the owner-approved `granit-plan-ap
 implementation authority comes only from repo-local tasks in each owning repo. Each slice still
 requires its own review, tests and evidence. No package, runtime, schema, deploy, staging or
 production change is authorized by this document.
+
+Follow-up authority on 2026-07-15 approved exact G6 candidate
+`ad40c27ad2cb97b5f2249f263a64073feaea1fcf` for the bounded M3 staging transition recorded in
+the authoritative repo-local plan. That follow-up permits one synthetic authenticated Mastra
+call only; it does not authorize production, continued staging enablement or the full live corpus.
