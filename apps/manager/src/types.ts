@@ -98,6 +98,49 @@ export type AiState =
   | "watching"
   | "closed";
 
+export type AiQualityEventType =
+  | "handoff"
+  | "degradation"
+  | "blocked"
+  | "policy_violation"
+  | "model_failure"
+  | "tool_failure"
+  | "runtime_failure";
+
+export type AiQualityReasonCode =
+  | "handoff_to_manager"
+  | "missing_openai_config"
+  | "model_error"
+  | "empty_model_response"
+  | "unsafe_model_response"
+  | "agent_reply_blocked"
+  | "ai_persistence_unconfirmed"
+  | "execution_context_mismatch"
+  | "candidate_invalid"
+  | "gate_closed"
+  | "send_gate_blocked"
+  | "tool_failed"
+  | "runtime_failed"
+  | "recorder_failed";
+
+export type AiQualitySeverity = "info" | "warning" | "error" | "critical";
+
+export type AiRunStatus =
+  | "running"
+  | "persisted"
+  | "handed_off"
+  | "blocked"
+  | "fallback_unavailable"
+  | "failed";
+
+export type ManagerAiQualitySummary = {
+  eventType: AiQualityEventType;
+  reasonCode: AiQualityReasonCode;
+  severity: AiQualitySeverity;
+  runStatus: AiRunStatus;
+  createdAt: string;
+};
+
 export type ManagerChannelIdentity = {
   provider: string;
   displayName?: string;
@@ -118,6 +161,7 @@ export type ManagerConversation = {
   sourcePageUrl?: string;
   createdAt: string;
   updatedAt: string;
+  latestUnresolvedAiQuality?: ManagerAiQualitySummary;
   messages: ManagerConversationMessage[];
 };
 

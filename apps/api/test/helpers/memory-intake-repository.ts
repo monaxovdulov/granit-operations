@@ -1131,7 +1131,55 @@ export class MemoryIntakeRepository
   }
 
   async getManagerLead(leadId: string): Promise<ManagerLeadDetail | null> {
-    return this.leads.get(leadId) ?? null;
+    const lead = this.leads.get(leadId);
+
+    if (!lead) {
+      return null;
+    }
+
+    const latestByConversation = new Map<
+      string,
+      {
+        sortKey: string;
+        value: NonNullable<
+          ManagerLeadDetail["conversations"][number]["latestUnresolvedAiQuality"]
+        >;
+      }
+    >();
+
+    for (const run of this.aiRunRepository.listRuns()) {
+      if (run.status === "running" || run.leadId !== leadId) {
+        continue;
+      }
+
+      run.qualityEvents.forEach((event, index) => {
+        const sortKey = `${run.completedAt.toISOString()}:${run.id}:${String(index).padStart(4, "0")}`;
+        const existing = latestByConversation.get(run.conversationId);
+
+        if (!existing || sortKey > existing.sortKey) {
+          latestByConversation.set(run.conversationId, {
+            sortKey,
+            value: {
+              eventType: event.eventType,
+              reasonCode: event.reasonCode,
+              severity: event.severity,
+              runStatus: run.status,
+              createdAt: run.completedAt.toISOString()
+            }
+          });
+        }
+      });
+    }
+
+    return {
+      ...lead,
+      conversations: lead.conversations.map((conversation) => ({
+        ...conversation,
+        latestUnresolvedAiQuality: latestByConversation.get(
+          this.publicConversationIds.get(conversation.publicConversationId) ?? ""
+        )?.value
+      }))
+    };
   }
 
   async changeManagerLeadStatus(
@@ -1144,7 +1192,7 @@ export class MemoryIntakeRepository
     }
 
     if (lead.status === input.status) {
-      return lead;
+      return this.getManagerLead(input.leadId);
     }
 
     const changedAt = new Date().toISOString();
@@ -1177,7 +1225,7 @@ export class MemoryIntakeRepository
     };
     this.leads.set(input.leadId, updatedLead);
 
-    return updatedLead;
+    return this.getManagerLead(input.leadId);
   }
 
   async setNextStep(input: SetNextStepInput): Promise<ManagerLeadDetail | null> {
@@ -1216,7 +1264,7 @@ export class MemoryIntakeRepository
 
     this.leads.set(input.leadId, updatedLead);
 
-    return updatedLead;
+    return this.getManagerLead(input.leadId);
   }
 
   async recordManualContact(input: RecordManualContactInput): Promise<ManagerLeadDetail | null> {
@@ -1259,7 +1307,7 @@ export class MemoryIntakeRepository
 
     this.leads.set(input.leadId, updatedLead);
 
-    return updatedLead;
+    return this.getManagerLead(input.leadId);
   }
 
   async takeoverConversation(input: TakeoverConversationInput): Promise<ManagerLeadDetail | null> {
@@ -1278,7 +1326,7 @@ export class MemoryIntakeRepository
     }
 
     if (!conversation.agentAllowedToReply && conversation.aiState === "manager_active") {
-      return lead;
+      return this.getManagerLead(input.leadId);
     }
 
     const changedAt = new Date().toISOString();
@@ -1321,7 +1369,7 @@ export class MemoryIntakeRepository
 
     this.leads.set(input.leadId, updatedLead);
 
-    return updatedLead;
+    return this.getManagerLead(input.leadId);
   }
 
   async takeoverConversationByPublicId(

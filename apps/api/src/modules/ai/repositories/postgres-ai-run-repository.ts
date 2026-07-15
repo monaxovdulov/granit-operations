@@ -33,6 +33,10 @@ import {
   type RunningAiRunRecord,
   type TerminalAiRunRecord
 } from "./ai-run-repository.js";
+import {
+  sanitizeAiRunCompletion,
+  sanitizeAiRunStart
+} from "../observability/ai-observability-sanitizer.js";
 
 const AI_MODEL_PROVIDERS = ["openai", "fake", "policy", "none"] as const;
 const AI_CONFIGURED_MODEL_PROVIDERS = ["openai", "fake", "none"] as const;
@@ -73,6 +77,7 @@ export class PostgresAiRunRepository implements AiRunRepository {
   constructor(private readonly db: OperationsDb) {}
 
   async beginOrReplay(input: BeginAiRunInput): Promise<BeginAiRunResult> {
+    input = sanitizeAiRunStart(input);
     assertRuntimeProfilePair(input);
 
     const [inserted] = await this.db
@@ -216,6 +221,10 @@ export async function completeAiRunInTransaction(
   tx: AiRunTransaction,
   input: CompleteAiRunInTransactionInput
 ): Promise<TerminalAiRunRecord> {
+  input = {
+    ...input,
+    completion: sanitizeAiRunCompletion(input.completion)
+  };
   assertCompletionShape(input.run, input.completion, input.outboundMessageId);
 
   const [updated] = await tx

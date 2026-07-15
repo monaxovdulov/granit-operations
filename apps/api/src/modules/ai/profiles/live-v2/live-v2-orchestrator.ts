@@ -78,7 +78,6 @@ export type LiveV2TurnOutcome =
 export async function executeLiveV2Turn(input: {
   turnInput: AiTurnInput;
   approvedFacts: LiveV2FactsSnapshot;
-  factsAsOfDate?: string;
   generator: LiveV2DecisionGenerator;
   gateReader: LiveV2GateReader;
 }): Promise<LiveV2TurnOutcome> {
@@ -112,10 +111,7 @@ export async function executeLiveV2Turn(input: {
   let approvedFacts: LiveV2FactsSnapshot;
 
   try {
-    approvedFacts = parseLiveV2FactsSnapshot(
-      input.approvedFacts,
-      input.factsAsOfDate ? { asOfDate: input.factsAsOfDate } : undefined
-    );
+    approvedFacts = parseLiveV2FactsSnapshot(input.approvedFacts);
   } catch {
     return {
       status: "assets_invalid",

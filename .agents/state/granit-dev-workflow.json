@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
   "repo": "granit-operations",
-  "updated_at": "2026-07-15T00:09:00Z",
-  "git_head": "c08128e",
+  "updated_at": "2026-07-15T00:36:00Z",
+  "git_head": "368b967",
   "mode": "implementation",
-  "state": "p2_passed_p3_next",
+  "state": "p3_passed_evidence_next",
   "dirty_worktree": {
-    "status": "intentional_p2_evidence_docs_dirty",
-    "summary": "P2 implementation is committed and exact-SHA evidence is ready to commit; P3 is next"
+    "status": "intentional_p3_implementation_ready",
+    "summary": "P3 implementation and bounded checks pass; exact-SHA evidence follows the implementation commit"
   },
   "context": {
     "last_scan_at": "2026-07-15T00:07:25Z",
@@ -19,20 +19,20 @@
     "last_refresh_at": "2026-07-14T00:00:00Z"
   },
   "task": {
-    "type": "ai-dialog-observability-p2",
-    "summary": "implement app-owned run/span/quality persistence and atomic direct-path completion before Mastra",
-    "source": "owner-approved AI dialog implementation plan and accepted G1Q"
+    "type": "ai-dialog-privacy-visibility-p3",
+    "summary": "implement protected AI quality visibility, strict approved assets, centralized sanitizer and bounded span retention before Mastra",
+    "source": "owner-approved AI dialog implementation plan, accepted G1Q and passed P2"
   },
   "checks": {
     "target_test": {
-      "command": "P2 focused suites plus disposable PostgreSQL fresh/upgrade and 5-test suite",
+      "command": "P3 focused suites plus disposable PostgreSQL fresh 0001..0010 and P2/P3 13-test suite",
       "status": "passed",
-      "reason": "focused app checks and real PostgreSQL invariants passed with no provider call"
+      "reason": "manager visibility, sanitizer, assets, retention and real PostgreSQL invariants passed with no provider call"
     },
     "full_suite": {
-      "command": "npm test -- --maxWorkers=1 --minWorkers=1; npm run build",
+      "command": "pnpm exec vitest run --maxWorkers=1 --minWorkers=1; pnpm typecheck; pnpm build",
       "status": "passed",
-      "reason": "245 tests passed, 5 conditional PostgreSQL tests passed separately, typecheck/build passed"
+      "reason": "262 tests passed, 7 conditional PostgreSQL tests passed separately, typecheck/build passed"
     },
     "lint": {
       "command": "not configured",
@@ -40,5 +40,5 @@
       "reason": "no dedicated lint script in root package.json"
     }
   },
-  "next_action": "Commit and push exact P2 evidence, then implement P3 manager visibility, versioned assets, centralized sanitizer and bounded retention; do not add Mastra or call a model yet."
+  "next_action": "Commit and push exact P3 evidence, then perform dated G4 official-doc review before pinning M1 dependencies; do not call a model."
 }

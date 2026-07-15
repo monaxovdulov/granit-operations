@@ -11,7 +11,6 @@ import {
   type LiveV2TurnOutcome
 } from "../src/modules/ai/profiles/live-v2/live-v2-orchestrator.js";
 import {
-  TEST_LIVE_V2_AS_OF_DATE,
   TEST_LIVE_V2_FACTS,
   answerCandidate,
   buildLiveV2TestTurn,
@@ -273,10 +272,9 @@ describe(
       const gateReader = buildLiveV2TestGateReader(fixture.turnInput);
 
       const outcome = await executeLiveV2Turn({
-      turnInput: fixture.turnInput,
-      approvedFacts: TEST_LIVE_V2_FACTS,
-      factsAsOfDate: TEST_LIVE_V2_AS_OF_DATE,
-      generator: {
+        turnInput: fixture.turnInput,
+        approvedFacts: TEST_LIVE_V2_FACTS,
+        generator: {
           async generateDecision() {
             generatorCalls += 1;
             return fixture.candidate;

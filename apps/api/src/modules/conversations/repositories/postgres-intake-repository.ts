@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import { and, desc, eq, lt, or, sql, type SQLWrapper } from "drizzle-orm";
 
 import {
+  aiQualityEvents,
+  aiRuns,
   channelIdentities,
   conversationMessages,
   conversations,
@@ -29,6 +31,11 @@ import type {
 import type {
   AiRunTerminalCompletion,
   RunningAiRunRecord
+} from "../../ai/repositories/ai-run-repository.js";
+import {
+  AI_QUALITY_EVENT_TYPES,
+  AI_QUALITY_REASON_CODES,
+  AI_RUN_STATUSES
 } from "../../ai/repositories/ai-run-repository.js";
 import type { RecordedLegacyS05PersistReplyResult } from "../../ai/ports/recorded-legacy-s05-turn.js";
 import {
@@ -81,6 +88,7 @@ import type {
 import type { IntakeRepository } from "./intake-repository.js";
 import type {
   ChangeManagerLeadStatusInput,
+  ManagerAiQualitySummary,
   ManagerChannelIdentity,
   ManagerConversation,
   ManagerLeadDetail,
@@ -1595,23 +1603,78 @@ export class PostgresIntakeRepository
   }
 
   private async listManagerConversations(leadId: string): Promise<ManagerConversation[]> {
-    const rows = await this.db
-      .select({
-        conversation: conversations,
-        identity: channelIdentities,
-        session: widgetSessions,
-        message: conversationMessages,
-        delivery: messageDeliveries
-      })
-      .from(conversations)
-      .leftJoin(channelIdentities, eq(conversations.channelIdentityId, channelIdentities.id))
-      .leftJoin(widgetSessions, eq(channelIdentities.widgetSessionId, widgetSessions.id))
-      .leftJoin(conversationMessages, eq(conversationMessages.conversationId, conversations.id))
-      .leftJoin(messageDeliveries, eq(messageDeliveries.conversationMessageId, conversationMessages.id))
-      .where(eq(conversations.leadId, leadId))
-      .orderBy(conversations.createdAt, conversationMessages.createdAt);
+    const [rows, qualityRows] = await Promise.all([
+      this.db
+        .select({
+          conversation: conversations,
+          identity: channelIdentities,
+          session: widgetSessions,
+          message: conversationMessages,
+          delivery: messageDeliveries
+        })
+        .from(conversations)
+        .leftJoin(channelIdentities, eq(conversations.channelIdentityId, channelIdentities.id))
+        .leftJoin(widgetSessions, eq(channelIdentities.widgetSessionId, widgetSessions.id))
+        .leftJoin(conversationMessages, eq(conversationMessages.conversationId, conversations.id))
+        .leftJoin(
+          messageDeliveries,
+          eq(messageDeliveries.conversationMessageId, conversationMessages.id)
+        )
+        .where(eq(conversations.leadId, leadId))
+        .orderBy(conversations.createdAt, conversationMessages.createdAt),
+      this.db
+        .selectDistinctOn([aiQualityEvents.conversationId], {
+          conversationId: aiQualityEvents.conversationId,
+          eventType: aiQualityEvents.eventType,
+          reasonCode: aiQualityEvents.reasonCode,
+          severity: aiQualityEvents.severity,
+          runStatus: aiRuns.status,
+          createdAt: aiQualityEvents.createdAt
+        })
+        .from(aiQualityEvents)
+        .innerJoin(
+          aiRuns,
+          and(
+            eq(aiRuns.id, aiQualityEvents.aiRunId),
+            eq(aiRuns.leadId, aiQualityEvents.leadId),
+            eq(aiRuns.conversationId, aiQualityEvents.conversationId)
+          )
+        )
+        .where(
+          and(
+            eq(aiQualityEvents.leadId, leadId),
+            eq(aiQualityEvents.managerVisible, true),
+            eq(aiQualityEvents.resolutionStatus, "open")
+          )
+        )
+        .orderBy(
+          aiQualityEvents.conversationId,
+          desc(aiQualityEvents.createdAt),
+          desc(aiQualityEvents.id)
+        )
+    ]);
 
     const byConversation = new Map<string, ManagerConversation>();
+    const latestQualityByConversation = new Map<string, ManagerAiQualitySummary>(
+      qualityRows.map((row) => [
+        row.conversationId,
+        {
+          eventType: controlledAiValue(AI_QUALITY_EVENT_TYPES, row.eventType, "quality event type"),
+          reasonCode: controlledAiValue(
+            AI_QUALITY_REASON_CODES,
+            row.reasonCode,
+            "quality reason code"
+          ),
+          severity: controlledAiValue(
+            ["info", "warning", "error", "critical"] as const,
+            row.severity,
+            "quality severity"
+          ),
+          runStatus: controlledAiValue(AI_RUN_STATUSES, row.runStatus, "AI run status"),
+          createdAt: row.createdAt.toISOString()
+        }
+      ])
+    );
 
     for (const row of rows) {
       const existing = byConversation.get(row.conversation.id);
@@ -1627,6 +1690,7 @@ export class PostgresIntakeRepository
           sourcePageUrl: row.conversation.sourcePageUrl ?? undefined,
           createdAt: row.conversation.createdAt.toISOString(),
           updatedAt: row.conversation.updatedAt.toISOString(),
+          latestUnresolvedAiQuality: latestQualityByConversation.get(row.conversation.id),
           messages: []
         } satisfies ManagerConversation);
 
@@ -2724,6 +2788,18 @@ function toAiState(value: string): AiState {
   }
 
   return value;
+}
+
+function controlledAiValue<const Values extends readonly string[]>(
+  values: Values,
+  value: string,
+  label: string
+): Values[number] {
+  if (!(values as readonly string[]).includes(value)) {
+    throw new Error(`invalid ${label} ${value}`);
+  }
+
+  return value as Values[number];
 }
 
 function readStringMetadata(metadata: Record<string, unknown>, key: string) {

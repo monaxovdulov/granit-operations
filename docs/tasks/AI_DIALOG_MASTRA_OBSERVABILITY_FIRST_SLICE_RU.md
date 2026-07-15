@@ -1,6 +1,6 @@
 # Task: AI-DIALOG-MASTRA-OBSERVABILITY-FIRST-SLICE - implementation plan первого staging-only Mastra + observability slice
 
-Status: in_progress; G0/G1/W0/G1Q/P2 passed; P3 next
+Status: in_progress; G0/G1/W0/G1Q/P2/P3 passed; G4/M1 next
 Created: 2026-07-13
 Updated: 2026-07-14
 Repo: `granit-operations`
@@ -688,8 +688,8 @@ accepted all 15 source-audited rows at exact source commit
 `23f2ee8c39ee2af30ca79cf9f2e5c4dd0229bf2a`. Matching `facts.v1.ts`, full-object parity tests and
 post-snapshot checks passed at implementation commit `1d737e0`. Evidence:
 `docs/release/evidence/AI_DIALOG_LIVE_V2_FACTS_G1Q_RU.md`. No model call, Mastra dependency,
-runtime switch or deploy occurred. At that checkpoint P2 became unblocked; P2 has since passed at
-the exact SHA recorded below, and P3 is next.
+runtime switch or deploy occurred. At that checkpoint P2 became unblocked; P2 and P3 have since
+passed at the exact SHAs recorded in their evidence documents, and G4/M1 is next.
 
 ### Slice P2 - add minimum app-owned run, span and quality persistence
 
@@ -725,8 +725,8 @@ before any Mastra dependency is added. This proves the recorder independently; i
 P2 result on 2026-07-15: `passed` at exact implementation SHA
 `c08128e6bdf3e1b8f859e6349b4d6fb626de1287`. Fresh and upgrade PostgreSQL proofs, atomic
 rollback/collision/raw canaries, configured/observed provider truth, replay behavior and zero-live
-call evidence are recorded in `docs/release/evidence/AI_DIALOG_OBSERVABILITY_P2_RU.md`. P3 is next;
-no Mastra dependency, runtime switch, staging mutation or provider call occurred.
+call evidence are recorded in `docs/release/evidence/AI_DIALOG_OBSERVABILITY_P2_RU.md`. P3 has
+since passed; no Mastra dependency, runtime switch, staging mutation or provider call occurred.
 
 ### Slice P3 - manager quality visibility, approved assets, redaction and retention
 
@@ -758,6 +758,12 @@ Work:
 
 Exit: direct path failure produces a manager-visible quality state, redaction canary tests pass,
 approved asset versions appear on runs and expired spans can be cleaned safely.
+
+P3 result on 2026-07-15: `passed`; exact implementation SHA and bounded check output are recorded
+in `docs/release/evidence/AI_DIALOG_PRIVACY_VISIBILITY_P3_RU.md`. Manager visibility, strict
+assets, centralized sanitizer and span-only retention passed local/full/build and disposable
+PostgreSQL checks. No Mastra dependency, runtime switch, staging mutation or provider call
+occurred.
 
 ### Owner gate before Mastra packages
 
@@ -1144,8 +1150,9 @@ G0 and G1/P1 are recorded as passed. W0 consumer and content-addressed preview i
 at source `2982de06...` and deployed landing commit `151062cb...`, including a 15.0 ms local
 pending-render measurement and exact remote static hashes. This does not claim staging
 backend/model latency. G1Q passed with exact owner acceptance and production snapshot at
-`1d737e0`; focused, frozen-direct, full, typecheck and build checks passed without a model call.
-The immediate backend action is P3, then M1 disabled, M2 local/fake, G6 and M3 staging.
+`1d737e0`; P2 and P3 passed with focused, PostgreSQL, frozen-direct, full, typecheck and build
+checks without a model call. The immediate backend action is dated G4 review, then M1 disabled,
+M2 local/fake, G6 and M3 staging.
 
 Mastra packages remain forbidden until P1/P1Q/P2/P3 and G4; staging config and every real
 `live_v2`/model call remain forbidden until the exact-SHA G6 approval immediately before M3. The

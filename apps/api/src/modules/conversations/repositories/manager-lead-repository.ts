@@ -1,6 +1,12 @@
 import type { SiteFormUtm, SiteWidgetUtm } from "@granit/contracts";
 
 import type {
+  AiQualityEventType,
+  AiQualityReasonCode,
+  AiQualitySeverity,
+  AiRunStatus
+} from "../../ai/repositories/ai-run-repository.js";
+import type {
   AiState,
   ConversationContentType,
   CustomerChannel,
@@ -72,6 +78,14 @@ export type ManagerChannelIdentity = {
   widgetInstanceId?: string;
 };
 
+export type ManagerAiQualitySummary = {
+  eventType: AiQualityEventType;
+  reasonCode: AiQualityReasonCode;
+  severity: AiQualitySeverity;
+  runStatus: AiRunStatus;
+  createdAt: string;
+};
+
 export type ManagerConversation = {
   publicConversationId: string;
   channel: CustomerChannel;
@@ -82,6 +96,7 @@ export type ManagerConversation = {
   sourcePageUrl?: string;
   createdAt: string;
   updatedAt: string;
+  latestUnresolvedAiQuality?: ManagerAiQualitySummary;
   messages: ManagerConversationMessage[];
 };
 

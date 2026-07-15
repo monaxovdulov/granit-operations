@@ -16,6 +16,7 @@
     "deliver:telegram:once": "tsx apps/api/src/scripts/deliver-telegram-pending-once.ts",
     "deliver:telegram:worker": "tsx apps/api/src/scripts/deliver-telegram-worker.ts",
     "deliver:manager-notifications:once": "tsx apps/api/src/scripts/deliver-manager-notifications-once.ts",
+    "cleanup:ai-run-spans": "tsx apps/api/src/scripts/cleanup-ai-run-spans.ts",
     "dev:api": "tsx apps/api/src/index.ts"
   },
   "devDependencies": {

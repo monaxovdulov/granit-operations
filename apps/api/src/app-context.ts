@@ -1,18 +1,17 @@
 import { createManagerAuth, type ManagerAuthOptions } from "./modules/auth/manager-auth.js";
+import {
+  loadApprovedAiAssetManifest,
+  type ApprovedAiAssetManifest
+} from "./modules/ai/assets/approved-ai-assets.js";
 import type { AiRunRepository } from "./modules/ai/repositories/ai-run-repository.js";
 import { isRecordedSiteWidgetAiReplyRepository } from "./modules/ai/repositories/recorded-site-widget-ai-reply-repository.js";
-import { WIDGET_AI_POLICY_VERSION } from "./modules/ai/policy/widget-ai-policy.js";
-import { WIDGET_AI_PROMPT_VERSION } from "./modules/ai/prompts/widget-ai-prompt.js";
 import { RecordedLegacyS05TurnService } from "./modules/ai/services/recorded-legacy-s05-turn-service.js";
 import { RecordedPublicWidgetAiTurnExecutor } from "./modules/ai/services/recorded-public-widget-ai-turn-executor.js";
 import { WidgetAiService, type WidgetAiProvider } from "./modules/ai/services/widget-ai-service.js";
 import { isSafeWidgetAiModelName } from "./modules/ai/widget-ai-model-name.js";
 import type { IntakeRepository } from "./modules/conversations/repositories/intake-repository.js";
 import { PublicIntakeService } from "./modules/intake/use-cases/public-intake-service.js";
-import {
-  WIDGET_AI_DISCLOSURE_VERSION,
-  type PublicWidgetAiReplyGenerator
-} from "./modules/intake/ports/public-widget-ai-reply-generator.js";
+import type { PublicWidgetAiReplyGenerator } from "./modules/intake/ports/public-widget-ai-reply-generator.js";
 import { isPublicWidgetManagerReviewRepository } from "./modules/intake/ports/public-widget-manager-review-repository.js";
 import { PublicWidgetIntakeService } from "./modules/intake/use-cases/public-widget-intake-service.js";
 import { ManagerLeadUseCases } from "./modules/manager/use-cases/manager-lead-use-cases.js";
@@ -39,12 +38,14 @@ export type WidgetAiAssemblyOptions = {
 };
 
 export function buildAppContext(options: AppContextOptions) {
+  const approvedAiAssets = loadApprovedAiAssetManifest();
   const managerAuth = createManagerAuth(options.managerAuth);
   const widgetAiReplyGenerator = buildWidgetAiReplyGenerator(options.widgetAi);
   const widgetAiTurnExecutor = buildWidgetAiTurnExecutor(
     options.repository,
     options.widgetAi,
-    widgetAiReplyGenerator
+    widgetAiReplyGenerator,
+    approvedAiAssets
   );
   const publicIntake = {
     siteForm: new PublicIntakeService(options.repository),
@@ -106,7 +107,8 @@ function buildWidgetAiReplyGenerator(
 function buildWidgetAiTurnExecutor(
   repository: IntakeRepository,
   options: WidgetAiAssemblyOptions | undefined,
-  generator: PublicWidgetAiReplyGenerator | undefined
+  generator: PublicWidgetAiReplyGenerator | undefined,
+  approvedAiAssets: ApprovedAiAssetManifest
 ) {
   if (!options?.enabled || !generator || !isRecordedSiteWidgetAiReplyRepository(repository)) {
     return undefined;
@@ -127,14 +129,16 @@ function buildWidgetAiTurnExecutor(
   const configuredModelProvider = options.replyGenerator
     ? "fake"
     : options.provider?.providerKind ?? "openai";
+  const legacyAssets = approvedAiAssets.legacyS05;
   const turnService = new RecordedLegacyS05TurnService({
     repository: runRepository,
     versions: {
-      policyVersion: WIDGET_AI_POLICY_VERSION,
-      promptVersion: WIDGET_AI_PROMPT_VERSION,
-      toolVersion: "granit_ai_tools.none.v1",
-      disclosureVersion: WIDGET_AI_DISCLOSURE_VERSION,
-      modelProfileVersion: "granit_widget_ai_direct.s05.v1",
+      policyVersion: legacyAssets.policyVersion,
+      promptVersion: legacyAssets.promptVersion,
+      toolVersion: legacyAssets.toolVersion,
+      assetVersion: legacyAssets.assetVersion,
+      disclosureVersion: legacyAssets.disclosureVersion,
+      modelProfileVersion: legacyAssets.modelProfileVersion,
       runtimeVersion: `node.v${process.versions.node}`
     },
     model: {

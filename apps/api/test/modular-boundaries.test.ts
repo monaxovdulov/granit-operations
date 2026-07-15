@@ -63,6 +63,23 @@ describe("ops-api modular monolith boundaries", () => {
     );
   });
 
+  it("keeps Mastra, Studio, workflow, trace and Codex routes absent before runtime work", () => {
+    const routeSource = [
+      readTree("modules/auth/routes"),
+      readTree("modules/intake/routes"),
+      readTree("modules/manager/routes"),
+      readTree("modules/telegram/inbound/routes")
+    ]
+      .join("\n")
+      .toLowerCase();
+    const appSource = readSource("app.ts").toLowerCase();
+
+    for (const forbiddenRoute of ["/mastra", "/studio", "/workflow", "/trace", "/codex"]) {
+      expect(routeSource).not.toContain(forbiddenRoute);
+      expect(appSource).not.toContain(forbiddenRoute);
+    }
+  });
+
   it("keeps conversation repository contracts split by responsibility", () => {
     const aggregateRepositorySource = readSource(
       "modules/conversations/repositories/intake-repository.ts"

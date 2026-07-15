@@ -45,6 +45,7 @@ import {
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { AuthRequiredError, managerApi } from "./api";
+import { AiQualityNotice } from "./ai-quality-notice";
 import {
   LEAD_STATUS_OPTIONS,
   contactLabel,
@@ -1028,6 +1029,8 @@ function ConversationHistory({
           {takeoverError}
         </Alert>
       ) : null}
+
+      <AiQualityNotice quality={conversation.latestUnresolvedAiQuality} />
 
       <Stack gap="xs" className="conversationMessages" data-collapsed={!expanded || undefined}>
         {!expanded && hiddenCount > 0 ? (

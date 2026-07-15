@@ -16,7 +16,6 @@ import {
 } from "../src/modules/ai/profiles/live-v2/assets/tone.v1.js";
 import { LIVE_V2_FACTS_VERSION } from "../src/modules/ai/profiles/live-v2/live-v2-assets.js";
 import {
-  TEST_LIVE_V2_AS_OF_DATE,
   TEST_LIVE_V2_FACTS,
   answerCandidate,
   buildLiveV2TestGateReader,
@@ -112,7 +111,6 @@ describe("live_v2 provider-neutral orchestration", () => {
     const outcome = await executeLiveV2Turn({
       turnInput,
       approvedFacts: TEST_LIVE_V2_FACTS,
-      factsAsOfDate: TEST_LIVE_V2_AS_OF_DATE,
       generator: { generateDecision },
       gateReader
     });
@@ -177,7 +175,6 @@ describe("live_v2 provider-neutral orchestration", () => {
     const outcome = await executeLiveV2Turn({
       turnInput,
       approvedFacts: TEST_LIVE_V2_FACTS,
-      factsAsOfDate: TEST_LIVE_V2_AS_OF_DATE,
       generator: { generateDecision },
       gateReader
     });
@@ -216,7 +213,6 @@ describe("live_v2 provider-neutral orchestration", () => {
     const outcome = await executeLiveV2Turn({
       turnInput,
       approvedFacts: TEST_LIVE_V2_FACTS,
-      factsAsOfDate: TEST_LIVE_V2_AS_OF_DATE,
       generator: { generateDecision },
       gateReader
     });
@@ -250,7 +246,6 @@ describe("live_v2 provider-neutral orchestration", () => {
     const outcome = await executeLiveV2Turn({
       turnInput,
       approvedFacts: TEST_LIVE_V2_FACTS,
-      factsAsOfDate: TEST_LIVE_V2_AS_OF_DATE,
       generator: { generateDecision },
       gateReader
     });
@@ -282,7 +277,6 @@ describe("live_v2 provider-neutral orchestration", () => {
     const outcome = await executeLiveV2Turn({
       turnInput,
       approvedFacts: TEST_LIVE_V2_FACTS,
-      factsAsOfDate: TEST_LIVE_V2_AS_OF_DATE,
       generator: { generateDecision },
       gateReader
     });
@@ -313,7 +307,6 @@ describe("live_v2 provider-neutral orchestration", () => {
     const outcome = await executeLiveV2Turn({
       turnInput,
       approvedFacts: TEST_LIVE_V2_FACTS,
-      factsAsOfDate: TEST_LIVE_V2_AS_OF_DATE,
       generator: { generateDecision },
       gateReader
     });
@@ -340,7 +333,6 @@ describe("live_v2 provider-neutral orchestration", () => {
     const outcome = await executeLiveV2Turn({
       turnInput,
       approvedFacts: TEST_LIVE_V2_FACTS,
-      factsAsOfDate: TEST_LIVE_V2_AS_OF_DATE,
       generator: { generateDecision },
       gateReader: buildLiveV2TestGateReader(turnInput)
     });
@@ -369,7 +361,6 @@ describe("live_v2 provider-neutral orchestration", () => {
     const outcome = await executeLiveV2Turn({
       turnInput,
       approvedFacts: TEST_LIVE_V2_FACTS,
-      factsAsOfDate: TEST_LIVE_V2_AS_OF_DATE,
       generator: { generateDecision },
       gateReader: buildLiveV2TestGateReader(turnInput)
     });
@@ -394,7 +385,6 @@ describe("live_v2 provider-neutral orchestration", () => {
     const outcome = await executeLiveV2Turn({
       turnInput,
       approvedFacts: invalidFacts,
-      factsAsOfDate: TEST_LIVE_V2_AS_OF_DATE,
       generator: { generateDecision },
       gateReader: buildLiveV2TestGateReader(turnInput)
     });

@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto";
 
+import {
+  sanitizeAiRunCompletion,
+  sanitizeAiRunStart
+} from "../observability/ai-observability-sanitizer.js";
 import type {
   AiQualityEventWrite,
   AiRunRepository,
@@ -75,6 +79,18 @@ export class MemoryAiRunRepository implements AiRunRepository {
   }
 
   async beginOrReplay(input: BeginAiRunInput): Promise<BeginAiRunResult> {
+    const existingUntrustedKey =
+      typeof input.idempotencyKey === "string"
+        ? this.runsByIdempotencyKey.get(input.idempotencyKey)
+        : undefined;
+    try {
+      input = sanitizeAiRunStart(input);
+    } catch {
+      if (existingUntrustedKey) {
+        throw new MemoryAiRunReplayConflictError();
+      }
+      throw new MemoryAiRunInputInvariantError();
+    }
     assertRuntimeProfilePair(input);
 
     if (this.options.failBegin) {
@@ -122,6 +138,11 @@ export class MemoryAiRunRepository implements AiRunRepository {
     completion: AiRunTerminalCompletion,
     outboundMessageId?: string
   ): () => TerminalAiRunRecord {
+    try {
+      completion = sanitizeAiRunCompletion(completion);
+    } catch {
+      throw new MemoryAiRunCompletionConflictError();
+    }
     this.assertCompletion(run, completion, outboundMessageId);
 
     return () => {

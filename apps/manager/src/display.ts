@@ -2,6 +2,10 @@ import { ApiRequestError, AuthRequiredError } from "./api";
 import {
   LEAD_STATUS_VALUES,
   isLeadStatus,
+  type AiQualityEventType,
+  type AiQualityReasonCode,
+  type AiQualitySeverity,
+  type AiRunStatus,
   type LeadStatus,
   type ManagerLeadDetail,
   type ManagerLeadListItem,
@@ -27,6 +31,65 @@ export function formatDate(value: string) {
   }
 
   return dateFormatter.format(date);
+}
+
+export function aiQualityEventLabel(eventType: AiQualityEventType) {
+  const labels: Record<AiQualityEventType, string> = {
+    handoff: "Передача менеджеру",
+    degradation: "AI требует внимания",
+    blocked: "AI-ответ заблокирован",
+    policy_violation: "Ответ отклонен политикой",
+    model_failure: "Ошибка AI-модели",
+    tool_failure: "Ошибка AI-инструмента",
+    runtime_failure: "Ошибка AI-обработки"
+  };
+
+  return labels[eventType];
+}
+
+export function aiQualityReasonLabel(reasonCode: AiQualityReasonCode) {
+  const labels: Record<AiQualityReasonCode, string> = {
+    handoff_to_manager: "Клиенту нужен менеджер",
+    missing_openai_config: "AI временно недоступен",
+    model_error: "Модель не смогла подготовить ответ",
+    empty_model_response: "Модель вернула пустой ответ",
+    unsafe_model_response: "Ответ не прошел проверку безопасности",
+    agent_reply_blocked: "Отправка AI-ответа запрещена",
+    ai_persistence_unconfirmed: "Сохранение AI-ответа не подтверждено",
+    execution_context_mismatch: "Контекст обработки изменился",
+    candidate_invalid: "AI-ответ не прошел проверку",
+    gate_closed: "Отправка AI-ответа закрыта",
+    send_gate_blocked: "Проверка отправки заблокировала ответ",
+    tool_failed: "AI-инструмент завершился ошибкой",
+    runtime_failed: "AI-обработка завершилась ошибкой",
+    recorder_failed: "Не удалось сохранить состояние AI-обработки"
+  };
+
+  return labels[reasonCode];
+}
+
+export function aiRunStatusLabel(status: AiRunStatus) {
+  const labels: Record<AiRunStatus, string> = {
+    running: "выполняется",
+    persisted: "ответ сохранен",
+    handed_off: "передан менеджеру",
+    blocked: "заблокирован",
+    fallback_unavailable: "ответ недоступен",
+    failed: "ошибка"
+  };
+
+  return labels[status];
+}
+
+export function aiQualitySeverityColor(severity: AiQualitySeverity) {
+  const colors: Record<AiQualitySeverity, string> = {
+    info: "blue",
+    warning: "yellow",
+    error: "orange",
+    critical: "red"
+  };
+
+  return colors[severity];
 }
 
 export function errorMessage(error: unknown) {

@@ -294,7 +294,7 @@ function beginInput(overrides: Partial<BeginAiRunInput> = {}): BeginAiRunInput {
     channel: "site_widget",
     runtimeMode: "direct_openai",
     decisionProfile: "legacy_s05",
-    idempotencyKey: "site-widget:p2-memory:turn-1",
+    idempotencyKey: "ai-turn:00000000-0000-4000-8000-000000000004",
     inputFingerprint: "a".repeat(64),
     versions: {
       policyVersion: "widget-ai-policy.v1",
