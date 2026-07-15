@@ -1,6 +1,6 @@
 # AI dialog Mastra M3 staging evidence
 
-Status: `passed_controlled_m3_staging_smoke`
+Status: `controlled_m3_smoke_passed; public_staging_deployed_but_blocked_on_runtime_key`
 
 Approved G6 base: `ad40c27ad2cb97b5f2249f263a64073feaea1fcf`
 
@@ -8,7 +8,65 @@ G6 transition commit: `a8cd55cc88fa53c4a6b4b46ed3ab67c2388536e5`
 
 Exact successful implementation: `9f52bfbe8cb77c3bb0a9e39f3d66882936c0f6e5`
 
+Exact public staging deployment: `59552bba6d7513e01ac6ec8b78e8a082d4c9f7e0`
+
 Date: `2026-07-15`
+
+## Public staging rollout follow-up
+
+The owner browser check exposed an important distinction that the original handoff did not state
+clearly enough: the successful M3 result below was an isolated application smoke against the
+staging database, while the public API container still ran the older direct runtime. The public
+staging service has now been rebuilt from an immutable release checkout and switched to exact SHA
+`59552bba6d7513e01ac6ec8b78e8a082d4c9f7e0`.
+
+The deployed service now has the following allowlisted configuration, verified from process env
+without reading or printing secret values:
+
+```text
+AI_WIDGET_ENABLED: true
+DEPLOYMENT_TIER: staging
+AI_RUNTIME_MODE: mastra_openai_api
+MASTRA_OPENAI_MODEL: gpt-5.6-sol
+MASTRA_OPENAI_REASONING_EFFORT: medium
+MASTRA_TELEMETRY_DISABLED: true
+MASTRA_AUTO_REFRESH_PROVIDERS: false
+AI_TRACE_EXPORT_ENABLED: false
+OPENAI_API_KEY: present
+OPENAI_BASE_URL / Mastra license variables: absent
+```
+
+The later staging CORS change was reconciled onto the Mastra branch. A real HTTPS preflight from
+the exact preview origin now returns `204` with the exact origin, `POST, OPTIONS`, and
+`Content-Type, Accept`; unrelated origins receive no allow-origin grant. API health returns `200`.
+
+The ordinary staging process env contains a different, older key than the key used by the
+successful one-shot M3 process. The successful key was passed through an ephemeral FIFO, inherited
+only by that process, unset on exit, and is no longer available. It was not copied to a file or to
+evidence. One final enum-only classified Mastra exposure on the deployed public route returned:
+
+```text
+HTTP: 202 accepted / fallback
+runtime/profile: mastra_openai_api / live_v2
+configured identity: openai / gpt-5.6-sol
+sanitized category: auth_or_entitlement
+runtimeRunId / usage / outbound: absent
+validator: not_run
+send gate: not_checked
+latency: 836 ms
+spans: 2 failed
+quality event: 1 open manager-visible event
+```
+
+No raw provider error/body/payload, model output, customer text, runtime identifier or key was
+printed or retained. Calls stopped after this classified exposure. Public route, CORS, database,
+Mastra assembly and fail-closed observability are deployed, but live public replies remain blocked
+until a working authorized key is injected into the ordinary staging server process environment.
+
+The post-M3 budget ledger is conservative: the owner's browser request against the old direct
+runtime is counted as possible exposure `4/10`; the first deployed Mastra request is exposure
+`5/10`; the final classified request is exposure `6/10`. A malformed HTTP harness request failed
+schema validation before persistence/provider execution and did not consume the provider budget.
 
 ## Result
 
@@ -120,10 +178,11 @@ pre-smoke ai_runs: 0
 historical backfill: none
 ```
 
-The isolated staging database contains four app-owned M3 runs: three fail-closed
-`fallback_unavailable` runs and one successful `persisted` run. A sanitized SQL aggregate confirms
-exactly one `mastra_openai_api/live_v2` run with matching configured/observed `gpt-5.6-sol`, passed
-validator and allowed send gate.
+The staging database contains the original four app-owned M3 runs plus two public-route
+fail-closed runs from the rollout follow-up. The original successful run remains the only
+`mastra_openai_api/live_v2` run with matching configured/observed `gpt-5.6-sol`, passed validator
+and allowed send gate. Both rollout failures have no usage, runtimeRunId or outbound linkage and
+created manager-visible quality evidence.
 
 ## Public response and observability
 
@@ -149,7 +208,9 @@ the generator, including when current AI configuration is disabled.
 
 - `mastra_openai_api` is accepted only with `DEPLOYMENT_TIER=staging` and the exact pinned profile.
 - Production/non-staging assembly fails before dynamic provider import or fetch.
-- The public staging API container was not switched to the candidate and production was untouched.
+- The public staging API container is switched to exact SHA `59552bba...`; production is untouched.
+- Public live replies are currently fail-closed on enum-only `auth_or_entitlement` until the
+  ordinary staging process receives the working authorized key.
 - No Mastra Studio, Mastra/Codex/workflow/trace route, trace exporter, license path or public runner
   was added.
 - The direct adapter remains the frozen manual `legacy_s05` rollback and contains no `live_v2`
@@ -196,11 +257,13 @@ PASS
 
 ## Gate result and latency interpretation
 
-The controlled single-call M3 success gate is passed. `7480 ms` is below the 15-second provider
+The controlled single-call M3 success gate remains passed. Public staging usability is currently
+blocked by the runtime key and must not be represented as passed. The successful `7480 ms` sample
+is below the 15-second provider
 timeout, the documented 20-second server budget and the widget's 25-second browser timeout. This
 leaves more than 12 seconds of server-budget headroom and more than 17 seconds before the browser
 deadline, so the architecture is not blocked or timeout-tight for this representative call.
 
-This is a single staging sample, not p50/p95 or semantic-corpus proof. Continued staging AI,
-production enablement and the planned 15-20-input authenticated corpus remain separate gates.
-Provider calls stopped immediately on success; unused owner budget was not spent.
+This is a single successful staging sample, not p50/p95 or semantic-corpus proof. Further public
+provider calls are stopped at exposure `6/10` until the key blocker is resolved. Production
+enablement and the planned 15-20-input authenticated corpus remain separate gates.

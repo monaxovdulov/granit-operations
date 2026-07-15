@@ -1,6 +1,6 @@
 # Task: AI-DIALOG-MASTRA-OBSERVABILITY-FIRST-SLICE - implementation plan первого staging-only Mastra + observability slice
 
-Status: passed controlled M3 staging smoke; G0/G1/W0/G1Q/P2/P3/G4/M1/M2/G5/G6 and first working Mastra live_v2 widget call evidenced
+Status: controlled M3 smoke passed; public staging deployed at `59552bba...` but live replies are blocked on `auth_or_entitlement` for the ordinary runtime key
 Created: 2026-07-13
 Updated: 2026-07-15
 Repo: `granit-operations`
@@ -1171,9 +1171,14 @@ operations boundary decision changes.
 
 - App-owned run/quality state, manager visibility, approved assets, retention, pinned Mastra
   packages and the disabled/local-fake adapter are implemented and evidenced through M2/G5.
+- Public route, exact-origin CORS and Mastra `live_v2` are deployed on staging at
+  `59552bba6d7513e01ac6ec8b78e8a082d4c9f7e0`. Health and preflight pass, but the ordinary
+  staging process key is not the successful one-shot M3 key; the final enum-only exposure is
+  `auth_or_entitlement`. No more provider calls are allowed until a working authorized key is
+  injected server-side without exposing or committing it.
 - Full M3 semantic/tone closure remains blocked on separate authority for the 15-20-input
   authenticated corpus.
-- Continued staging enablement and every production change remain unapproved.
+- Production remains unapproved.
 - All schema, AI behavior, environment, staging and production changes require owner review under
   `docs/AGENT_WORKFLOW.md`.
 
@@ -1209,7 +1214,10 @@ build and independent review checks without a model call. G6 exact-SHA owner app
 owner authorized a bounded `$5` continuation budget. The first successful result stopped further
 provider calls with the budget mostly unused.
 
-Mastra packages were admitted only after P1/P1Q/P2/P3 and G4. The working M3 call went through
-Mastra with the server-only `OPENAI_API_KEY`. The frozen direct
+Mastra packages were admitted only after P1/P1Q/P2/P3 and G4. The working controlled M3 call went
+through Mastra with the server-only `OPENAI_API_KEY`. Public staging now also runs only the Mastra
+profile, but is fail-closed because its ordinary process env contains a different key classified
+as `auth_or_entitlement`. The frozen direct
 OpenAI path remains a manual emergency rollback without `live_v2` and without automatic
-cross-provider retries; production and continued staging enablement remain forbidden.
+cross-provider retries; production remains forbidden and public provider calls are stopped until
+the key blocker is resolved.
