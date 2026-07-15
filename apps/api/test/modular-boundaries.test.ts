@@ -135,21 +135,34 @@ describe("ops-api modular monolith boundaries", () => {
     const widgetAiReplyGeneratorSource = readSource(
       "modules/intake/ports/public-widget-ai-reply-generator.ts"
     );
+    const widgetAiTurnExecutorSource = readSource(
+      "modules/intake/ports/public-widget-ai-turn-executor.ts"
+    );
     const widgetAiServiceSource = readSource("modules/ai/services/widget-ai-service.ts");
     const widgetAiPolicySource = readSource("modules/ai/policy/widget-ai-policy.ts");
     const widgetAiPromptSource = readSource("modules/ai/prompts/widget-ai-prompt.ts");
     const aiModuleSource = readTree("modules/ai");
 
     expect(widgetAiReplyGeneratorSource).toContain("interface PublicWidgetAiReplyGenerator");
+    expect(widgetAiTurnExecutorSource).toContain("interface PublicWidgetAiTurnExecutor");
+    expect(widgetAiTurnExecutorSource).toContain("AiTurnExecutionContext");
+    expect(widgetAiTurnExecutorSource).not.toContain("drizzle");
+    expect(widgetAiTurnExecutorSource).not.toContain("Postgres");
     expect(widgetAiReplyGeneratorSource).toContain("AiTurnInput");
     expect(widgetAiReplyGeneratorSource).not.toContain("SiteWidgetMessageRequest");
     expect(publicWidgetIntakeServiceSource).toContain(
       "../ports/public-widget-ai-reply-generator.js"
     );
+    expect(publicWidgetIntakeServiceSource).toContain(
+      "../ports/public-widget-ai-turn-executor.js"
+    );
+    expect(publicWidgetIntakeServiceSource).not.toContain("ai/repositories");
     expect(publicWidgetIntakeServiceSource).not.toMatch(
       /\b(WidgetAiService|WidgetAiProvider|OpenAiWidgetAssistantProvider|provider|modelName)\b/
     );
     expect(appContextSource).toContain("new WidgetAiService");
+    expect(appContextSource).toContain("new RecordedLegacyS05TurnService");
+    expect(appContextSource).toContain("new RecordedPublicWidgetAiTurnExecutor");
     expect(appContextSource).toContain("replyGenerator");
     expect(widgetAiServiceSource).toContain("implements PublicWidgetAiReplyGenerator");
     expect(widgetAiServiceSource).toContain("../policy/widget-ai-policy.js");
@@ -172,6 +185,53 @@ describe("ops-api modular monolith boundaries", () => {
     expect(widgetAiServiceSource).not.toContain("SiteWidgetMessageRequest");
     expect(aiModuleSource).not.toContain("@granit/contracts");
     expect(aiModuleSource).not.toContain("SiteWidgetMessageRequest");
+  });
+
+  it("keeps intake and AI contract trees independent from AI service implementations", () => {
+    const contractRoots = [
+      "modules/intake/ports",
+      "modules/ai/repositories",
+      "modules/ai/ports"
+    ];
+    const aiServicesRoot = path.join(apiSrc, "modules/ai/services");
+    const serviceImports: string[] = [];
+
+    for (const relativeRoot of contractRoots) {
+      for (const filePath of listFiles(path.join(apiSrc, relativeRoot))) {
+        if (!filePath.endsWith(".ts")) {
+          continue;
+        }
+
+        const source = readFileSync(filePath, "utf8");
+        const sourceFile = ts.createSourceFile(filePath, source, ts.ScriptTarget.Latest, true);
+
+        for (const specifier of collectModuleSpecifiers(sourceFile)) {
+          if (resolvesInsideDirectory(filePath, specifier, aiServicesRoot)) {
+            serviceImports.push(`${path.relative(apiSrc, filePath)} -> ${specifier}`);
+          }
+        }
+      }
+    }
+
+    const neutralTurnPortSource = readSource(
+      "modules/ai/ports/recorded-legacy-s05-turn.ts"
+    );
+    const intakeTurnExecutorSource = readSource(
+      "modules/intake/ports/public-widget-ai-turn-executor.ts"
+    );
+    const recordedReplyRepositorySource = readSource(
+      "modules/ai/repositories/recorded-site-widget-ai-reply-repository.ts"
+    );
+
+    expect(serviceImports).toEqual([]);
+    expect(neutralTurnPortSource).toContain("interface RecordedLegacyS05ReplyApplier");
+    expect(neutralTurnPortSource).toContain("type RecordedLegacyS05TurnResult");
+    expect(intakeTurnExecutorSource).toContain(
+      "../../ai/ports/recorded-legacy-s05-turn.js"
+    );
+    expect(recordedReplyRepositorySource).toContain(
+      "../ports/recorded-legacy-s05-turn.js"
+    );
   });
 
   it("keeps Telegram inbound free of delivery provider sends", () => {
@@ -322,6 +382,24 @@ function resolvesToCompatibilityExport(fromFilePath: string, specifier: string):
   }
 
   return compatibilityExportDirs.has(relativePath.split(path.sep)[0] ?? "");
+}
+
+function resolvesInsideDirectory(
+  fromFilePath: string,
+  specifier: string,
+  targetDirectory: string
+): boolean {
+  if (!specifier.startsWith(".")) {
+    return specifier.includes("modules/ai/services");
+  }
+
+  const resolvedPath = path.normalize(path.join(path.dirname(fromFilePath), specifier));
+  const relativePath = path.relative(targetDirectory, resolvedPath);
+
+  return (
+    relativePath === "" ||
+    (!path.isAbsolute(relativePath) && relativePath !== ".." && !relativePath.startsWith(`..${path.sep}`))
+  );
 }
 
 function collectModuleSpecifiers(sourceFile: ts.SourceFile): string[] {

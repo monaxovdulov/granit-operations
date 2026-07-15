@@ -6,6 +6,7 @@ import {
 } from "../services/widget-ai-service.js";
 import { WIDGET_AI_POLICY_VERSION } from "../policy/widget-ai-policy.js";
 import { WIDGET_AI_PROMPT_VERSION } from "../prompts/widget-ai-prompt.js";
+import { isSafeWidgetAiModelName } from "../widget-ai-model-name.js";
 
 export type OpenAiWidgetAssistantProviderOptions = {
   apiKey: string;
@@ -14,7 +15,16 @@ export type OpenAiWidgetAssistantProviderOptions = {
 };
 
 export class OpenAiWidgetAssistantProvider implements WidgetAiProvider {
-  constructor(private readonly options: OpenAiWidgetAssistantProviderOptions) {}
+  readonly providerKind = "openai" as const;
+  private readonly options: OpenAiWidgetAssistantProviderOptions;
+
+  constructor(options: OpenAiWidgetAssistantProviderOptions) {
+    if (!isSafeWidgetAiModelName(options.model)) {
+      throw new Error("Invalid widget AI model name");
+    }
+
+    this.options = options;
+  }
 
   async generateReply(input: WidgetAiProviderInput): Promise<WidgetAiProviderResult> {
     const controller = new AbortController();

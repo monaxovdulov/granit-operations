@@ -48,6 +48,7 @@ describe("legacy S05 direct golden baseline", () => {
   it("freezes generated user input and the deterministic manager-request candidate", async () => {
     const turn = buildTurn("Позовите менеджера");
     const provider: WidgetAiProvider = {
+      providerKind: "fake",
       generateReply: vi.fn(async () => {
         throw new Error("manager policy candidate must not call the provider");
       })
@@ -99,7 +100,7 @@ describe("legacy S05 direct golden baseline", () => {
         totalTokens: 54
       }
     }));
-    const provider: WidgetAiProvider = { generateReply: providerInput };
+    const provider: WidgetAiProvider = { providerKind: "fake", generateReply: providerInput };
 
     await expect(
       new WidgetAiService({ provider, modelName: "gpt-5.5" }).generateReply(turn)

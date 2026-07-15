@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { and, desc, eq, lt, or, sql, type SQLWrapper } from "drizzle-orm";
 
 import {
@@ -17,6 +19,19 @@ import {
 import type { SiteFormIntakeRequest, SiteWidgetMessageRequest } from "@granit/contracts";
 
 import {
+  completeAiRunInTransaction,
+  PostgresAiRunRepository
+} from "../../ai/repositories/postgres-ai-run-repository.js";
+import type {
+  PersistRecordedSiteWidgetAiReplyInput,
+  RecordedSiteWidgetAiReplyRepository
+} from "../../ai/repositories/recorded-site-widget-ai-reply-repository.js";
+import type {
+  AiRunTerminalCompletion,
+  RunningAiRunRecord
+} from "../../ai/repositories/ai-run-repository.js";
+import type { RecordedLegacyS05PersistReplyResult } from "../../ai/ports/recorded-legacy-s05-turn.js";
+import {
   AI_TURN_CONTEXT_CURSOR_VERSION,
   AI_TURN_CONTEXT_MAX_MESSAGES,
   buildSiteWidgetAiTurnExecutionContext,
@@ -33,8 +48,13 @@ import {
   managerTakeoverTimelineEvent,
   manualContactRecordedTimelineEvent,
   nextStepUpdatedTimelineEvent,
+  publicWidgetManagerReviewTimelineEvent,
   siteFormLeadCreatedTimelineEvent
 } from "../../timeline/timeline-events.js";
+import type {
+  PublicWidgetManagerReviewRepository,
+  TransitionSiteWidgetConversationToManagerReviewInput
+} from "../../intake/ports/public-widget-manager-review-repository.js";
 import {
   AgentReplyBlockedError,
   IdempotencyConflictError,
@@ -93,11 +113,18 @@ import type {
   SaveAcceptedSiteWidgetMessageResult
 } from "./public-intake-repository.js";
 
-export class PostgresIntakeRepository implements IntakeRepository {
+export class PostgresIntakeRepository
+  implements
+    IntakeRepository,
+    RecordedSiteWidgetAiReplyRepository,
+    PublicWidgetManagerReviewRepository
+{
   private readonly managerTelegramRepository: PostgresManagerTelegramRepository;
+  private readonly aiRunRepository: PostgresAiRunRepository;
 
   constructor(private readonly db: OperationsDb) {
     this.managerTelegramRepository = new PostgresManagerTelegramRepository(db);
+    this.aiRunRepository = new PostgresAiRunRepository(db);
   }
 
   async saveAcceptedSiteFormSubmission(
@@ -525,6 +552,120 @@ export class PostgresIntakeRepository implements IntakeRepository {
     };
   }
 
+  async transitionSiteWidgetConversationToManagerReview(
+    input: TransitionSiteWidgetConversationToManagerReviewInput
+  ): Promise<void> {
+    await this.db.transaction((tx) =>
+      this.transitionSiteWidgetConversationToManagerReviewInTransaction(tx, input)
+    );
+  }
+
+  private async transitionSiteWidgetConversationToManagerReviewInTransaction(
+    tx: Transaction,
+    input: SiteWidgetManagerReviewTransitionTarget
+  ): Promise<void> {
+    const [linkedInbound] = await tx
+      .select({
+        conversationId: conversations.id,
+        publicConversationId: conversations.publicConversationId,
+        agentAllowedToReply: conversations.agentAllowedToReply,
+        aiState: conversations.aiState
+      })
+      .from(conversationMessages)
+      .innerJoin(conversations, eq(conversations.id, conversationMessages.conversationId))
+      .where(
+        and(
+          eq(conversationMessages.id, input.inboundMessageId),
+          eq(conversationMessages.publicMessageId, input.inboundPublicMessageId),
+          eq(conversationMessages.leadId, input.leadId),
+          eq(conversationMessages.direction, "inbound"),
+          eq(conversations.id, input.conversationId),
+          eq(conversations.leadId, input.leadId),
+          input.publicConversationId
+            ? eq(conversations.publicConversationId, input.publicConversationId)
+            : undefined,
+          eq(conversations.channel, "site_widget")
+        )
+      )
+      .limit(1);
+
+    if (!linkedInbound) {
+      throw new Error("site widget inbound linkage not found for manager review transition");
+    }
+
+    if (
+      !linkedInbound.agentAllowedToReply &&
+      (linkedInbound.aiState === "needs_manager" || linkedInbound.aiState === "manager_active")
+    ) {
+      return;
+    }
+
+    const [transitioned] = await tx
+      .update(conversations)
+      .set({
+        agentAllowedToReply: false,
+        aiState: sql<AiState>`CASE
+            WHEN ${conversations.aiState} = 'manager_active' THEN 'manager_active'
+            ELSE 'needs_manager'
+          END`,
+        updatedAt: nextConversationMessageTimestamp()
+      })
+      .where(
+        and(
+          eq(conversations.id, input.conversationId),
+          eq(conversations.leadId, input.leadId),
+          eq(conversations.publicConversationId, linkedInbound.publicConversationId),
+          or(
+            eq(conversations.agentAllowedToReply, true),
+            sql`${conversations.aiState} NOT IN ('needs_manager', 'manager_active')`
+          )
+        )
+      )
+      .returning({ updatedAt: conversations.updatedAt });
+
+    if (!transitioned) {
+      const [current] = await tx
+        .select({
+          agentAllowedToReply: conversations.agentAllowedToReply,
+          aiState: conversations.aiState
+        })
+        .from(conversations)
+        .where(
+          and(
+            eq(conversations.id, input.conversationId),
+            eq(conversations.leadId, input.leadId),
+            eq(conversations.publicConversationId, linkedInbound.publicConversationId)
+          )
+        )
+        .limit(1);
+
+      if (
+        current &&
+        !current.agentAllowedToReply &&
+        (current.aiState === "needs_manager" || current.aiState === "manager_active")
+      ) {
+        return;
+      }
+
+      throw new Error("site widget manager review transition was not persisted");
+    }
+
+    await tx
+      .update(leads)
+      .set({ updatedAt: transitioned.updatedAt })
+      .where(eq(leads.id, input.leadId));
+
+    await tx.insert(leadTimelineEvents).values(
+      publicWidgetManagerReviewTimelineEvent({
+        leadId: input.leadId,
+        publicConversationId: linkedInbound.publicConversationId,
+        inboundPublicMessageId: input.inboundPublicMessageId,
+        reason: input.reason,
+        createdAt: transitioned.updatedAt
+      })
+    );
+  }
+
   async persistAiReplyWithSendGate(
     input: PersistAiReplyWithSendGateInput
   ): Promise<SaveSiteWidgetAiMessageResult> {
@@ -533,7 +674,10 @@ export class PostgresIntakeRepository implements IntakeRepository {
     }
 
     try {
-      const existing = await this.findExistingAiMessageByIdempotencyKey(input.idempotencyKey);
+      const existing = await this.findExistingAiMessageByIdempotencyKey(input.idempotencyKey, {
+        conversationId: input.conversationId,
+        leadId: input.leadId
+      });
 
       if (existing) {
         return this.replayExistingAiMessage(existing, input.requestFingerprint);
@@ -565,7 +709,11 @@ export class PostgresIntakeRepository implements IntakeRepository {
           });
 
         if (!sendGate) {
-          const replay = await this.findExistingAiMessageByIdempotencyKey(input.idempotencyKey);
+          const replay = await this.findExistingAiMessageByIdempotencyKey(
+            input.idempotencyKey,
+            { conversationId: input.conversationId, leadId: input.leadId },
+            tx
+          );
 
           if (replay) {
             return this.replayExistingAiMessage(replay, input.requestFingerprint);
@@ -653,7 +801,10 @@ export class PostgresIntakeRepository implements IntakeRepository {
       }
 
       if (isUniqueViolation(error)) {
-        const replay = await this.findExistingAiMessageByIdempotencyKey(input.idempotencyKey);
+        const replay = await this.findExistingAiMessageByIdempotencyKey(input.idempotencyKey, {
+          conversationId: input.conversationId,
+          leadId: input.leadId
+        });
 
         if (replay) {
           return this.replayExistingAiMessage(replay, input.requestFingerprint);
@@ -672,6 +823,262 @@ export class PostgresIntakeRepository implements IntakeRepository {
       channel: "site_widget",
       provider: "site_widget"
     });
+  }
+
+  async persistRecordedSiteWidgetAiReply(
+    input: PersistRecordedSiteWidgetAiReplyInput
+  ): Promise<RecordedLegacyS05PersistReplyResult> {
+    assertRecordedReplyMatchesRun(input);
+
+    const existing = await this.findExistingAiMessageByIdempotencyKey(input.idempotencyKey, {
+      conversationId: input.run.conversationId,
+      leadId: input.run.leadId
+    });
+    if (existing) {
+      return this.replayRecordedAiReply(existing, input);
+    }
+
+    const gateStartedAt = new Date();
+
+    try {
+      const transactionResult = await this.db.transaction(async (tx) => {
+        const nextAiState =
+          input.reply.action === "handoff_to_manager" ? "needs_manager" : "ai_collecting_info";
+        const [sendGate] = await tx
+          .update(conversations)
+          .set({
+            agentAllowedToReply:
+              input.reply.action === "handoff_to_manager" ? false : true,
+            aiState: nextAiState,
+            updatedAt: nextConversationMessageTimestamp()
+          })
+          .where(
+            and(
+              eq(conversations.id, input.run.conversationId),
+              eq(conversations.leadId, input.run.leadId),
+              eq(conversations.agentAllowedToReply, true)
+            )
+          )
+          .returning({
+            id: conversations.id,
+            leadId: conversations.leadId,
+            publicConversationId: conversations.publicConversationId,
+            channelIdentityId: conversations.channelIdentityId,
+            updatedAt: conversations.updatedAt
+          });
+
+        if (!sendGate) {
+          const replay = await this.findExistingAiMessageByIdempotencyKey(
+            input.idempotencyKey,
+            { conversationId: input.run.conversationId, leadId: input.run.leadId },
+            tx
+          );
+
+          if (replay) {
+            return { kind: "replay" as const, replay };
+          }
+
+          const [existingConversation] = await tx
+            .select({ id: conversations.id, leadId: conversations.leadId })
+            .from(conversations)
+            .where(eq(conversations.id, input.run.conversationId))
+            .limit(1);
+
+          if (!existingConversation || existingConversation.leadId !== input.run.leadId) {
+            throw new Error("conversation not found for recorded AI reply");
+          }
+
+          const blockedAt = new Date();
+          const blockedCompletion = withRecordedPersistenceSpans(
+            input.run,
+            input.completionPlan.agentReplyBlocked,
+            blockedAt,
+            [
+              {
+                spanId: randomUUID(),
+                kind: "send_gate",
+                name: "send_gate_check",
+                status: "blocked",
+                latencyMs: elapsedMilliseconds(gateStartedAt, blockedAt),
+                errorCode: "send_gate_blocked",
+                usedInFinalAnswer: false
+              }
+            ]
+          );
+          const completedRun = await completeAiRunInTransaction(tx, {
+            run: input.run,
+            completion: blockedCompletion
+          });
+
+          return { kind: "blocked" as const, completedRun };
+        }
+
+        const gateCompletedAt = new Date();
+        const sentAt = sendGate.updatedAt;
+        const [message] = await tx
+          .insert(conversationMessages)
+          .values({
+            publicMessageId: input.publicMessageId,
+            conversationId: input.run.conversationId,
+            leadId: input.run.leadId,
+            channelIdentityId: sendGate.channelIdentityId ?? null,
+            direction: "outbound",
+            senderRole: "ai_assistant",
+            body: input.reply.replyDraft,
+            idempotencyKey: input.idempotencyKey,
+            requestFingerprint: input.requestFingerprint,
+            sourcePageUrl: input.sourcePageUrl,
+            contentType: "text",
+            metadata: {
+              ...input.metadata,
+              public_conversation_id: sendGate.publicConversationId
+            },
+            submittedAt: sentAt,
+            createdAt: sentAt
+          })
+          .returning({
+            internalMessageId: conversationMessages.id,
+            publicMessageId: conversationMessages.publicMessageId,
+            body: conversationMessages.body,
+            createdAt: conversationMessages.createdAt
+          });
+
+        if (!message) {
+          throw new Error("recorded AI message insert returned no row");
+        }
+
+        await tx
+          .update(leads)
+          .set({ updatedAt: sentAt })
+          .where(eq(leads.id, input.run.leadId));
+
+        await tx.insert(leadTimelineEvents).values(
+          aiMessageSentTimelineEvent({
+            leadId: input.run.leadId,
+            channel: "site_widget",
+            publicMessageId: message.publicMessageId,
+            inboundPublicMessageId: input.inboundPublicMessageId,
+            publicConversationId: sendGate.publicConversationId,
+            metadata: input.metadata,
+            createdAt: sentAt
+          })
+        );
+
+        const persistedAt = new Date();
+        const allowedCompletion = {
+          ...withRecordedPersistenceSpans(
+            input.run,
+            input.completionPlan.allowed,
+            persistedAt,
+            [
+              {
+                spanId: randomUUID(),
+                kind: "send_gate" as const,
+                name: "send_gate_check" as const,
+                status: "succeeded" as const,
+                latencyMs: elapsedMilliseconds(gateStartedAt, gateCompletedAt),
+                usedInFinalAnswer: true
+              },
+              {
+                spanId: randomUUID(),
+                kind: "runtime" as const,
+                name: "reply_persistence" as const,
+                status: "succeeded" as const,
+                latencyMs: elapsedMilliseconds(gateCompletedAt, persistedAt),
+                usedInFinalAnswer: true
+              }
+            ]
+          ),
+          sendGateCheckedAt: gateCompletedAt
+        };
+        const completedRun = await completeAiRunInTransaction(tx, {
+          run: input.run,
+          completion: allowedCompletion,
+          outboundMessageId: message.internalMessageId
+        });
+
+        return { kind: "persisted" as const, message, completedRun };
+      });
+
+      if (transactionResult.kind === "replay") {
+        return this.replayRecordedAiReply(transactionResult.replay, input);
+      }
+
+      if (transactionResult.kind === "blocked") {
+        return {
+          status: "blocked",
+          reason: "agent_reply_blocked",
+          completedRun: transactionResult.completedRun
+        };
+      }
+
+      return {
+        status: "persisted",
+        internalMessageId: transactionResult.message.internalMessageId,
+        publicMessageId: transactionResult.message.publicMessageId,
+        body: transactionResult.message.body,
+        completedRun: transactionResult.completedRun
+      };
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        const replay = await this.findExistingAiMessageByIdempotencyKey(input.idempotencyKey, {
+          conversationId: input.run.conversationId,
+          leadId: input.run.leadId
+        });
+        if (replay) {
+          return this.replayRecordedAiReply(replay, input);
+        }
+      }
+
+      const failedAt = new Date();
+      const failureCompletion = withRecordedPersistenceSpans(
+        input.run,
+        input.completionPlan.persistenceUnconfirmed,
+        failedAt,
+        [
+          {
+            spanId: randomUUID(),
+            kind: "runtime",
+            name: "reply_persistence",
+            status: "failed",
+            latencyMs: elapsedMilliseconds(gateStartedAt, failedAt),
+            errorCode: "persistence_failed",
+            usedInFinalAnswer: false
+          }
+        ]
+      );
+
+      try {
+        const completedRun = await this.db.transaction(async (tx) => {
+          const completed = await completeAiRunInTransaction(tx, {
+            run: input.run,
+            completion: failureCompletion
+          });
+          await this.transitionSiteWidgetConversationToManagerReviewInTransaction(tx, {
+            leadId: input.run.leadId,
+            conversationId: input.run.conversationId,
+            inboundMessageId: input.run.inboundMessageId,
+            inboundPublicMessageId: input.inboundPublicMessageId,
+            reason: "ai_reply_persistence_unconfirmed"
+          });
+          return completed;
+        });
+        return {
+          status: "blocked",
+          reason: "ai_persistence_unconfirmed",
+          completedRun
+        };
+      } catch {
+        const replay = await this.findExistingAiMessageByIdempotencyKey(input.idempotencyKey, {
+          conversationId: input.run.conversationId,
+          leadId: input.run.leadId
+        });
+        if (replay) {
+          return this.replayRecordedAiReply(replay, input);
+        }
+        throw error;
+      }
+    }
   }
 
   async listManagerLeads(): Promise<ManagerLeadListItem[]> {
@@ -1031,6 +1438,30 @@ export class PostgresIntakeRepository implements IntakeRepository {
     return this.managerTelegramRepository.persistManagerTelegramReply(input);
   }
 
+  private async replayRecordedAiReply(
+    existing: SiteWidgetAiMessageLookupResult,
+    input: PersistRecordedSiteWidgetAiReplyInput
+  ): Promise<RecordedLegacyS05PersistReplyResult> {
+    const message = this.replayExistingAiMessage(existing, input.requestFingerprint);
+    const replay = await this.aiRunRepository.beginOrReplay(input.run);
+
+    if (
+      replay.kind !== "terminal_replay" ||
+      (replay.run.status !== "persisted" && replay.run.status !== "handed_off") ||
+      replay.run.outboundMessageId !== message.internalMessageId
+    ) {
+      throw new Error("recorded AI reply replay linkage is inconsistent");
+    }
+
+    return {
+      status: "persisted",
+      internalMessageId: message.internalMessageId,
+      publicMessageId: message.publicMessageId,
+      body: message.body,
+      completedRun: replay.run
+    };
+  }
+
   private async findExistingByIdempotencyKey(idempotencyKey: string) {
     const [existing] = await this.db
       .select({
@@ -1092,9 +1523,11 @@ export class PostgresIntakeRepository implements IntakeRepository {
   }
 
   private async findExistingAiMessageByIdempotencyKey(
-    idempotencyKey: string
+    idempotencyKey: string,
+    scope: { conversationId: string; leadId: string },
+    reader: ConversationMessageReader = this.db
   ): Promise<SiteWidgetAiMessageLookupResult | null> {
-    const [existing] = await this.db
+    const [existing] = await reader
       .select({
         internalMessageId: conversationMessages.id,
         publicMessageId: conversationMessages.publicMessageId,
@@ -1103,7 +1536,15 @@ export class PostgresIntakeRepository implements IntakeRepository {
         requestFingerprint: conversationMessages.requestFingerprint
       })
       .from(conversationMessages)
-      .where(eq(conversationMessages.idempotencyKey, idempotencyKey))
+      .where(
+        and(
+          eq(conversationMessages.idempotencyKey, idempotencyKey),
+          eq(conversationMessages.direction, "outbound"),
+          eq(conversationMessages.senderRole, "ai_assistant"),
+          eq(conversationMessages.conversationId, scope.conversationId),
+          eq(conversationMessages.leadId, scope.leadId)
+        )
+      )
       .limit(1);
 
     return existing
@@ -1266,7 +1707,8 @@ export class PostgresIntakeRepository implements IntakeRepository {
     }
 
     const existingAiReply = await this.findExistingAiMessageByIdempotencyKey(
-      `ai:${existing.publicMessageId}`
+      `ai:${existing.publicMessageId}`,
+      { conversationId: existing.conversationId, leadId: existing.leadId }
     );
     const previousMessagesNewestFirst =
       existing.channel === "site_widget"
@@ -1333,6 +1775,59 @@ export class PostgresIntakeRepository implements IntakeRepository {
 }
 
 type Transaction = Parameters<Parameters<OperationsDb["transaction"]>[0]>[0];
+type SiteWidgetManagerReviewTransitionTarget = Omit<
+  TransitionSiteWidgetConversationToManagerReviewInput,
+  "publicConversationId"
+> & {
+  publicConversationId?: string;
+};
+
+function assertRecordedReplyMatchesRun(input: PersistRecordedSiteWidgetAiReplyInput): void {
+  const context = input.reply.executionContext;
+  const expectedAllowedStatus =
+    input.reply.action === "handoff_to_manager" ? "handed_off" : "persisted";
+
+  if (
+    context.internal.leadId !== input.run.leadId ||
+    context.internal.conversationId !== input.run.conversationId ||
+    context.internal.inboundMessageId !== input.run.inboundMessageId ||
+    context.turn.idempotencyKey !== input.run.idempotencyKey ||
+    context.turn.inputFingerprint !== input.run.inputFingerprint ||
+    context.public.inboundMessageId !== input.inboundPublicMessageId ||
+    input.idempotencyKey !== `ai:${input.inboundPublicMessageId}` ||
+    input.completionPlan.allowed.status !== expectedAllowedStatus ||
+    input.completionPlan.allowed.normalizedAction !== input.reply.action ||
+    input.completionPlan.allowed.sendGateResult !== "allowed" ||
+    input.completionPlan.agentReplyBlocked.status !== "blocked" ||
+    input.completionPlan.agentReplyBlocked.normalizedAction !== input.reply.action ||
+    input.completionPlan.agentReplyBlocked.sendGateResult !== "blocked" ||
+    input.completionPlan.persistenceUnconfirmed.status !== "failed" ||
+    input.completionPlan.persistenceUnconfirmed.normalizedAction !== input.reply.action ||
+    input.completionPlan.persistenceUnconfirmed.sendGateResult !== "not_checked"
+  ) {
+    throw new Error("recorded AI reply does not match its run completion plan");
+  }
+}
+
+function withRecordedPersistenceSpans(
+  run: RunningAiRunRecord,
+  completion: AiRunTerminalCompletion,
+  completedAt: Date,
+  spans: AiRunTerminalCompletion["spans"]
+): AiRunTerminalCompletion {
+  return {
+    ...completion,
+    sendGateCheckedAt:
+      completion.sendGateResult === "not_checked" ? undefined : completedAt,
+    completedAt,
+    latencyMs: elapsedMilliseconds(run.startedAt, completedAt),
+    spans: [...completion.spans, ...spans]
+  };
+}
+
+function elapsedMilliseconds(startedAt: Date, completedAt: Date): number {
+  return Math.max(0, completedAt.getTime() - startedAt.getTime());
+}
 
 function nextConversationMessageTimestamp() {
   // Updating the conversation row serializes message writes for one conversation. The one

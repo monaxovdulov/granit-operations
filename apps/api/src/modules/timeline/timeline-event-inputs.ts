@@ -23,6 +23,15 @@ export type TimelineNeedsManagerReason =
   | "telegram_human_requested"
   | "ai_tool_failure";
 
+export type PublicWidgetManagerReviewReason =
+  | "ai_executor_unavailable"
+  | "ai_execution_context_invalid"
+  | "ai_execution_failed"
+  | "ai_run_in_progress"
+  | "ai_no_reply"
+  | "ai_reply_persistence_unconfirmed"
+  | "ai_send_gate_blocked";
+
 export type TimelineNextStepChannel =
   | "manager_call"
   | "phone"
@@ -68,6 +77,14 @@ export type AiMessageSentTimelineInput = {
   inboundPublicMessageId: string;
   publicConversationId: string;
   metadata: Record<string, unknown>;
+  createdAt: Date;
+};
+
+export type PublicWidgetManagerReviewTimelineInput = {
+  leadId: string;
+  publicConversationId: string;
+  inboundPublicMessageId: string;
+  reason: PublicWidgetManagerReviewReason;
   createdAt: Date;
 };
 

@@ -11,6 +11,25 @@ import {
   type AiTurnContextMessage,
   type AiTurnInput
 } from "../../src/modules/ai/ai-turn.js";
+import { MemoryAiRunRepository } from "../../src/modules/ai/repositories/memory-ai-run-repository.js";
+import type {
+  AiRunRepository,
+  AiRunTerminalCompletion,
+  BeginAiRunInput,
+  BeginAiRunResult,
+  RunningAiRunRecord,
+  TerminalAiRunRecord
+} from "../../src/modules/ai/repositories/ai-run-repository.js";
+import type {
+  PersistRecordedSiteWidgetAiReplyInput,
+  RecordedSiteWidgetAiReplyRepository
+} from "../../src/modules/ai/repositories/recorded-site-widget-ai-reply-repository.js";
+import type { RecordedLegacyS05PersistReplyResult } from "../../src/modules/ai/ports/recorded-legacy-s05-turn.js";
+import type {
+  PublicWidgetManagerReviewRepository,
+  TransitionSiteWidgetConversationToManagerReviewInput
+} from "../../src/modules/intake/ports/public-widget-manager-review-repository.js";
+import { publicWidgetManagerReviewTimelineEvent } from "../../src/modules/timeline/timeline-events.js";
 import {
   AgentReplyBlockedError,
   IdempotencyConflictError,
@@ -57,9 +76,47 @@ type MemoryAiContextMessage = {
   message: AiTurnContextMessage;
 };
 
-export class MemoryIntakeRepository implements IntakeRepository {
+function withMemoryRecordedSpans(
+  run: RunningAiRunRecord,
+  completion: AiRunTerminalCompletion,
+  completedAt: Date,
+  name: "send_gate_check" | "reply_persistence",
+  status: "succeeded" | "failed" | "blocked",
+  errorCode?: "persistence_failed" | "send_gate_blocked"
+): AiRunTerminalCompletion {
+  const latencyMs = Math.max(0, completedAt.getTime() - run.startedAt.getTime());
+
+  return {
+    ...completion,
+    sendGateCheckedAt:
+      completion.sendGateResult === "not_checked" ? undefined : completedAt,
+    completedAt,
+    latencyMs,
+    spans: [
+      ...completion.spans,
+      {
+        spanId: randomUUID(),
+        kind: name === "send_gate_check" ? "send_gate" : "runtime",
+        name,
+        status,
+        latencyMs,
+        ...(errorCode ? { errorCode } : {}),
+        usedInFinalAnswer: status === "succeeded"
+      }
+    ]
+  };
+}
+
+export class MemoryIntakeRepository
+  implements
+    IntakeRepository,
+    AiRunRepository,
+    RecordedSiteWidgetAiReplyRepository,
+    PublicWidgetManagerReviewRepository
+{
   saveCalls = 0;
   aiSaveCalls = 0;
+  managerReviewTransitionCalls = 0;
   lastAiSaveInput?: SaveSiteWidgetAiMessageInput;
   private readonly leads = new Map<string, ManagerLeadDetail>();
   private readonly idempotency = new Map<
@@ -159,14 +216,45 @@ export class MemoryIntakeRepository implements IntakeRepository {
     }
   >();
   private readonly aiContextMessages = new Map<string, MemoryAiContextMessage[]>();
+  private readonly aiRunRepository: MemoryAiRunRepository;
   private lastAiContextCreatedAtMs = 0;
 
   constructor(
-    private readonly options: { failPersistence?: boolean; failAiPersistence?: boolean } = {}
-  ) {}
+    private readonly options: {
+      failPersistence?: boolean;
+      failAiPersistence?: boolean;
+      failAiRunBegin?: boolean;
+      failAiRunCompletion?: boolean;
+      failManagerReviewTransition?: boolean;
+    } = {}
+  ) {
+    this.aiRunRepository = new MemoryAiRunRepository({
+      failBegin: options.failAiRunBegin,
+      failCompletion: options.failAiRunCompletion
+    });
+  }
 
   get leadCount() {
     return this.leads.size;
+  }
+
+  get aiRunCount() {
+    return this.aiRunRepository.runCount;
+  }
+
+  listAiRuns() {
+    return this.aiRunRepository.listRuns();
+  }
+
+  beginOrReplay(input: BeginAiRunInput): Promise<BeginAiRunResult> {
+    return this.aiRunRepository.beginOrReplay(input);
+  }
+
+  completeWithoutReply(input: {
+    run: RunningAiRunRecord;
+    completion: AiRunTerminalCompletion;
+  }): Promise<TerminalAiRunRecord> {
+    return this.aiRunRepository.completeWithoutReply(input);
   }
 
   onlyLead() {
@@ -182,7 +270,7 @@ export class MemoryIntakeRepository implements IntakeRepository {
   private appendAiContextMessage(
     conversationId: string,
     message: AiTurnContextMessage,
-    internalMessageId = randomUUID()
+    internalMessageId: string = randomUUID()
   ): string {
     const createdAtMs = Math.max(Date.now(), this.lastAiContextCreatedAtMs + 1);
     this.lastAiContextCreatedAtMs = createdAtMs;
@@ -694,6 +782,87 @@ export class MemoryIntakeRepository implements IntakeRepository {
     };
   }
 
+  async transitionSiteWidgetConversationToManagerReview(
+    input: TransitionSiteWidgetConversationToManagerReviewInput
+  ): Promise<void> {
+    this.managerReviewTransitionCalls += 1;
+
+    if (this.options.failManagerReviewTransition) {
+      throw new Error("manager review transition unavailable");
+    }
+
+    const leadId = this.conversationLeads.get(input.conversationId);
+    const publicConversationId = this.conversationPublicIds.get(input.conversationId);
+    const lead = leadId ? this.leads.get(leadId) : undefined;
+    const inbound = this.aiContextMessages
+      .get(input.conversationId)
+      ?.find(
+        (candidate) =>
+          candidate.internalMessageId === input.inboundMessageId &&
+          candidate.message.publicMessageId === input.inboundPublicMessageId &&
+          candidate.message.direction === "inbound"
+      );
+
+    if (
+      !lead ||
+      leadId !== input.leadId ||
+      publicConversationId !== input.publicConversationId ||
+      !inbound
+    ) {
+      throw new Error("memory site widget inbound linkage not found for manager review transition");
+    }
+
+    const conversation = lead.conversations.find(
+      (candidate) => candidate.publicConversationId === input.publicConversationId
+    );
+
+    if (!conversation) {
+      throw new Error("memory site widget conversation not found for manager review transition");
+    }
+
+    if (
+      !conversation.agentAllowedToReply &&
+      (conversation.aiState === "needs_manager" || conversation.aiState === "manager_active")
+    ) {
+      return;
+    }
+
+    const createdAt = new Date();
+    const timelineEvent = publicWidgetManagerReviewTimelineEvent({
+      leadId: input.leadId,
+      publicConversationId: input.publicConversationId,
+      inboundPublicMessageId: input.inboundPublicMessageId,
+      reason: input.reason,
+      createdAt
+    });
+    const createdAtIso = createdAt.toISOString();
+
+    this.leads.set(input.leadId, {
+      ...lead,
+      updatedAt: createdAtIso,
+      timeline: [
+        ...lead.timeline,
+        {
+          eventType: timelineEvent.eventType,
+          summary: timelineEvent.summary,
+          metadata: timelineEvent.metadata,
+          createdAt: createdAtIso
+        }
+      ],
+      conversations: lead.conversations.map((candidate) =>
+        candidate.publicConversationId === input.publicConversationId
+          ? {
+              ...candidate,
+              agentAllowedToReply: false,
+              aiState:
+                candidate.aiState === "manager_active" ? "manager_active" : "needs_manager",
+              updatedAt: createdAtIso
+            }
+          : candidate
+      )
+    });
+  }
+
   async persistAiReplyWithSendGate(
     input: PersistAiReplyWithSendGateInput
   ): Promise<SaveSiteWidgetAiMessageResult> {
@@ -706,7 +875,8 @@ export class MemoryIntakeRepository implements IntakeRepository {
   }
 
   async saveSiteWidgetAiMessage(
-    input: SaveSiteWidgetAiMessageInput
+    input: SaveSiteWidgetAiMessageInput,
+    internalMessageIdOverride?: string
   ): Promise<SaveSiteWidgetAiMessageResult> {
     this.aiSaveCalls += 1;
     this.lastAiSaveInput = input;
@@ -791,14 +961,18 @@ export class MemoryIntakeRepository implements IntakeRepository {
     };
 
     this.leads.set(lead.leadId, updatedLead);
-    const internalMessageId = this.appendAiContextMessage(input.conversationId, {
-      publicMessageId: input.publicMessageId,
-      direction: "outbound",
-      senderRole: "ai_assistant",
-      contentType: "text",
-      submittedAt: createdAt,
-      text: input.body
-    });
+    const internalMessageId = this.appendAiContextMessage(
+      input.conversationId,
+      {
+        publicMessageId: input.publicMessageId,
+        direction: "outbound",
+        senderRole: "ai_assistant",
+        contentType: "text",
+        submittedAt: createdAt,
+        text: input.body
+      },
+      internalMessageIdOverride
+    );
     this.widgetAiIdempotency.set(input.idempotencyKey, {
       internalMessageId,
       publicMessageId: input.publicMessageId,
@@ -812,6 +986,141 @@ export class MemoryIntakeRepository implements IntakeRepository {
       publicMessageId: input.publicMessageId,
       body: input.body,
       createdAt
+    };
+  }
+
+  async persistRecordedSiteWidgetAiReply(
+    input: PersistRecordedSiteWidgetAiReplyInput
+  ): Promise<RecordedLegacyS05PersistReplyResult> {
+    const siteWidgetInput: SaveSiteWidgetAiMessageInput = {
+      leadId: input.run.leadId,
+      conversationId: input.run.conversationId,
+      publicMessageId: input.publicMessageId,
+      inboundPublicMessageId: input.inboundPublicMessageId,
+      idempotencyKey: input.idempotencyKey,
+      requestFingerprint: input.requestFingerprint,
+      body: input.reply.replyDraft,
+      sourcePageUrl: input.sourcePageUrl,
+      agentAllowedToReplyAfterSend:
+        input.reply.action === "handoff_to_manager" ? false : undefined,
+      metadata: input.metadata
+    };
+    const existing = this.widgetAiIdempotency.get(input.idempotencyKey);
+
+    if (existing) {
+      if (existing.requestFingerprint !== input.requestFingerprint) {
+        throw new IdempotencyConflictError();
+      }
+
+      const terminal = this.aiRunRepository
+        .listRuns()
+        .find((run) => run.id === input.run.id && run.status !== "running");
+      if (
+        !terminal ||
+        (terminal.status !== "persisted" && terminal.status !== "handed_off") ||
+        terminal.outboundMessageId !== existing.internalMessageId
+      ) {
+        throw new Error("memory recorded AI reply replay linkage is inconsistent");
+      }
+
+      return {
+        status: "persisted",
+        internalMessageId: existing.internalMessageId,
+        publicMessageId: existing.publicMessageId,
+        body: existing.body,
+        completedRun: terminal
+      };
+    }
+
+    const attemptedAt = new Date();
+    if (this.options.failAiPersistence) {
+      this.aiSaveCalls += 1;
+      this.lastAiSaveInput = siteWidgetInput;
+      const completion = withMemoryRecordedSpans(
+        input.run,
+        input.completionPlan.persistenceUnconfirmed,
+        attemptedAt,
+        "reply_persistence",
+        "failed",
+        "persistence_failed"
+      );
+      const completedRun = this.aiRunRepository
+        .prepareCompletion(input.run, completion)();
+      return {
+        status: "blocked",
+        reason: "ai_persistence_unconfirmed",
+        completedRun
+      };
+    }
+
+    const leadId = this.conversationLeads.get(input.run.conversationId);
+    const publicSessionId = this.conversationSessions.get(input.run.conversationId);
+    const lead = leadId ? this.leads.get(leadId) : undefined;
+    const conversation = lead?.conversations.find(
+      (candidate) => candidate.channelIdentity.widgetPublicSessionId === publicSessionId
+    );
+
+    if (!lead || !publicSessionId || leadId !== input.run.leadId || !conversation) {
+      throw new Error("memory recorded AI conversation not found");
+    }
+
+    if (!conversation.agentAllowedToReply) {
+      this.aiSaveCalls += 1;
+      this.lastAiSaveInput = siteWidgetInput;
+      const completion = withMemoryRecordedSpans(
+        input.run,
+        input.completionPlan.agentReplyBlocked,
+        attemptedAt,
+        "send_gate_check",
+        "blocked",
+        "send_gate_blocked"
+      );
+      const completedRun = this.aiRunRepository
+        .prepareCompletion(input.run, completion)();
+      return {
+        status: "blocked",
+        reason: "agent_reply_blocked",
+        completedRun
+      };
+    }
+
+    const outboundInternalMessageId = randomUUID();
+    const gateCompletedAt = new Date();
+    const persistedAt = new Date();
+    const allowedWithGate = withMemoryRecordedSpans(
+      input.run,
+      input.completionPlan.allowed,
+      gateCompletedAt,
+      "send_gate_check",
+      "succeeded"
+    );
+    const allowedCompletion = {
+      ...withMemoryRecordedSpans(
+        input.run,
+        allowedWithGate,
+        persistedAt,
+        "reply_persistence",
+        "succeeded"
+      ),
+      sendGateCheckedAt: gateCompletedAt
+    };
+    const commitRun = this.aiRunRepository.prepareCompletion(
+      input.run,
+      allowedCompletion,
+      outboundInternalMessageId
+    );
+    const message = await this.saveSiteWidgetAiMessage(
+      siteWidgetInput,
+      outboundInternalMessageId
+    );
+    const completedRun = commitRun();
+
+    return {
+      status: "persisted",
+      internalMessageId: message.internalMessageId,
+      publicMessageId: message.publicMessageId,
+      body: message.body,
+      completedRun
     };
   }
 

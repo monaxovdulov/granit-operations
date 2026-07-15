@@ -14,6 +14,7 @@ import type {
   ManagerTakeoverTimelineInput,
   ManualContactRecordedTimelineInput,
   NextStepUpdatedTimelineInput,
+  PublicWidgetManagerReviewTimelineInput,
   SiteFormLeadCreatedTimelineInput
 } from "./timeline-event-inputs.js";
 
@@ -36,6 +37,7 @@ export const TIMELINE_EVENT_TYPES = {
   leadManualContactRecorded: "lead.manual_contact_recorded",
   conversationMessageReceived: "conversation.message_received",
   conversationAiMessageSent: "conversation.ai_message_sent",
+  conversationAiManagerReviewRequired: "conversation.ai_manager_review_required",
   conversationManagerTakeover: "conversation.manager_takeover",
   conversationManagerMessageQueued: "conversation.manager_message_queued",
   conversationDeliverySent: "conversation.delivery_sent",
@@ -127,6 +129,24 @@ export function aiMessageSentTimelineEvent(input: AiMessageSentTimelineInput): T
       inbound_public_message_id: input.inboundPublicMessageId,
       public_conversation_id: input.publicConversationId,
       channel: input.channel
+    },
+    createdAt: input.createdAt
+  };
+}
+
+export function publicWidgetManagerReviewTimelineEvent(
+  input: PublicWidgetManagerReviewTimelineInput
+): TimelineEvent {
+  return {
+    leadId: input.leadId,
+    eventType: TIMELINE_EVENT_TYPES.conversationAiManagerReviewRequired,
+    summary: "Website widget AI stopped; manager review required",
+    metadata: {
+      public_conversation_id: input.publicConversationId,
+      inbound_public_message_id: input.inboundPublicMessageId,
+      reason: input.reason,
+      agent_allowed_to_reply: false,
+      ai_state: "needs_manager"
     },
     createdAt: input.createdAt
   };

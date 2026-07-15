@@ -1,38 +1,38 @@
 {
   "schema_version": 1,
   "repo": "granit-operations",
-  "updated_at": "2026-05-12T19:54:45Z",
-  "git_head": "0f14659",
-  "mode": "status",
-  "state": "report_done",
+  "updated_at": "2026-07-15T00:07:25Z",
+  "git_head": "fa10c7c",
+  "mode": "implementation",
+  "state": "p2_implementation_verified",
   "dirty_worktree": {
-    "status": "dirty",
-    "summary": "application repo was clean at HEAD 0f14659 before state restoration; only untracked .agents/state/granit-dev-workflow.json exists after restoration"
+    "status": "intentional_p2_implementation_ready_to_commit",
+    "summary": "P2 schema, recorder, atomicity, replay and fail-closed provider truth are implemented and verified; exact-SHA evidence is next"
   },
   "context": {
-    "last_scan_at": "2026-05-12T19:54:45Z",
-    "fresh_until": "2026-05-19T19:54:45Z",
+    "last_scan_at": "2026-07-15T00:07:25Z",
+    "fresh_until": "2026-07-15T00:00:00Z",
     "source_hashes": {}
   },
   "rules": {
     "status": "current",
-    "last_refresh_at": "2026-05-12T19:54:45Z"
+    "last_refresh_at": "2026-07-14T00:00:00Z"
   },
   "task": {
-    "type": "workflow-state-restore",
-    "summary": "restore Granit workflow state after S01 public intake provider, persistence, and manager visibility commits",
-    "source": "manual state restoration"
+    "type": "ai-dialog-observability-p2",
+    "summary": "implement app-owned run/span/quality persistence and atomic direct-path completion before Mastra",
+    "source": "owner-approved AI dialog implementation plan and accepted G1Q"
   },
   "checks": {
     "target_test": {
-      "command": "npm run smoke:api",
+      "command": "P2 focused suites plus disposable PostgreSQL fresh/upgrade and 5-test suite",
       "status": "passed",
-      "reason": "focused public intake Vitest suite passed"
+      "reason": "focused app checks and real PostgreSQL invariants passed with no provider call"
     },
     "full_suite": {
-      "command": "npm run build && npm run smoke:api && npm test",
+      "command": "npm test -- --maxWorkers=1 --minWorkers=1; npm run build",
       "status": "passed",
-      "reason": "typecheck, focused API smoke, and full Vitest suite passed"
+      "reason": "245 tests passed, 5 conditional PostgreSQL tests passed separately, typecheck/build passed"
     },
     "lint": {
       "command": "not configured",
@@ -40,5 +40,5 @@
       "reason": "no dedicated lint script in root package.json"
     }
   },
-  "next_action": "Push or deploy staging for commit 0f14659 if needed; otherwise start S02 manager auth through docs/tasks/S02_MANAGER_AUTH_YANDEX_RU.md."
+  "next_action": "Commit the verified P2 implementation, pin exact SHA and migration digests in release evidence, push, then implement P3; do not add Mastra or call a model yet."
 }

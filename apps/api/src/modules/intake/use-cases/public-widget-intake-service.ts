@@ -10,18 +10,22 @@ import {
 import { sha256Hex, stableStringify } from "@granit/shared";
 
 import type { AiTurnInput } from "../../ai/ai-turn.js";
-import { executeLegacyS05Turn } from "../../ai/profiles/legacy-s05/legacy-s05-orchestrator.js";
-import {
-  AgentReplyBlockedError,
-  IdempotencyConflictError
-} from "../../conversations/repositories/lead-conversation-types.js";
-import type { PublicIntakeRepository } from "../../conversations/repositories/public-intake-repository.js";
+import { IdempotencyConflictError } from "../../conversations/repositories/lead-conversation-types.js";
+import type {
+  PublicIntakeRepository,
+  SaveAcceptedSiteWidgetMessageResult
+} from "../../conversations/repositories/public-intake-repository.js";
 import {
   WIDGET_AI_DISCLOSURE_TEXT,
   WIDGET_AI_DISCLOSURE_VERSION,
   type PublicWidgetAiReplyGenerator,
   type PublicWidgetAiUnavailableReason
 } from "../ports/public-widget-ai-reply-generator.js";
+import type { PublicWidgetAiTurnExecutor } from "../ports/public-widget-ai-turn-executor.js";
+import type {
+  PublicWidgetManagerReviewReason,
+  PublicWidgetManagerReviewRepository
+} from "../ports/public-widget-manager-review-repository.js";
 
 export type PublicWidgetIntakeServiceResult = {
   statusCode: number;
@@ -29,9 +33,11 @@ export type PublicWidgetIntakeServiceResult = {
 };
 
 export type PublicWidgetIntakeServiceOptions = {
+  managerReviewRepository?: PublicWidgetManagerReviewRepository;
   ai?: {
     enabled: boolean;
     replyGenerator?: PublicWidgetAiReplyGenerator;
+    turnExecutor?: PublicWidgetAiTurnExecutor;
   };
 };
 
@@ -78,7 +84,9 @@ export class PublicWidgetIntakeService {
     const requestFingerprint = sha256Hex(stableStringify(parsed.data));
     const publicSessionId = parsed.data.public_session_id ?? randomUUID();
     const aiReplyGenerator = this.options.ai?.replyGenerator;
-    const aiCanRun = this.options.ai?.enabled === true && Boolean(aiReplyGenerator);
+    const aiTurnExecutor = this.options.ai?.turnExecutor;
+    const aiCanRun =
+      this.options.ai?.enabled === true && Boolean(aiReplyGenerator) && Boolean(aiTurnExecutor);
 
     try {
       const saved = await this.repository.saveAcceptedSiteWidgetMessage({
@@ -104,19 +112,25 @@ export class PublicWidgetIntakeService {
       }
 
       if (!aiReplyGenerator) {
-        return fallbackSuccess(
-          saved.replayed,
-          saved.publicSessionId,
-          saved.publicMessageId,
+        return await this.fallbackWithManagerReview(
+          saved,
+          "ai_executor_unavailable",
           "missing_openai_config"
         );
       }
 
-      if (!saved.agentAllowedToReply) {
-        return fallbackSuccess(
-          saved.replayed,
-          saved.publicSessionId,
-          saved.publicMessageId,
+      if (!aiTurnExecutor) {
+        return await this.fallbackWithManagerReview(
+          saved,
+          "ai_executor_unavailable",
+          "ai_persistence_unconfirmed"
+        );
+      }
+
+      if (!saved.agentAllowedToReply && !saved.replayed) {
+        return await this.fallbackWithManagerReview(
+          saved,
+          "ai_send_gate_blocked",
           "agent_reply_blocked"
         );
       }
@@ -125,10 +139,9 @@ export class PublicWidgetIntakeService {
       const aiTurnExecutionContext = saved.aiTurnExecutionContext;
 
       if (!isReplyCapableSiteWidgetTurn(aiTurnInput) || !aiTurnExecutionContext) {
-        return fallbackSuccess(
-          saved.replayed,
-          saved.publicSessionId,
-          saved.publicMessageId,
+        return await this.fallbackWithManagerReview(
+          saved,
+          "ai_execution_context_invalid",
           "ai_persistence_unconfirmed"
         );
       }
@@ -138,24 +151,22 @@ export class PublicWidgetIntakeService {
         aiTurnExecutionContext.internal.conversationId !== saved.conversationId ||
         aiTurnExecutionContext.internal.inboundMessageId !== saved.inboundMessageId
       ) {
-        return fallbackSuccess(
-          saved.replayed,
-          saved.publicSessionId,
-          saved.publicMessageId,
+        return await this.fallbackWithManagerReview(
+          saved,
+          "ai_execution_context_invalid",
           "ai_persistence_unconfirmed"
         );
       }
 
-      if (!aiTurnInput.conversation.agentAllowedToReply) {
-        return fallbackSuccess(
-          saved.replayed,
-          saved.publicSessionId,
-          saved.publicMessageId,
+      if (!aiTurnInput.conversation.agentAllowedToReply && !saved.replayed) {
+        return await this.fallbackWithManagerReview(
+          saved,
+          "ai_send_gate_blocked",
           "agent_reply_blocked"
         );
       }
 
-      const aiInputFingerprint = sha256Hex(stableStringify(aiTurnInput));
+      const aiInputFingerprint = siteWidgetAiInputFingerprint(aiTurnInput);
       const aiTurnInputWithFingerprint: AiTurnInput = {
         ...aiTurnInput,
         turn: {
@@ -170,79 +181,63 @@ export class PublicWidgetIntakeService {
           inputFingerprint: aiInputFingerprint
         }
       };
-      const outcome = await executeLegacyS05Turn({
-        executionContext: aiTurnExecutionContextWithFingerprint,
-        turnInput: aiTurnInputWithFingerprint,
-        generator: aiReplyGenerator,
-        applier: {
-          persistReply: async (reply) => {
-            try {
-              const outboundFingerprint = sha256Hex(
-                stableStringify({
-                  outbound_kind: "site_widget_ai_reply",
-                  inbound_public_message_id: saved.publicMessageId,
-                  public_conversation_id: saved.publicConversationId,
-                  body: reply.replyDraft,
-                  metadata: reply.metadata
-                })
-              );
-              const persistedAiReply = await this.repository.saveSiteWidgetAiMessage({
-                leadId: reply.executionContext.internal.leadId,
-                conversationId: reply.executionContext.internal.conversationId,
-                publicMessageId: randomUUID(),
-                inboundPublicMessageId: saved.publicMessageId,
-                idempotencyKey: `ai:${saved.publicMessageId}`,
-                requestFingerprint: outboundFingerprint,
-                body: reply.replyDraft,
-                sourcePageUrl: aiTurnInputWithFingerprint.page.url,
-                agentAllowedToReplyAfterSend:
-                  reply.action === "handoff_to_manager" ? false : undefined,
-                metadata: {
-                  ...reply.metadata,
-                  channel: "site_widget",
-                  public_session_id: saved.publicSessionId,
-                  inbound_public_message_id: saved.publicMessageId,
-                  ai_input_fingerprint: aiInputFingerprint
-                }
-              });
+      let execution;
 
-              return {
-                status: "persisted" as const,
-                internalMessageId: persistedAiReply.internalMessageId,
-                publicMessageId: persistedAiReply.publicMessageId,
-                body: persistedAiReply.body
-              };
-            } catch (error) {
-              return {
-                status: "blocked" as const,
-                reason:
-                  error instanceof AgentReplyBlockedError
-                    ? ("agent_reply_blocked" as const)
-                    : ("ai_persistence_unconfirmed" as const)
-              };
-            }
+      try {
+        execution = await aiTurnExecutor.execute({
+          executionContext: aiTurnExecutionContextWithFingerprint,
+          turnInput: aiTurnInputWithFingerprint,
+          generator: aiReplyGenerator,
+          outbound: {
+            publicSessionId: saved.publicSessionId,
+            inboundPublicMessageId: saved.publicMessageId,
+            sourcePageUrl: aiTurnInputWithFingerprint.page.url,
+            aiInputFingerprint
           }
-        }
-      });
+        });
+      } catch {
+        return await this.fallbackWithManagerReview(
+          saved,
+          "ai_execution_failed",
+          "ai_persistence_unconfirmed"
+        );
+      }
+
+      if (execution.kind === "running_replay") {
+        await this.transitionToManagerReview(saved, "ai_run_in_progress");
+        throw new WidgetAiRunInProgressError();
+      }
+
+      if (execution.kind === "terminal_replay") {
+        return await this.fallbackWithManagerReview(
+          saved,
+          terminalReplayManagerReviewReason(execution.run),
+          terminalReplayFallbackReason(execution.run),
+          true
+        );
+      }
+
+      const outcome = execution.outcome;
 
       if (outcome.decision.action === "no_reply") {
-        return fallbackSuccess(
-          saved.replayed,
-          saved.publicSessionId,
-          saved.publicMessageId,
+        return await this.fallbackWithManagerReview(
+          saved,
+          "ai_no_reply",
           outcome.decision.reason
         );
       }
 
       if (!outcome.persistedReply) {
-        return fallbackSuccess(
-          saved.replayed,
-          saved.publicSessionId,
-          saved.publicMessageId,
+        const sendGateBlocked =
           outcome.result.status === "blocked" &&
-            outcome.result.reason === "agent_reply_blocked"
-            ? "agent_reply_blocked"
-            : "ai_persistence_unconfirmed"
+          outcome.result.reason === "agent_reply_blocked";
+
+        return await this.fallbackWithManagerReview(
+          saved,
+          sendGateBlocked
+            ? "ai_send_gate_blocked"
+            : "ai_reply_persistence_unconfirmed",
+          sendGateBlocked ? "agent_reply_blocked" : "ai_persistence_unconfirmed"
         );
       }
 
@@ -282,6 +277,92 @@ export class PublicWidgetIntakeService {
       };
     }
   }
+
+  private async fallbackWithManagerReview(
+    saved: SaveAcceptedSiteWidgetMessageResult,
+    managerReviewReason: PublicWidgetManagerReviewReason,
+    fallbackReason: PublicWidgetFallbackReason,
+    replayed = saved.replayed
+  ): Promise<PublicWidgetIntakeServiceResult> {
+    await this.transitionToManagerReview(saved, managerReviewReason);
+
+    return fallbackSuccess(
+      replayed,
+      saved.publicSessionId,
+      saved.publicMessageId,
+      fallbackReason
+    );
+  }
+
+  private async transitionToManagerReview(
+    saved: SaveAcceptedSiteWidgetMessageResult,
+    reason: PublicWidgetManagerReviewReason
+  ): Promise<void> {
+    const repository = this.options.managerReviewRepository;
+
+    if (!repository) {
+      throw new Error("site widget manager review persistence is unavailable");
+    }
+
+    await repository.transitionSiteWidgetConversationToManagerReview({
+      leadId: saved.leadId,
+      conversationId: saved.conversationId,
+      publicConversationId: saved.publicConversationId,
+      inboundMessageId: saved.inboundMessageId,
+      inboundPublicMessageId: saved.publicMessageId,
+      reason
+    });
+  }
+}
+
+class WidgetAiRunInProgressError extends Error {
+  constructor() {
+    super("widget AI run is still in progress");
+    this.name = "WidgetAiRunInProgressError";
+  }
+}
+
+function terminalReplayFallbackReason(run: {
+  status: string;
+  outcomeReason: string;
+}): PublicWidgetFallbackReason {
+  switch (run.outcomeReason) {
+    case "missing_provider_config":
+      return "missing_openai_config";
+    case "model_error":
+      return "model_error";
+    case "empty_model_response":
+      return "empty_model_response";
+    case "unsafe_model_response":
+    case "execution_context_mismatch":
+    case "candidate_invalid":
+      return "unsafe_model_response";
+    case "agent_reply_blocked":
+    case "gate_closed":
+      return "agent_reply_blocked";
+    default:
+      return "ai_persistence_unconfirmed";
+  }
+}
+
+function terminalReplayManagerReviewReason(run: {
+  status: string;
+  outcomeReason: string;
+  sendGateResult: string;
+}): PublicWidgetManagerReviewReason {
+  if (
+    run.sendGateResult === "blocked" ||
+    run.outcomeReason === "agent_reply_blocked" ||
+    run.outcomeReason === "gate_closed"
+  ) {
+    return "ai_send_gate_blocked";
+  }
+
+  if (run.status === "failed" || run.outcomeReason === "ai_persistence_unconfirmed") {
+    return "ai_reply_persistence_unconfirmed";
+  }
+
+  return "ai_no_reply";
 }
 
 function disabledSuccess(
@@ -337,6 +418,20 @@ type PublicWidgetFallbackReason =
   | PublicWidgetAiUnavailableReason
   | "agent_reply_blocked"
   | "ai_persistence_unconfirmed";
+
+function siteWidgetAiInputFingerprint(input: AiTurnInput): string {
+  const { conversation, gateSnapshot: _gateSnapshot, ...immutableTurn } = input;
+
+  // The conversation gate is mutable after acceptance (manager takeover/fail-closed review).
+  // Replay identity must remain tied to the accepted inbound and bounded context, while the
+  // current gate is still enforced independently before any outbound persistence.
+  return sha256Hex(
+    stableStringify({
+      ...immutableTurn,
+      conversation: { publicConversationId: conversation.publicConversationId }
+    })
+  );
+}
 
 function aiReplySuccess(
   replayed: boolean,

@@ -5,6 +5,8 @@ import type {
 } from "../../src/services/widget-ai-service.js";
 
 export class FakeWidgetAiProvider implements WidgetAiProvider {
+  readonly providerKind = "fake" as const;
+
   constructor(
     private readonly options: {
       text?: string;

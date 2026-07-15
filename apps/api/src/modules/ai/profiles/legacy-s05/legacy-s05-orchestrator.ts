@@ -49,7 +49,7 @@ export async function executeLegacyS05Turn(input: {
   generator: LegacyS05DecisionGenerator;
   applier: LegacyS05ReplyApplier;
 }): Promise<LegacyS05TurnOutcome> {
-  if (!executionContextMatchesTurnInput(input.executionContext, input.turnInput)) {
+  if (!legacyS05ExecutionContextMatchesTurnInput(input.executionContext, input.turnInput)) {
     const decision = mapLegacyS05Decision(
       validateLegacyS05Candidate({
         decision: "no_reply",
@@ -142,7 +142,7 @@ export async function executeLegacyS05Turn(input: {
   };
 }
 
-function executionContextMatchesTurnInput(
+export function legacyS05ExecutionContextMatchesTurnInput(
   context: AiTurnExecutionContext,
   input: AiTurnInput
 ): boolean {

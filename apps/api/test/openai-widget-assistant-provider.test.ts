@@ -11,6 +11,16 @@ afterEach(() => {
 });
 
 describe("direct OpenAI widget adapter golden request", () => {
+  it("rejects an unsafe configured model before any provider call", () => {
+    expect(
+      () =>
+        new OpenAiWidgetAssistantProvider({
+          apiKey: "test-openai-key",
+          model: "unsafe model name"
+        })
+    ).toThrow("Invalid widget AI model name");
+  });
+
   it("keeps the frozen gpt-5.5 low/store:false Responses API shape", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
