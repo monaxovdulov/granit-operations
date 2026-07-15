@@ -13,6 +13,13 @@ import { PostgresIntakeRepository } from "./modules/conversations/repositories/p
 setDefaultResultOrder("ipv4first");
 
 const config = loadConfig(process.env);
+
+if (config.widgetAi.runtimeMode === "mastra_openai_api") {
+  throw new Error(
+    "AI_RUNTIME_MODE=mastra_openai_api is pinned but disabled until the M2 app-owned path is connected"
+  );
+}
+
 const { db } = createOperationsDb(config.databaseUrl);
 const repository = new PostgresIntakeRepository(db);
 const aiRunRepository = new PostgresAiRunRepository(db);
@@ -29,6 +36,7 @@ const app = buildApi({
   logger: true,
   widgetAi: {
     enabled: config.widgetAi.enabled,
+    runtimeMode: "direct_openai",
     provider: widgetAiProvider,
     modelName: config.widgetAi.openAiModel,
     runRepository: aiRunRepository

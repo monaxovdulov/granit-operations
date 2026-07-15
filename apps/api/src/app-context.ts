@@ -31,6 +31,7 @@ export type AppContextOptions = {
 
 export type WidgetAiAssemblyOptions = {
   enabled: boolean;
+  runtimeMode?: "direct_openai";
   provider?: WidgetAiProvider;
   modelName?: string;
   replyGenerator?: PublicWidgetAiReplyGenerator;

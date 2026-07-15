@@ -80,6 +80,26 @@ describe("ops-api modular monolith boundaries", () => {
     }
   });
 
+  it("keeps the disabled Mastra adapter isolated from business mutation and transport layers", () => {
+    const adapterSource = readSource(
+      "modules/ai/adapters/mastra-live-v2-decision-generator.ts"
+    );
+    const appContextSource = readSource("app-context.ts");
+    const indexSource = readSource("index.ts");
+
+    expect(adapterSource).toContain('import("@mastra/core/agent")');
+    expect(adapterSource).toContain('import("@mastra/core/logger")');
+    expect(adapterSource).toContain("agent.__registerPrimitives({ logger: noopLogger })");
+    expect(adapterSource).toContain("store: false");
+    expect(adapterSource).toContain('transport: "fetch"');
+    expect(adapterSource).not.toMatch(
+      /@granit\/db|drizzle|postgres|repositories|fastify|routes|delivery|telegram|sendMessage/
+    );
+    expect(appContextSource).not.toContain("MastraLiveV2DecisionGenerator");
+    expect(indexSource).not.toContain("createMastraOpenAiLiveV2DecisionGenerator");
+    expect(indexSource).toContain("disabled until the M2 app-owned path is connected");
+  });
+
   it("keeps conversation repository contracts split by responsibility", () => {
     const aggregateRepositorySource = readSource(
       "modules/conversations/repositories/intake-repository.ts"
