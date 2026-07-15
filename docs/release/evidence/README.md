@@ -55,6 +55,9 @@ Current evidence records:
 - `AI_DIALOG_OBSERVABILITY_P2_RU.md` - exact-SHA P2 evidence for app-owned run/span/quality
   persistence, configured/observed model truth, atomic outbound linkage, fail-closed replay,
   disposable PostgreSQL fresh/upgrade proof and zero live provider calls.
+- `AI_DIALOG_PRIVACY_VISIBILITY_P3_RU.md` - exact-SHA P3 evidence for protected manager quality
+  visibility, strict approved assets, centralized fail-closed observability sanitizer, bounded
+  span-only retention and zero live provider calls.
 - `P0_CHANNEL_NEUTRAL_CONVERSATION_FOUNDATION_RU.md` - channel-neutral widget/Telegram-ready conversation foundation evidence.
 - `TELEGRAM_INBOUND_MANAGER_MINI_PANEL_RU.md` - Telegram inbound webhook, manager binding, takeover/reply mini-panel, and no-direct-send evidence.
 - `TELEGRAM_OUTBOUND_DELIVERY_SENDER_RU.md` - Telegram delivery sender path, retry/failure status and manager-visible delivery evidence.

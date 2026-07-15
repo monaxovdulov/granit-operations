@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
   "repo": "granit-operations",
-  "updated_at": "2026-07-15T00:36:00Z",
-  "git_head": "368b967",
+  "updated_at": "2026-07-15T00:38:00Z",
+  "git_head": "56a81eb9a7e6e5540198367ee112a16fb2c1281b",
   "mode": "implementation",
-  "state": "p3_passed_evidence_next",
+  "state": "p3_passed_g4_next",
   "dirty_worktree": {
-    "status": "intentional_p3_implementation_ready",
-    "summary": "P3 implementation and bounded checks pass; exact-SHA evidence follows the implementation commit"
+    "status": "intentional_p3_evidence_dirty",
+    "summary": "P3 implementation is committed; exact-SHA evidence is ready for its follow-up commit"
   },
   "context": {
     "last_scan_at": "2026-07-15T00:07:25Z",
