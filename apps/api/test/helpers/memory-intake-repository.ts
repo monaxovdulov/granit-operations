@@ -1064,7 +1064,10 @@ export class MemoryIntakeRepository
       throw new Error("memory recorded AI conversation not found");
     }
 
-    if (!conversation.agentAllowedToReply) {
+    if (
+      !conversation.agentAllowedToReply ||
+      conversation.aiState !== "ai_collecting_info"
+    ) {
       this.aiSaveCalls += 1;
       this.lastAiSaveInput = siteWidgetInput;
       const completion = withMemoryRecordedSpans(
@@ -1121,6 +1124,27 @@ export class MemoryIntakeRepository
       publicMessageId: message.publicMessageId,
       body: message.body,
       completedRun
+    };
+  }
+
+  async readRecordedSiteWidgetAiGate(input: {
+    leadId: string;
+    conversationId: string;
+  }): Promise<{ aiState: AiTurnInput["gateSnapshot"]["aiState"]; agentAllowedToReply: boolean }> {
+    const leadId = this.conversationLeads.get(input.conversationId);
+    const publicSessionId = this.conversationSessions.get(input.conversationId);
+    const lead = leadId ? this.leads.get(leadId) : undefined;
+    const conversation = lead?.conversations.find(
+      (candidate) => candidate.channelIdentity.widgetPublicSessionId === publicSessionId
+    );
+
+    if (!conversation || leadId !== input.leadId) {
+      throw new Error("memory recorded site widget AI gate is unavailable");
+    }
+
+    return {
+      aiState: conversation.aiState,
+      agentAllowedToReply: conversation.agentAllowedToReply
     };
   }
 

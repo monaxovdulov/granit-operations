@@ -140,6 +140,7 @@ export type SelectedLiveV2ApprovedAssets = {
   manifest: ApprovedAiAssetManifest["liveV2"];
   prompt: typeof LIVE_V2_PROMPT_ASSET;
   tone: typeof LIVE_V2_TONE_ASSET;
+  factsSnapshot: ReturnType<typeof parseLiveV2FactsSnapshot>;
   facts: ReturnType<typeof toLiveV2ModelFactsAsset>;
 };
 
@@ -162,6 +163,7 @@ export async function selectLiveV2ApprovedAssets(): Promise<SelectedLiveV2Approv
     manifest: registry.liveV2,
     prompt: LIVE_V2_PROMPT_ASSET,
     tone: LIVE_V2_TONE_ASSET,
+    factsSnapshot: facts,
     facts: toLiveV2ModelFactsAsset(facts)
   };
 }

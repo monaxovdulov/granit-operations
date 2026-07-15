@@ -29,6 +29,13 @@ export type TrustedLiveV2RuntimeObservation = {
   usage?: LiveV2RuntimeUsage;
 };
 
+export type RejectedLiveV2RuntimeObservation = {
+  observedModelProvider: LiveV2RuntimeProvider | "none";
+  observedModelName?: string;
+  runtimeRunId?: string;
+  usage?: LiveV2RuntimeUsage;
+};
+
 export type LiveV2RuntimeGeneration = {
   candidate: unknown;
   observation: TrustedLiveV2RuntimeObservation;
@@ -86,7 +93,7 @@ export interface MastraLiveV2AgentPort {
 }
 
 export class MastraLiveV2GenerationError extends Error {
-  constructor() {
+  constructor(readonly observation?: RejectedLiveV2RuntimeObservation) {
     super("Mastra live_v2 generation failed");
     this.name = "MastraLiveV2GenerationError";
   }
@@ -95,7 +102,8 @@ export class MastraLiveV2GenerationError extends Error {
 export class MastraLiveV2DecisionGenerator implements ObservedLiveV2DecisionGenerator {
   constructor(
     private readonly agent: MastraLiveV2AgentPort,
-    private readonly expectedProvider: LiveV2RuntimeProvider
+    private readonly expectedProvider: LiveV2RuntimeProvider,
+    private readonly expectedModelName: string
   ) {}
 
   async generateDecision(
@@ -109,11 +117,14 @@ export class MastraLiveV2DecisionGenerator implements ObservedLiveV2DecisionGene
         buildGenerateOptions(input, invocation)
       );
 
+      const rejectedObservation = toRejectedObservation(result);
+
       if (
         result.modelProvider !== this.expectedProvider ||
-        !isSafeWidgetAiModelName(result.providerModelName)
+        !isSafeWidgetAiModelName(result.providerModelName) ||
+        result.providerModelName !== this.expectedModelName
       ) {
-        throw new MastraLiveV2GenerationError();
+        throw new MastraLiveV2GenerationError(rejectedObservation);
       }
 
       const runtimeRunId = toSafeRuntimeRunId(result.runtimeRunId);
@@ -128,10 +139,43 @@ export class MastraLiveV2DecisionGenerator implements ObservedLiveV2DecisionGene
           ...(usage ? { usage } : {})
         }
       };
-    } catch {
+    } catch (error) {
+      if (error instanceof MastraLiveV2GenerationError) {
+        throw error;
+      }
+
       throw new MastraLiveV2GenerationError();
     }
   }
+}
+
+function toRejectedObservation(
+  result: MastraLiveV2AgentResult
+): RejectedLiveV2RuntimeObservation {
+  const provider =
+    result.modelProvider === "openai" || result.modelProvider === "fake"
+      ? result.modelProvider
+      : "none";
+  const modelName = isSafeWidgetAiModelName(result.providerModelName)
+    ? result.providerModelName
+    : undefined;
+  const runtimeRunId = toSafeRuntimeRunId(result.runtimeRunId);
+  const usage = toTrustedUsage(result.usage);
+
+  if (provider === "none" || !modelName) {
+    return {
+      observedModelProvider: "none",
+      ...(runtimeRunId ? { runtimeRunId } : {}),
+      ...(usage ? { usage } : {})
+    };
+  }
+
+  return {
+    observedModelProvider: provider,
+    observedModelName: modelName,
+    ...(runtimeRunId ? { runtimeRunId } : {}),
+    ...(usage ? { usage } : {})
+  };
 }
 
 export async function createMastraOpenAiLiveV2DecisionGenerator(input: {
@@ -187,7 +231,7 @@ export async function createMastraOpenAiLiveV2DecisionGenerator(input: {
     }
   };
 
-  return new MastraLiveV2DecisionGenerator(port, "openai");
+  return new MastraLiveV2DecisionGenerator(port, "openai", input.config.model);
 }
 
 function buildGenerateOptions(

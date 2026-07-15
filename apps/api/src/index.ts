@@ -16,7 +16,7 @@ const config = loadConfig(process.env);
 
 if (config.widgetAi.runtimeMode === "mastra_openai_api") {
   throw new Error(
-    "AI_RUNTIME_MODE=mastra_openai_api is pinned but disabled until the M2 app-owned path is connected"
+    "AI_RUNTIME_MODE=mastra_openai_api is disabled until exact-SHA G6 owner approval"
   );
 }
 

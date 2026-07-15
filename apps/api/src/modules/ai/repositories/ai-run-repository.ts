@@ -39,6 +39,8 @@ export const AI_RUN_OUTCOME_REASONS = [
   "execution_context_mismatch",
   "generator_failed",
   "candidate_invalid",
+  "no_safe_answer",
+  "missing_approved_fact",
   "gate_closed",
   "recorder_failure"
 ] as const;
@@ -119,6 +121,8 @@ export const AI_QUALITY_REASON_CODES = [
   "ai_persistence_unconfirmed",
   "execution_context_mismatch",
   "candidate_invalid",
+  "no_safe_answer",
+  "missing_approved_fact",
   "gate_closed",
   "send_gate_blocked",
   "tool_failed",
@@ -206,6 +210,8 @@ export type AiRunTerminalCompletion = {
   outcomeReason: AiRunOutcomeReason;
   failureCode?: AiRunFailureCode;
   validatorResult: AiRunValidatorResult;
+  /** Trusted runtime execution identifier; valid only for `mastra_openai_api` runs. */
+  runtimeRunId?: string;
   /**
    * Terminal provider truth captured by an app-owned adapter boundary. This is deliberately
    * separate from `run.model`, which remains the immutable configured/requested model truth.
@@ -213,6 +219,9 @@ export type AiRunTerminalCompletion = {
   observedModelProvider: AiModelProvider;
   observedModelName?: string;
   usage?: AiRunUsage;
+  /** App-owned estimate in fixed microunits. The rate identifier is required with the estimate. */
+  costEstimateMicrounits?: number;
+  costRateVersion?: string;
   sendGateResult: AiRunSendGateResult;
   sendGateCheckedAt?: Date;
   completedAt: Date;

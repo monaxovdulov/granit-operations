@@ -80,7 +80,7 @@ describe("ops-api modular monolith boundaries", () => {
     }
   });
 
-  it("keeps the disabled Mastra adapter isolated from business mutation and transport layers", () => {
+  it("keeps the M2 local/fake Mastra adapter isolated from business mutation and transport layers", () => {
     const adapterSource = readSource(
       "modules/ai/adapters/mastra-live-v2-decision-generator.ts"
     );
@@ -95,9 +95,11 @@ describe("ops-api modular monolith boundaries", () => {
     expect(adapterSource).not.toMatch(
       /@granit\/db|drizzle|postgres|repositories|fastify|routes|delivery|telegram|sendMessage/
     );
-    expect(appContextSource).not.toContain("MastraLiveV2DecisionGenerator");
+    expect(appContextSource).toContain("MastraLiveV2DecisionGenerator");
+    expect(appContextSource).toContain('"fake"');
+    expect(appContextSource).not.toContain("createMastraOpenAiLiveV2DecisionGenerator");
     expect(indexSource).not.toContain("createMastraOpenAiLiveV2DecisionGenerator");
-    expect(indexSource).toContain("disabled until the M2 app-owned path is connected");
+    expect(indexSource).toContain("disabled until exact-SHA G6 owner approval");
   });
 
   it("keeps conversation repository contracts split by responsibility", () => {
@@ -250,7 +252,8 @@ describe("ops-api modular monolith boundaries", () => {
       }
     }
 
-    const neutralTurnPortSource = readSource(
+    const neutralTurnPortSource = readSource("modules/ai/ports/recorded-ai-turn.ts");
+    const legacyTurnPortSource = readSource(
       "modules/ai/ports/recorded-legacy-s05-turn.ts"
     );
     const intakeTurnExecutorSource = readSource(
@@ -261,13 +264,14 @@ describe("ops-api modular monolith boundaries", () => {
     );
 
     expect(serviceImports).toEqual([]);
-    expect(neutralTurnPortSource).toContain("interface RecordedLegacyS05ReplyApplier");
-    expect(neutralTurnPortSource).toContain("type RecordedLegacyS05TurnResult");
+    expect(neutralTurnPortSource).toContain("interface RecordedAiReplyApplier");
+    expect(neutralTurnPortSource).toContain("type RecordedAiTurnResult");
+    expect(legacyTurnPortSource).toContain("interface RecordedLegacyS05ReplyApplier");
     expect(intakeTurnExecutorSource).toContain(
-      "../../ai/ports/recorded-legacy-s05-turn.js"
+      "../../ai/ports/recorded-ai-turn.js"
     );
     expect(recordedReplyRepositorySource).toContain(
-      "../ports/recorded-legacy-s05-turn.js"
+      "../ports/recorded-ai-turn.js"
     );
   });
 

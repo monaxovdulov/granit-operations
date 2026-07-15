@@ -254,11 +254,16 @@ function assertCompletionShape(
   const replyBearing = isReplyBearingStatus(completion.status);
   const hasOutboundMessage = outboundMessageId !== undefined;
   const successful = completion.status === "persisted" || completion.status === "handed_off";
+  const controlledNoReply =
+    completion.status === "fallback_unavailable" &&
+    completion.normalizedAction === "no_reply" &&
+    (completion.outcomeReason === "no_safe_answer" ||
+      completion.outcomeReason === "missing_approved_fact");
 
   if (
     replyBearing !== hasOutboundMessage ||
     (outboundMessageId !== undefined && !UUID.test(outboundMessageId)) ||
-    successful === (completion.failureCode !== undefined) ||
+    (successful || controlledNoReply) === (completion.failureCode !== undefined) ||
     !terminalActionMatches(completion) ||
     (completion.sendGateResult === "not_checked") !==
       (completion.sendGateCheckedAt === undefined) ||
@@ -275,6 +280,23 @@ function assertCompletionShape(
   checkedOptionalCount(completion.usage?.inputTokens);
   checkedOptionalCount(completion.usage?.outputTokens);
   checkedOptionalCount(completion.usage?.totalTokens);
+
+  if (
+    completion.runtimeRunId !== undefined &&
+    (run.runtimeMode !== "mastra_openai_api" || !safeIdentifier(completion.runtimeRunId, 200))
+  ) {
+    throw new MemoryAiRunCompletionConflictError();
+  }
+
+  if (
+    (completion.costEstimateMicrounits === undefined) !==
+      (completion.costRateVersion === undefined) ||
+    (completion.costRateVersion !== undefined &&
+      !safeIdentifier(completion.costRateVersion, 160))
+  ) {
+    throw new MemoryAiRunCompletionConflictError();
+  }
+  checkedOptionalCount(completion.costEstimateMicrounits);
 
   if (
     completion.observedModelName !== undefined &&

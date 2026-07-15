@@ -73,15 +73,22 @@ export function sanitizeAiRunStart(value: unknown): BeginAiRunInput {
 /** Rebuilds terminal run evidence, spans and quality events from one centralized allowlist. */
 export function sanitizeAiRunCompletion(value: unknown): AiRunTerminalCompletion {
   const input = record(value);
+  const runtimeRunId = optional(input.runtimeRunId, runtimeRunIdentifier);
   const observedModelProvider = enumValue(AI_MODEL_PROVIDERS, input.observedModelProvider);
   const observedModelName = optional(input.observedModelName, safeModelName);
   const usage = input.usage === undefined ? undefined : sanitizeUsage(input.usage);
+  const costEstimateMicrounits = optional(input.costEstimateMicrounits, count);
+  const costRateVersion = optional(input.costRateVersion, costRateIdentifier);
   const sendGateCheckedAt = optional(input.sendGateCheckedAt, date);
   const failureCode = optional(input.failureCode, (candidate) =>
     enumValue(AI_RUN_FAILURE_CODES, candidate)
   );
 
   if ((observedModelProvider === "none") !== (observedModelName === undefined)) {
+    throw new AiObservabilitySanitizationError();
+  }
+
+  if ((costEstimateMicrounits === undefined) !== (costRateVersion === undefined)) {
     throw new AiObservabilitySanitizationError();
   }
 
@@ -98,9 +105,13 @@ export function sanitizeAiRunCompletion(value: unknown): AiRunTerminalCompletion
     outcomeReason: enumValue(AI_RUN_OUTCOME_REASONS, input.outcomeReason),
     ...(failureCode === undefined ? {} : { failureCode }),
     validatorResult: enumValue(AI_RUN_VALIDATOR_RESULTS, input.validatorResult),
+    ...(runtimeRunId === undefined ? {} : { runtimeRunId }),
     observedModelProvider,
     ...(observedModelName === undefined ? {} : { observedModelName }),
     ...(usage === undefined ? {} : { usage }),
+    ...(costEstimateMicrounits === undefined || costRateVersion === undefined
+      ? {}
+      : { costEstimateMicrounits, costRateVersion }),
     sendGateResult: enumValue(AI_RUN_SEND_GATE_RESULTS, input.sendGateResult),
     ...(sendGateCheckedAt === undefined ? {} : { sendGateCheckedAt }),
     completedAt: date(input.completedAt),
@@ -252,6 +263,22 @@ function evidenceIdentifier(value: unknown): string {
   // Production span IDs are UUIDs. Short deterministic test/local IDs remain supported, but
   // secret-, email- and phone-shaped data must never pass an allowlisted identifier boundary.
   if (!UUID.test(parsed) && sensitive(parsed)) {
+    throw new AiObservabilitySanitizationError();
+  }
+  return parsed;
+}
+
+function runtimeRunIdentifier(value: unknown): string {
+  const parsed = safeIdentifier(value, 200);
+  if (!UUID.test(parsed) && sensitive(parsed)) {
+    throw new AiObservabilitySanitizationError();
+  }
+  return parsed;
+}
+
+function costRateIdentifier(value: unknown): string {
+  const parsed = safeIdentifier(value, 160);
+  if (sensitive(parsed)) {
     throw new AiObservabilitySanitizationError();
   }
   return parsed;

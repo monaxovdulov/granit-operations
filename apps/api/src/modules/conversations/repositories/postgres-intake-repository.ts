@@ -833,6 +833,30 @@ export class PostgresIntakeRepository
     });
   }
 
+  async readRecordedSiteWidgetAiGate(input: {
+    leadId: string;
+    conversationId: string;
+  }): Promise<{ aiState: AiTurnInput["gateSnapshot"]["aiState"]; agentAllowedToReply: boolean }> {
+    const [gate] = await this.db
+      .select({
+        leadId: conversations.leadId,
+        aiState: conversations.aiState,
+        agentAllowedToReply: conversations.agentAllowedToReply
+      })
+      .from(conversations)
+      .where(eq(conversations.id, input.conversationId))
+      .limit(1);
+
+    if (!gate || gate.leadId !== input.leadId || !isAiState(gate.aiState)) {
+      throw new Error("recorded site widget AI gate is unavailable");
+    }
+
+    return {
+      aiState: gate.aiState,
+      agentAllowedToReply: gate.agentAllowedToReply
+    };
+  }
+
   async persistRecordedSiteWidgetAiReply(
     input: PersistRecordedSiteWidgetAiReplyInput
   ): Promise<RecordedLegacyS05PersistReplyResult> {
@@ -864,7 +888,8 @@ export class PostgresIntakeRepository
             and(
               eq(conversations.id, input.run.conversationId),
               eq(conversations.leadId, input.run.leadId),
-              eq(conversations.agentAllowedToReply, true)
+              eq(conversations.agentAllowedToReply, true),
+              eq(conversations.aiState, "ai_collecting_info")
             )
           )
           .returning({

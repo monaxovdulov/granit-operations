@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { MastraLiveV2DecisionGenerator } from "../src/modules/ai/adapters/mastra-live-v2-decision-generator.js";
 import type { LiveV2ApplyPlan } from "../src/modules/ai/profiles/live-v2/live-v2-apply-plan.js";
 import type {
   LiveV2Candidate,
@@ -270,14 +271,32 @@ describe(
     it.each(SYNTHETIC_CASES)("$id: $name", async (fixture) => {
       let generatorCalls = 0;
       const gateReader = buildLiveV2TestGateReader(fixture.turnInput);
+      const adapter = new MastraLiveV2DecisionGenerator(
+        {
+          async generate() {
+            generatorCalls += 1;
+            return {
+              candidate: fixture.candidate,
+              modelProvider: "fake",
+              providerModelName: "mastra-local-fixture-v1",
+              runtimeRunId: `fixture-${fixture.id.toLowerCase()}`,
+              usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 }
+            };
+          }
+        },
+        "fake",
+        "mastra-local-fixture-v1"
+      );
 
       const outcome = await executeLiveV2Turn({
         turnInput: fixture.turnInput,
         approvedFacts: TEST_LIVE_V2_FACTS,
         generator: {
-          async generateDecision() {
-            generatorCalls += 1;
-            return fixture.candidate;
+          async generateDecision(input) {
+            const generated = await adapter.generateDecision(input, {
+              appTraceId: "00000000-0000-4000-8000-000000000181"
+            });
+            return generated.candidate;
           }
         },
         gateReader

@@ -646,6 +646,8 @@ export const aiRuns = pgTable(
         'execution_context_mismatch',
         'generator_failed',
         'candidate_invalid',
+        'no_safe_answer',
+        'missing_approved_fact',
         'gate_closed',
         'recorder_failure'
       )`
@@ -695,9 +697,14 @@ export const aiRuns = pgTable(
           AND ${table.decisionAction} IS NOT NULL
           AND ${table.outcomeReason} IS NOT NULL
           AND ${table.failureCode} IS NULL)
+        OR (${table.status} = 'fallback_unavailable'
+          AND ${table.decisionAction} = 'no_reply'
+          AND ${table.outcomeReason} IN ('no_safe_answer', 'missing_approved_fact')
+          AND ${table.failureCode} IS NULL)
         OR (${table.status} IN ('blocked', 'fallback_unavailable', 'failed')
           AND ${table.decisionAction} IS NOT NULL
           AND ${table.outcomeReason} IS NOT NULL
+          AND ${table.outcomeReason} NOT IN ('no_safe_answer', 'missing_approved_fact')
           AND ${table.failureCode} IS NOT NULL)`
     ),
     sendGateStateCheck: check(
@@ -862,6 +869,8 @@ export const aiQualityEvents = pgTable(
         'ai_persistence_unconfirmed',
         'execution_context_mismatch',
         'candidate_invalid',
+        'no_safe_answer',
+        'missing_approved_fact',
         'gate_closed',
         'send_gate_blocked',
         'tool_failed',

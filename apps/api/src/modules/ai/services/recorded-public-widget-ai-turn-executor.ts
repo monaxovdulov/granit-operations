@@ -6,16 +6,16 @@ import type {
   AiRunTerminalCompletion,
   RunningAiRunRecord
 } from "../repositories/ai-run-repository.js";
+import type { RecordedAiTurnService } from "../ports/recorded-ai-turn.js";
 import type { RecordedSiteWidgetAiReplyRepository } from "../repositories/recorded-site-widget-ai-reply-repository.js";
 import type {
   PublicWidgetAiTurnExecutionInput,
   PublicWidgetAiTurnExecutor
 } from "../../intake/ports/public-widget-ai-turn-executor.js";
-import { RecordedLegacyS05TurnService } from "./recorded-legacy-s05-turn-service.js";
 
 export class RecordedPublicWidgetAiTurnExecutor implements PublicWidgetAiTurnExecutor {
   constructor(
-    private readonly turnService: RecordedLegacyS05TurnService,
+    private readonly turnService: RecordedAiTurnService,
     private readonly replyRepository: RecordedSiteWidgetAiReplyRepository,
     private readonly idGenerator: () => string = randomUUID
   ) {}
@@ -24,7 +24,6 @@ export class RecordedPublicWidgetAiTurnExecutor implements PublicWidgetAiTurnExe
     return this.turnService.execute({
       executionContext: input.executionContext,
       turnInput: input.turnInput,
-      generator: input.generator,
       replyApplier: {
         persistReplyAndCompleteRun: async ({ run, reply, completionPlan }) => {
           const publicMessageId = this.idGenerator();
@@ -78,7 +77,7 @@ const ALLOWED_HANDOFF_REASONS = new Set([
 
 function recordedReplyMetadata(input: {
   run: RunningAiRunRecord;
-  action: "answer" | "handoff_to_manager";
+  action: "answer" | "ask_clarifying_question" | "handoff_to_manager";
   candidateMetadata: Record<string, unknown>;
   completion: AiRunTerminalCompletion;
   publicSessionId: string;

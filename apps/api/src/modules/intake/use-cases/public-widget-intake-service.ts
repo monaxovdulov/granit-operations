@@ -36,6 +36,7 @@ export type PublicWidgetIntakeServiceOptions = {
   managerReviewRepository?: PublicWidgetManagerReviewRepository;
   ai?: {
     enabled: boolean;
+    /** Direct-mode compatibility signal; execution itself owns the bound generator. */
     replyGenerator?: PublicWidgetAiReplyGenerator;
     turnExecutor?: PublicWidgetAiTurnExecutor;
   };
@@ -85,8 +86,7 @@ export class PublicWidgetIntakeService {
     const publicSessionId = parsed.data.public_session_id ?? randomUUID();
     const aiReplyGenerator = this.options.ai?.replyGenerator;
     const aiTurnExecutor = this.options.ai?.turnExecutor;
-    const aiCanRun =
-      this.options.ai?.enabled === true && Boolean(aiReplyGenerator) && Boolean(aiTurnExecutor);
+    const aiCanRun = this.options.ai?.enabled === true && Boolean(aiTurnExecutor);
 
     try {
       const saved = await this.repository.saveAcceptedSiteWidgetMessage({
@@ -111,19 +111,11 @@ export class PublicWidgetIntakeService {
         return disabledSuccess(saved.replayed, saved.publicSessionId, saved.publicMessageId);
       }
 
-      if (!aiReplyGenerator) {
-        return await this.fallbackWithManagerReview(
-          saved,
-          "ai_executor_unavailable",
-          "missing_openai_config"
-        );
-      }
-
       if (!aiTurnExecutor) {
         return await this.fallbackWithManagerReview(
           saved,
           "ai_executor_unavailable",
-          "ai_persistence_unconfirmed"
+          aiReplyGenerator ? "ai_persistence_unconfirmed" : "missing_openai_config"
         );
       }
 
@@ -187,7 +179,6 @@ export class PublicWidgetIntakeService {
         execution = await aiTurnExecutor.execute({
           executionContext: aiTurnExecutionContextWithFingerprint,
           turnInput: aiTurnInputWithFingerprint,
-          generator: aiReplyGenerator,
           outbound: {
             publicSessionId: saved.publicSessionId,
             inboundPublicMessageId: saved.publicMessageId,
@@ -222,8 +213,8 @@ export class PublicWidgetIntakeService {
       if (outcome.decision.action === "no_reply") {
         return await this.fallbackWithManagerReview(
           saved,
-          "ai_no_reply",
-          outcome.decision.reason
+          terminalReplayManagerReviewReason(execution.run),
+          terminalReplayFallbackReason(execution.run)
         );
       }
 
@@ -330,12 +321,17 @@ function terminalReplayFallbackReason(run: {
     case "missing_provider_config":
       return "missing_openai_config";
     case "model_error":
+    case "generator_failed":
       return "model_error";
     case "empty_model_response":
       return "empty_model_response";
     case "unsafe_model_response":
     case "execution_context_mismatch":
     case "candidate_invalid":
+      return "unsafe_model_response";
+    case "no_safe_answer":
+    case "missing_approved_fact":
+      // site_widget.v1 has no generic no-reply reason; keep its immutable compatibility bucket.
       return "unsafe_model_response";
     case "agent_reply_blocked":
     case "gate_closed":

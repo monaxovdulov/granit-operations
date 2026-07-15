@@ -44,7 +44,11 @@ describe("M1 disabled Mastra live_v2 adapter", () => {
         negative: -1
       }
     }));
-    const generator = new MastraLiveV2DecisionGenerator({ generate }, "fake");
+    const generator = new MastraLiveV2DecisionGenerator(
+      { generate },
+      "fake",
+      "mastra-local-fixture-v1"
+    );
 
     const result = await generator.generateDecision(generatorInput(), {
       appTraceId: "00000000-0000-4000-8000-000000000123"
@@ -117,11 +121,19 @@ describe("M1 disabled Mastra live_v2 adapter", () => {
         providerModelName: "unsafe model name",
         runtimeRunId: undefined,
         usage: undefined
+      },
+      {
+        candidate: answerCandidate(),
+        modelProvider: "fake",
+        providerModelName: "safe-but-unexpected-model",
+        runtimeRunId: undefined,
+        usage: undefined
       }
     ]) {
       const generator = new MastraLiveV2DecisionGenerator(
         { generate: vi.fn(async () => result) },
-        "fake"
+        "fake",
+        "mastra-local-fixture-v1"
       );
 
       await expect(
@@ -130,6 +142,47 @@ describe("M1 disabled Mastra live_v2 adapter", () => {
         })
       ).rejects.toBeInstanceOf(MastraLiveV2GenerationError);
     }
+  });
+
+  it("carries only sanitized returned identity on an exact-model mismatch", async () => {
+    const generator = new MastraLiveV2DecisionGenerator(
+      {
+        generate: vi.fn(async () => ({
+          candidate: answerCandidate(),
+          modelProvider: "fake",
+          providerModelName: "unexpected-safe-model",
+          runtimeRunId: "safe-mismatch-run",
+          usage: {
+            inputTokens: 9,
+            outputTokens: 4,
+            totalTokens: 13,
+            raw: "RAW_MISMATCH_USAGE_CANARY"
+          }
+        }))
+      },
+      "fake",
+      "mastra-local-fixture-v1"
+    );
+
+    let thrown: unknown;
+    try {
+      await generator.generateDecision(generatorInput(), {
+        appTraceId: "00000000-0000-4000-8000-000000000123"
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(MastraLiveV2GenerationError);
+    expect((thrown as MastraLiveV2GenerationError).observation).toEqual({
+      observedModelProvider: "fake",
+      observedModelName: "unexpected-safe-model",
+      runtimeRunId: "safe-mismatch-run",
+      usage: { inputTokens: 9, outputTokens: 4, totalTokens: 13 }
+    });
+    expect(JSON.stringify((thrown as MastraLiveV2GenerationError).observation)).not.toContain(
+      "RAW_MISMATCH"
+    );
   });
 
   it("normalizes provider failures without exposing raw errors", async () => {
@@ -141,7 +194,8 @@ describe("M1 disabled Mastra live_v2 adapter", () => {
           throw new Error(rawCanary);
         })
       },
-      "fake"
+      "fake",
+      "mastra-local-fixture-v1"
     );
 
     try {

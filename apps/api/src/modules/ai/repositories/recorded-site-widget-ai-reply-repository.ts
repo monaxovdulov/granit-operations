@@ -1,14 +1,15 @@
-import type { LegacyS05PersistReplyInput } from "../profiles/legacy-s05/legacy-s05-orchestrator.js";
 import type {
-  RecordedLegacyS05PersistReplyResult,
-  RecordedLegacyS05ReplyCompletionPlan
-} from "../ports/recorded-legacy-s05-turn.js";
+  RecordedAiPersistReplyInput,
+  RecordedAiPersistReplyResult,
+  RecordedAiReplyCompletionPlan
+} from "../ports/recorded-ai-turn.js";
+import type { AiTurnAiState } from "../ai-turn.js";
 import type { RunningAiRunRecord } from "./ai-run-repository.js";
 
 export type PersistRecordedSiteWidgetAiReplyInput = {
   run: RunningAiRunRecord;
-  reply: LegacyS05PersistReplyInput;
-  completionPlan: RecordedLegacyS05ReplyCompletionPlan;
+  reply: RecordedAiPersistReplyInput;
+  completionPlan: RecordedAiReplyCompletionPlan;
   publicMessageId: string;
   inboundPublicMessageId: string;
   idempotencyKey: string;
@@ -24,7 +25,17 @@ export type PersistRecordedSiteWidgetAiReplyInput = {
 export interface RecordedSiteWidgetAiReplyRepository {
   persistRecordedSiteWidgetAiReply(
     input: PersistRecordedSiteWidgetAiReplyInput
-  ): Promise<RecordedLegacyS05PersistReplyResult>;
+  ): Promise<RecordedAiPersistReplyResult>;
+}
+
+export interface RecordedSiteWidgetAiGateRepository {
+  readRecordedSiteWidgetAiGate(input: {
+    leadId: string;
+    conversationId: string;
+  }): Promise<{
+    aiState: AiTurnAiState;
+    agentAllowedToReply: boolean;
+  }>;
 }
 
 export function isRecordedSiteWidgetAiReplyRepository(
@@ -35,5 +46,16 @@ export function isRecordedSiteWidgetAiReplyRepository(
     value !== null &&
     "persistRecordedSiteWidgetAiReply" in value &&
     typeof value.persistRecordedSiteWidgetAiReply === "function"
+  );
+}
+
+export function isRecordedSiteWidgetAiGateRepository(
+  value: unknown
+): value is RecordedSiteWidgetAiGateRepository {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "readRecordedSiteWidgetAiGate" in value &&
+    typeof value.readRecordedSiteWidgetAiGate === "function"
   );
 }

@@ -4,8 +4,22 @@ import {
   type ApprovedAiAssetManifest
 } from "./modules/ai/assets/approved-ai-assets.js";
 import type { AiRunRepository } from "./modules/ai/repositories/ai-run-repository.js";
-import { isRecordedSiteWidgetAiReplyRepository } from "./modules/ai/repositories/recorded-site-widget-ai-reply-repository.js";
+import {
+  isRecordedSiteWidgetAiGateRepository,
+  isRecordedSiteWidgetAiReplyRepository,
+  type RecordedSiteWidgetAiReplyRepository
+} from "./modules/ai/repositories/recorded-site-widget-ai-reply-repository.js";
+import {
+  MastraLiveV2DecisionGenerator,
+  type MastraLiveV2AgentPort
+} from "./modules/ai/adapters/mastra-live-v2-decision-generator.js";
+import {
+  parseLiveV2FactsSnapshot,
+  type LiveV2FactsSnapshot
+} from "./modules/ai/profiles/live-v2/live-v2-assets.js";
 import { RecordedLegacyS05TurnService } from "./modules/ai/services/recorded-legacy-s05-turn-service.js";
+import { BoundRecordedLegacyS05TurnService } from "./modules/ai/services/bound-recorded-legacy-s05-turn-service.js";
+import { RecordedLiveV2TurnService } from "./modules/ai/services/recorded-live-v2-turn-service.js";
 import { RecordedPublicWidgetAiTurnExecutor } from "./modules/ai/services/recorded-public-widget-ai-turn-executor.js";
 import { WidgetAiService, type WidgetAiProvider } from "./modules/ai/services/widget-ai-service.js";
 import { isSafeWidgetAiModelName } from "./modules/ai/widget-ai-model-name.js";
@@ -29,7 +43,7 @@ export type AppContextOptions = {
   telegramBot?: TelegramBotServiceOptions;
 };
 
-export type WidgetAiAssemblyOptions = {
+type DirectWidgetAiAssemblyOptions = {
   enabled: boolean;
   runtimeMode?: "direct_openai";
   provider?: WidgetAiProvider;
@@ -37,6 +51,21 @@ export type WidgetAiAssemblyOptions = {
   replyGenerator?: PublicWidgetAiReplyGenerator;
   runRepository?: AiRunRepository;
 };
+
+type MastraLocalFakeWidgetAiAssemblyOptions = {
+  enabled: boolean;
+  runtimeMode: "mastra_openai_api";
+  runRepository?: AiRunRepository;
+  localFake: {
+    agent: MastraLiveV2AgentPort;
+    modelName: string;
+    approvedFacts: LiveV2FactsSnapshot;
+  };
+};
+
+export type WidgetAiAssemblyOptions =
+  | DirectWidgetAiAssemblyOptions
+  | MastraLocalFakeWidgetAiAssemblyOptions;
 
 export function buildAppContext(options: AppContextOptions) {
   const approvedAiAssets = loadApprovedAiAssetManifest();
@@ -87,7 +116,7 @@ export type AppContext = ReturnType<typeof buildAppContext>;
 function buildWidgetAiReplyGenerator(
   options?: WidgetAiAssemblyOptions
 ): PublicWidgetAiReplyGenerator | undefined {
-  if (!options?.enabled) {
+  if (!options?.enabled || options.runtimeMode === "mastra_openai_api") {
     return undefined;
   }
 
@@ -111,13 +140,46 @@ function buildWidgetAiTurnExecutor(
   generator: PublicWidgetAiReplyGenerator | undefined,
   approvedAiAssets: ApprovedAiAssetManifest
 ) {
-  if (!options?.enabled || !generator || !isRecordedSiteWidgetAiReplyRepository(repository)) {
+  if (!options?.enabled || !isRecordedSiteWidgetAiReplyRepository(repository)) {
     return undefined;
   }
 
   const runRepository = options.runRepository ?? asAiRunRepository(repository);
 
   if (!runRepository) {
+    return undefined;
+  }
+
+  switch (options.runtimeMode) {
+    case undefined:
+    case "direct_openai":
+      return buildDirectWidgetAiTurnExecutor(
+        repository,
+        options,
+        generator,
+        runRepository,
+        approvedAiAssets
+      );
+    case "mastra_openai_api":
+      return buildMastraLocalFakeWidgetAiTurnExecutor(
+        repository,
+        options,
+        runRepository,
+        approvedAiAssets
+      );
+    default:
+      return assertNeverRuntime(options);
+  }
+}
+
+function buildDirectWidgetAiTurnExecutor(
+  repository: IntakeRepository & RecordedSiteWidgetAiReplyRepository,
+  options: DirectWidgetAiAssemblyOptions,
+  generator: PublicWidgetAiReplyGenerator | undefined,
+  runRepository: AiRunRepository,
+  approvedAiAssets: ApprovedAiAssetManifest
+) {
+  if (!generator) {
     return undefined;
   }
 
@@ -149,7 +211,64 @@ function buildWidgetAiTurnExecutor(
     }
   });
 
+  return new RecordedPublicWidgetAiTurnExecutor(
+    new BoundRecordedLegacyS05TurnService(turnService, generator),
+    repository
+  );
+}
+
+function buildMastraLocalFakeWidgetAiTurnExecutor(
+  repository: IntakeRepository & RecordedSiteWidgetAiReplyRepository,
+  options: MastraLocalFakeWidgetAiAssemblyOptions,
+  runRepository: AiRunRepository,
+  approvedAiAssets: ApprovedAiAssetManifest
+) {
+  if (!options.localFake) {
+    throw new Error("M2 Mastra runtime requires an explicit local fake boundary");
+  }
+
+  if (
+    !isRecordedSiteWidgetAiGateRepository(repository) ||
+    !isSafeWidgetAiModelName(options.localFake.modelName)
+  ) {
+    return undefined;
+  }
+
+  const liveAssets = approvedAiAssets.liveV2;
+  const approvedFacts = parseLiveV2FactsSnapshot(options.localFake.approvedFacts);
+  const generator = new MastraLiveV2DecisionGenerator(
+    options.localFake.agent,
+    "fake",
+    options.localFake.modelName
+  );
+  const turnService = new RecordedLiveV2TurnService({
+    repository: runRepository,
+    gateRepository: repository,
+    generator,
+    approvedFacts,
+    versions: {
+      policyVersion: liveAssets.policyVersion,
+      promptVersion: liveAssets.promptVersion,
+      toolVersion: liveAssets.toolVersion,
+      assetVersion: liveAssets.assetVersion,
+      toneVersion: liveAssets.toneVersion,
+      factsVersion: liveAssets.factsVersion,
+      disclosureVersion: liveAssets.disclosureVersion,
+      modelProfileVersion: liveAssets.modelProfileVersion,
+      runtimeVersion: `node.v${process.versions.node}`
+    },
+    model: {
+      modelProvider: "fake",
+      requestedModelName: options.localFake.modelName,
+      reasoningEffort: "none"
+    }
+  });
+
   return new RecordedPublicWidgetAiTurnExecutor(turnService, repository);
+}
+
+function assertNeverRuntime(value: never): never {
+  throw new Error(`Unsupported AI runtime mode: ${String(value)}`);
 }
 
 function asAiRunRepository(value: unknown): AiRunRepository | undefined {

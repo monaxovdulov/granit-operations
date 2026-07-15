@@ -186,6 +186,13 @@ export class PostgresAiRunRepository implements AiRunRepository {
         .orderBy(asc(aiQualityEvents.createdAt), asc(aiQualityEvents.id))
     ]);
     const usage = usageFromRow(row);
+    const cost = costFromRow(row);
+    const runtimeRunId =
+      row.runtimeRunId === null ? undefined : checkedSafeIdentifier(row.runtimeRunId, 200);
+
+    if (runtimeRunId !== undefined && row.runtimeMode !== "mastra_openai_api") {
+      throw new AiRunCompletionConflictError();
+    }
 
     return {
       ...runningRecordBase(row),
@@ -196,12 +203,14 @@ export class PostgresAiRunRepository implements AiRunRepository {
         ? { failureCode: enumValue(AI_RUN_FAILURE_CODES, row.failureCode) }
         : {}),
       validatorResult: enumValue(AI_RUN_VALIDATOR_RESULTS, row.profileValidatorResult),
+      ...(runtimeRunId ? { runtimeRunId } : {}),
       observedModelProvider: enumValue(
         AI_MODEL_PROVIDERS,
         requiredObservedModelProvider(row.observedModelProvider)
       ),
       ...(row.observedModelName ? { observedModelName: row.observedModelName } : {}),
       ...(usage ? { usage } : {}),
+      ...(cost ? cost : {}),
       sendGateResult: enumValue(AI_RUN_SEND_GATE_RESULTS, row.sendGateResult),
       ...(row.sendGateCheckedAt ? { sendGateCheckedAt: row.sendGateCheckedAt } : {}),
       completedAt: row.completedAt,
@@ -235,9 +244,12 @@ export async function completeAiRunInTransaction(
       status: input.completion.status,
       observedModelProvider: input.completion.observedModelProvider,
       observedModelName: input.completion.observedModelName ?? null,
+      runtimeRunId: input.completion.runtimeRunId ?? null,
       inputTokens: input.completion.usage?.inputTokens ?? null,
       outputTokens: input.completion.usage?.outputTokens ?? null,
       totalTokens: input.completion.usage?.totalTokens ?? null,
+      costEstimateMicrounits: input.completion.costEstimateMicrounits ?? null,
+      costRateVersion: input.completion.costRateVersion ?? null,
       sendGateResult: input.completion.sendGateResult,
       sendGateCheckedAt: input.completion.sendGateCheckedAt ?? null,
       outcomeReason: input.completion.outcomeReason,
@@ -384,8 +396,17 @@ function assertCompletionShape(
   outboundMessageId: string | undefined
 ): void {
   const replyBearing = isReplyBearingStatus(completion.status);
+  const successful = completion.status === "persisted" || completion.status === "handed_off";
+  const controlledNoReply =
+    completion.status === "fallback_unavailable" &&
+    completion.normalizedAction === "no_reply" &&
+    (completion.outcomeReason === "no_safe_answer" ||
+      completion.outcomeReason === "missing_approved_fact");
 
-  if (replyBearing !== Boolean(outboundMessageId)) {
+  if (
+    replyBearing !== Boolean(outboundMessageId) ||
+    (successful || controlledNoReply) === (completion.failureCode !== undefined)
+  ) {
     throw new AiRunCompletionConflictError();
   }
 
@@ -404,6 +425,23 @@ function assertCompletionShape(
   checkedOptionalCount(completion.usage?.inputTokens);
   checkedOptionalCount(completion.usage?.outputTokens);
   checkedOptionalCount(completion.usage?.totalTokens);
+  if (completion.runtimeRunId !== undefined) {
+    if (run.runtimeMode !== "mastra_openai_api") {
+      throw new AiRunCompletionConflictError();
+    }
+    checkedSafeIdentifier(completion.runtimeRunId, 200);
+  }
+
+  if (
+    (completion.costEstimateMicrounits === undefined) !==
+    (completion.costRateVersion === undefined)
+  ) {
+    throw new AiRunCompletionConflictError();
+  }
+  if (completion.costRateVersion !== undefined) {
+    checkedSafeIdentifier(completion.costRateVersion, 160);
+  }
+  checkedOptionalCount(completion.costEstimateMicrounits);
   if (
     completion.observedModelName !== undefined &&
     !/^[A-Za-z0-9._:/@+-]{1,120}$/.test(completion.observedModelName)
@@ -484,6 +522,25 @@ function usageFromRow(row: typeof aiRuns.$inferSelect) {
   return Object.keys(usage).length > 0 ? usage : undefined;
 }
 
+function costFromRow(
+  row: typeof aiRuns.$inferSelect
+): Pick<AiRunTerminalCompletion, "costEstimateMicrounits" | "costRateVersion"> | undefined {
+  if (
+    (row.costEstimateMicrounits === null) !== (row.costRateVersion === null)
+  ) {
+    throw new AiRunCompletionConflictError();
+  }
+
+  if (row.costEstimateMicrounits === null || row.costRateVersion === null) {
+    return undefined;
+  }
+
+  return {
+    costEstimateMicrounits: checkedNonNegativeInteger(row.costEstimateMicrounits),
+    costRateVersion: checkedSafeIdentifier(row.costRateVersion, 160)
+  };
+}
+
 function checkedOptionalCount(value: number | undefined): void {
   if (value !== undefined) {
     checkedNonNegativeInteger(value);
@@ -492,6 +549,18 @@ function checkedOptionalCount(value: number | undefined): void {
 
 function checkedNonNegativeInteger(value: number): number {
   if (!Number.isInteger(value) || value < 0 || value > POSTGRES_INTEGER_MAX) {
+    throw new AiRunCompletionConflictError();
+  }
+
+  return value;
+}
+
+function checkedSafeIdentifier(value: string, maxLength: number): string {
+  if (
+    value.length < 1 ||
+    value.length > maxLength ||
+    !/^[A-Za-z0-9._:/@+-]+$/.test(value)
+  ) {
     throw new AiRunCompletionConflictError();
   }
 

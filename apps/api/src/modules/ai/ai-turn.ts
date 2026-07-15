@@ -117,6 +117,20 @@ export type AiTurnInput = {
   };
 };
 
+export function aiTurnExecutionContextMatchesInput(
+  context: AiTurnExecutionContext,
+  input: AiTurnInput
+): boolean {
+  return (
+    context.channel === input.channel &&
+    context.public.conversationId === input.conversation.publicConversationId &&
+    context.public.inboundMessageId === input.inboundMessage.publicMessageId &&
+    context.turn.idempotencyKey === input.turn.idempotencyKey &&
+    context.turn.acceptedRequestFingerprint === input.turn.acceptedRequestFingerprint &&
+    context.turn.inputFingerprint === input.turn.inputFingerprint
+  );
+}
+
 export type AiReplyCandidateEvidence = {
   businessFacts?: Array<{
     kind: "price" | "business_fact";
