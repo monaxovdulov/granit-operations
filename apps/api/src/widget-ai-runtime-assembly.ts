@@ -2,6 +2,7 @@ import type { ApiConfig } from "./config.js";
 import type { WidgetAiAssemblyOptions } from "./app-context.js";
 import {
   createMastraOpenAiLiveV2DecisionGenerator,
+  type LiveV2RuntimeFailureCategory,
   type ObservedLiveV2DecisionGenerator,
   type RealMastraBoundaryConfig
 } from "./modules/ai/adapters/mastra-live-v2-decision-generator.js";
@@ -16,6 +17,7 @@ import { isSafeWidgetAiModelName } from "./modules/ai/widget-ai-model-name.js";
 type RuntimeAssemblyDependencies = {
   createMastraGenerator?: (input: {
     config: RealMastraBoundaryConfig;
+    onSanitizedFailure?: (category: LiveV2RuntimeFailureCategory) => void;
   }) => Promise<ObservedLiveV2DecisionGenerator>;
   selectLiveV2Assets?: () => Promise<SelectedLiveV2ApprovedAssets>;
 };
@@ -23,6 +25,7 @@ type RuntimeAssemblyDependencies = {
 export async function buildConfiguredWidgetAiAssembly(input: {
   config: ApiConfig;
   runRepository: AiRunRepository;
+  onSanitizedFailure?: (category: LiveV2RuntimeFailureCategory) => void;
   dependencies?: RuntimeAssemblyDependencies;
 }): Promise<WidgetAiAssemblyOptions> {
   const { config, runRepository } = input;
@@ -54,7 +57,12 @@ export async function buildConfiguredWidgetAiAssembly(input: {
     runtimeMode: config.widgetAi.runtimeMode,
     mastra: config.widgetAi.mastra
   };
-  const generator = await createGenerator({ config: boundaryConfig });
+  const generator = await createGenerator({
+    config: boundaryConfig,
+    ...(input.onSanitizedFailure
+      ? { onSanitizedFailure: input.onSanitizedFailure }
+      : {})
+  });
 
   return {
     enabled: config.widgetAi.enabled,

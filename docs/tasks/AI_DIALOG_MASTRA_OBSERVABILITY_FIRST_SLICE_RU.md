@@ -1,6 +1,6 @@
 # Task: AI-DIALOG-MASTRA-OBSERVABILITY-FIRST-SLICE - implementation plan первого staging-only Mastra + observability slice
 
-Status: blocked; G0/G1/W0/G1Q/P2/P3/G4/M1/M2/G5/G6 passed; first M3 Mastra call failed closed before trusted provider observation
+Status: blocked; G0/G1/W0/G1Q/P2/P3/G4/M1/M2/G5/G6 passed; first M3 Mastra call failed closed with provider exposure possible; a second call is not authorized
 Created: 2026-07-13
 Updated: 2026-07-15
 Repo: `granit-operations`
@@ -901,6 +901,13 @@ critical quality state and safe public fallback were recorded; no automatic retr
 fallback ran. M3 is not passed. Sanitized evidence and the next stop gate are recorded in
 `docs/release/evidence/AI_DIALOG_MASTRA_OBSERVABILITY_FIRST_SLICE_RU.md`.
 
+Guard classification: `provider_exposure_possible=true`. The failed 1648 ms model-generation span
+shows that the app entered the model boundary, while sanitized app-owned evidence does not prove a
+pre-provider/harness-only failure. The absence of observed provider/model is therefore not treated
+as proof of no provider exposure. A second live/provider call is blocked until new explicit owner
+approval. An allowlisted failure-category diagnostic is prepared for that future approved attempt;
+it retains no raw message, exception, response body or provider payload.
+
 Write sanitized proof to
 `docs/release/evidence/AI_DIALOG_MASTRA_OBSERVABILITY_FIRST_SLICE_RU.md`. Update this task's
 checks/evidence status only after the evidence exists.
@@ -1164,8 +1171,11 @@ operations boundary decision changes.
 
 - App-owned run/quality state, manager visibility, approved assets, retention, pinned Mastra
   packages and the disabled/local-fake adapter are implemented and evidenced through M2/G5.
+- The first and only G6-authorized call has been consumed. Because app-owned evidence classifies
+  it as `provider_exposure_possible=true`, even one additional synthetic live/provider call now
+  requires new explicit owner approval.
 - Full M3 semantic/tone closure remains blocked on separate authority for the 15-20-input
-  authenticated corpus; the current G6 follow-up permits exactly one synthetic staging call.
+  authenticated corpus.
 - Continued staging enablement and every production change remain unapproved.
 - All schema, AI behavior, environment, staging and production changes require owner review under
   `docs/AGENT_WORKFLOW.md`.
@@ -1198,11 +1208,11 @@ pending-render measurement and exact remote static hashes. This does not claim s
 backend/model latency. G1Q passed with exact owner acceptance and production snapshot at
 `1d737e0`; P2, P3, G4, M1 and M2 passed with focused, PostgreSQL, frozen-direct, full, typecheck,
 build and independent review checks without a model call. G6 exact-SHA owner approval passed on
-2026-07-15 for `ad40c27ad2cb97b5f2249f263a64073feaea1fcf`; the immediate backend action is the
-bounded M3 single-call staging smoke described above.
+2026-07-15 for `ad40c27ad2cb97b5f2249f263a64073feaea1fcf`; its bounded single-call authority has
+been consumed by the failed-closed M3 attempt described above.
 
-Mastra packages were admitted only after P1/P1Q/P2/P3 and G4. G6 now authorizes the bounded M3
-staging transition from its exact approved base. The first and, under the current instruction,
-only real call must go through Mastra with the server-only `OPENAI_API_KEY`. The frozen direct
+Mastra packages were admitted only after P1/P1Q/P2/P3 and G4. The first and only G6-authorized
+real call went through Mastra with the server-only `OPENAI_API_KEY`; any additional live/provider
+call requires new explicit owner approval. The frozen direct
 OpenAI path remains a manual emergency rollback without `live_v2` and without automatic
 cross-provider retries; production and continued staging enablement remain forbidden.

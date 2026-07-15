@@ -1,6 +1,6 @@
 # AI dialog Mastra M3 staging evidence
 
-Status: `blocked_after_first_call`
+Status: `blocked_after_possible_provider_exposure`
 
 Approved G6 base: `ad40c27ad2cb97b5f2249f263a64073feaea1fcf`
 
@@ -35,6 +35,20 @@ The failure was fail-closed:
 The current sanitized boundary does not retain provider exception text or a provider payload.
 Therefore this evidence cannot distinguish API-key entitlement, provider request rejection or a
 Mastra/provider-runtime failure. A second provider call was not made.
+
+Guard classification after the first attempt:
+
+```text
+provider_exposure_possible: true
+classification_basis: model_generation span entered and failed after 1648 ms
+pre_provider_failure_proven: false
+second_live_provider_call_authorized: false
+```
+
+The absence of a trusted observed provider/model is not proof that the provider was unexposed.
+The app entered the model-generation boundary and no sanitized evidence proves a harness-only or
+pre-provider failure. The attempt is therefore counted conservatively as possible provider
+exposure. No second live/provider call is permitted without new explicit owner approval.
 
 ## Secret and call boundary
 
@@ -120,8 +134,11 @@ npx vitest run <M3 evidence/provenance/adapter files> --maxWorkers=1 --minWorker
 npx vitest run <M3 boundary/evidence files> --maxWorkers=1 --minWorkers=1
 30/30 PASS
 
+npx vitest run apps/api/test/mastra-live-v2-decision-generator.test.ts --maxWorkers=1 --minWorkers=1
+9/9 PASS after adding the allowlisted failure classifier; no provider call
+
 npm run typecheck:api
-PASS (source/packages and test batches 1-40)
+PASS (source/packages and test batches 1-40), including the post-guard diagnostic change
 
 npm test -- --maxWorkers=1 --minWorkers=1
 PASS before the evidence-only harness correction
@@ -141,8 +158,10 @@ PASS
 The M3 success gate remains closed because no trusted observed provider/model, runtimeRunId,
 usage or validated reply exists. Continued staging AI and production remain disabled.
 
-Before any separately authorized second provider call, add a strictly allowlisted provider-error
-classification that can distinguish auth/entitlement/request/runtime categories without retaining
-message text, exception text, response bodies or payloads. Use a new one-shot synthetic identity
-and exact clean reviewed SHA. Do not reinterpret this failed attempt as model-quality or latency
-success evidence.
+A strictly allowlisted provider-error classification is now prepared for a future separately
+authorized attempt. It emits only one enum from
+`auth_or_entitlement|identity_mismatch|invalid_request|provider_rate_limited|provider_unavailable|provider_sdk_error|runtime_error|timeout_or_abort`
+and retains no message text, exception text, response body or payload. This diagnostic change does
+not retroactively classify the first attempt and does not authorize another call. Any future call
+requires a new one-shot synthetic identity, an exact clean reviewed SHA and explicit owner
+approval. Do not reinterpret this failed attempt as model-quality or latency success evidence.

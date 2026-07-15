@@ -16,6 +16,7 @@ import {
 import { buildApi } from "../app.js";
 import { loadConfig } from "../config.js";
 import { PostgresAiRunRepository } from "../modules/ai/repositories/postgres-ai-run-repository.js";
+import type { LiveV2RuntimeFailureCategory } from "../modules/ai/adapters/mastra-live-v2-decision-generator.js";
 import { PostgresIntakeRepository } from "../modules/conversations/repositories/postgres-intake-repository.js";
 import { buildConfiguredWidgetAiAssembly } from "../widget-ai-runtime-assembly.js";
 import {
@@ -31,6 +32,7 @@ const SHA_PATTERN = /^[a-f0-9]{40}$/;
 
 let client: ReturnType<typeof createOperationsDb>["client"] | undefined;
 let app: ReturnType<typeof buildApi> | undefined;
+let sanitizedFailureCategory: LiveV2RuntimeFailureCategory | undefined;
 
 try {
   assertExplicitApproval(process.env);
@@ -62,7 +64,13 @@ try {
     throw new Error("M3 smoke idempotency key was already consumed");
   }
 
-  const widgetAi = await buildConfiguredWidgetAiAssembly({ config, runRepository });
+  const widgetAi = await buildConfiguredWidgetAiAssembly({
+    config,
+    runRepository,
+    onSanitizedFailure(category) {
+      sanitizedFailureCategory = category;
+    }
+  });
   app = buildApi({ repository, widgetAi, logger: false });
   const response = await app.inject({
     method: "POST",
@@ -225,12 +233,19 @@ try {
       openai_api_key_present: Boolean(config.widgetAi.mastra.openAiApiKey),
       trace_export_enabled: config.widgetAi.mastra.traceExportEnabled,
       telemetry_disabled: config.widgetAi.mastra.telemetryDisabled,
-      auto_refresh_providers: config.widgetAi.mastra.autoRefreshProviders
+      auto_refresh_providers: config.widgetAi.mastra.autoRefreshProviders,
+      sanitized_failure_category: sanitizedFailureCategory ?? null
     })
   );
   process.exitCode = m3SmokeExitCode(smokeOk);
 } catch {
-  console.error(JSON.stringify({ ok: false, error: "m3_mastra_smoke_failed" }));
+  console.error(
+    JSON.stringify({
+      ok: false,
+      error: "m3_mastra_smoke_failed",
+      sanitized_failure_category: sanitizedFailureCategory ?? null
+    })
+  );
   process.exitCode = 1;
 } finally {
   await app?.close();

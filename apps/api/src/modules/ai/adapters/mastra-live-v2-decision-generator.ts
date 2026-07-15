@@ -17,6 +17,16 @@ export const MASTRA_LIVE_V2_PROVIDER_TIMEOUT_MS = 15_000;
 
 export type LiveV2RuntimeProvider = "openai" | "fake";
 
+export type LiveV2RuntimeFailureCategory =
+  | "auth_or_entitlement"
+  | "identity_mismatch"
+  | "invalid_request"
+  | "provider_rate_limited"
+  | "provider_unavailable"
+  | "provider_sdk_error"
+  | "runtime_error"
+  | "timeout_or_abort";
+
 export type LiveV2RuntimeUsage = {
   inputTokens?: number;
   outputTokens?: number;
@@ -105,7 +115,10 @@ export interface MastraLiveV2AgentPort {
 }
 
 export class MastraLiveV2GenerationError extends Error {
-  constructor(readonly observation?: RejectedLiveV2RuntimeObservation) {
+  constructor(
+    readonly observation?: RejectedLiveV2RuntimeObservation,
+    readonly failureCategory?: LiveV2RuntimeFailureCategory
+  ) {
     super("Mastra live_v2 generation failed");
     this.name = "MastraLiveV2GenerationError";
   }
@@ -136,7 +149,7 @@ export class MastraLiveV2DecisionGenerator implements ObservedLiveV2DecisionGene
         !isSafeWidgetAiModelName(result.providerModelName) ||
         result.providerModelName !== this.expectedModelName
       ) {
-        throw new MastraLiveV2GenerationError(rejectedObservation);
+        throw new MastraLiveV2GenerationError(rejectedObservation, "identity_mismatch");
       }
 
       const runtimeRunId = toSafeRuntimeRunId(result.runtimeRunId);
@@ -192,6 +205,7 @@ function toRejectedObservation(
 
 export async function createMastraOpenAiLiveV2DecisionGenerator(input: {
   config: RealMastraBoundaryConfig;
+  onSanitizedFailure?: (category: LiveV2RuntimeFailureCategory) => void;
 }): Promise<MastraLiveV2DecisionGenerator> {
   assertRealMastraBoundary(input.config, process.env);
   const mastraConfig = input.config.mastra;
@@ -217,21 +231,31 @@ export async function createMastraOpenAiLiveV2DecisionGenerator(input: {
       let finishProvider: string | undefined;
       let finishModelName: string | undefined;
       let finishRunId: string | undefined;
-      const result = await agent.generate(messages, {
-        ...options,
-        structuredOutput: {
-          ...options.structuredOutput,
-          logger: noopLogger
-        },
-        onFinish(event) {
-          finishProvider = event.model?.provider;
-          finishModelName = event.model?.modelId;
-          finishRunId = event.runId;
-        }
-      });
+      let result: Awaited<ReturnType<typeof agent.generate>>;
+
+      try {
+        result = await agent.generate(messages, {
+          ...options,
+          structuredOutput: {
+            ...options.structuredOutput,
+            logger: noopLogger
+          },
+          onFinish(event) {
+            finishProvider = event.model?.provider;
+            finishModelName = event.model?.modelId;
+            finishRunId = event.runId;
+          }
+        });
+      } catch (error) {
+        const category = classifyLiveV2RuntimeFailure(error);
+        reportSanitizedFailure(input.onSanitizedFailure, category);
+        throw new MastraLiveV2GenerationError(undefined, category);
+      }
 
       if (result.error) {
-        throw new MastraLiveV2GenerationError();
+        const category = classifyLiveV2RuntimeFailure(result.error);
+        reportSanitizedFailure(input.onSanitizedFailure, category);
+        throw new MastraLiveV2GenerationError(undefined, category);
       }
 
       return {
@@ -251,6 +275,74 @@ export function canonicalizePinnedMastraOpenAiProvider(
   provider: string | undefined
 ): "openai" | undefined {
   return provider === PINNED_MASTRA_OPENAI_RESPONSES_PROVIDER ? "openai" : undefined;
+}
+
+export function classifyLiveV2RuntimeFailure(
+  error: unknown
+): LiveV2RuntimeFailureCategory {
+  const status = findHttpStatus(error);
+
+  if (status === 400 || status === 422) return "invalid_request";
+  if (status === 401 || status === 403 || status === 404) {
+    return "auth_or_entitlement";
+  }
+  if (status === 408) return "timeout_or_abort";
+  if (status === 429) return "provider_rate_limited";
+  if (status !== undefined && status >= 500 && status <= 599) {
+    return "provider_unavailable";
+  }
+
+  const name = findErrorName(error);
+  if (name === "AbortError" || name === "TimeoutError") return "timeout_or_abort";
+  if (name === "APICallError") return "provider_sdk_error";
+
+  return "runtime_error";
+}
+
+function reportSanitizedFailure(
+  callback: ((category: LiveV2RuntimeFailureCategory) => void) | undefined,
+  category: LiveV2RuntimeFailureCategory
+): void {
+  try {
+    callback?.(category);
+  } catch {
+    // Diagnostic reporting cannot change the fail-closed runtime outcome.
+  }
+}
+
+function findHttpStatus(value: unknown, depth = 0): number | undefined {
+  if (!isRecord(value) || depth > 4) return undefined;
+
+  for (const key of ["status", "statusCode"]) {
+    const candidate = value[key];
+    if (
+      typeof candidate === "number" &&
+      Number.isInteger(candidate) &&
+      candidate >= 100 &&
+      candidate <= 599
+    ) {
+      return candidate;
+    }
+  }
+
+  for (const key of ["cause", "details", "error", "originalError"]) {
+    const nested = findHttpStatus(value[key], depth + 1);
+    if (nested !== undefined) return nested;
+  }
+
+  return undefined;
+}
+
+function findErrorName(value: unknown, depth = 0): string | undefined {
+  if (!isRecord(value) || depth > 4) return undefined;
+  if (typeof value.name === "string") return value.name;
+
+  for (const key of ["cause", "details", "error", "originalError"]) {
+    const nested = findErrorName(value[key], depth + 1);
+    if (nested) return nested;
+  }
+
+  return undefined;
 }
 
 function buildGenerateOptions(

@@ -7,6 +7,7 @@ import {
   MastraLiveV2DecisionGenerator,
   MastraLiveV2GenerationError,
   canonicalizePinnedMastraOpenAiProvider,
+  classifyLiveV2RuntimeFailure,
   createMastraOpenAiLiveV2DecisionGenerator,
   type MastraLiveV2AgentPort
 } from "../src/modules/ai/adapters/mastra-live-v2-decision-generator.js";
@@ -27,6 +28,26 @@ describe("M1 disabled Mastra live_v2 adapter", () => {
     expect(canonicalizePinnedMastraOpenAiProvider("openai")).toBeUndefined();
     expect(canonicalizePinnedMastraOpenAiProvider("openai.chat")).toBeUndefined();
     expect(canonicalizePinnedMastraOpenAiProvider(undefined)).toBeUndefined();
+  });
+
+  it("classifies provider failures using only allowlisted status and error names", () => {
+    expect(classifyLiveV2RuntimeFailure({ cause: { statusCode: 401 } })).toBe(
+      "auth_or_entitlement"
+    );
+    expect(classifyLiveV2RuntimeFailure({ status: 400 })).toBe("invalid_request");
+    expect(classifyLiveV2RuntimeFailure({ details: { status: 429 } })).toBe(
+      "provider_rate_limited"
+    );
+    expect(classifyLiveV2RuntimeFailure({ error: { status: 503 } })).toBe(
+      "provider_unavailable"
+    );
+    expect(classifyLiveV2RuntimeFailure({ name: "AbortError" })).toBe("timeout_or_abort");
+    expect(classifyLiveV2RuntimeFailure({ originalError: { name: "APICallError" } })).toBe(
+      "provider_sdk_error"
+    );
+    expect(
+      classifyLiveV2RuntimeFailure({ message: "RAW_PROVIDER_SECRET_MUST_NOT_BE_READ" })
+    ).toBe("runtime_error");
   });
 
   it("builds the exact bounded request and trusts only the injected agent observation", async () => {
@@ -186,6 +207,9 @@ describe("M1 disabled Mastra live_v2 adapter", () => {
     }
 
     expect(thrown).toBeInstanceOf(MastraLiveV2GenerationError);
+    expect((thrown as MastraLiveV2GenerationError).failureCategory).toBe(
+      "identity_mismatch"
+    );
     expect((thrown as MastraLiveV2GenerationError).observation).toEqual({
       observedModelProvider: "fake",
       observedModelName: "unexpected-safe-model",
