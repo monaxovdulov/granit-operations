@@ -19,7 +19,12 @@ const aiRunRepository = new PostgresAiRunRepository(db);
 const managerAuthRepository = new PostgresManagerAuthRepository(db);
 const widgetAi = await buildConfiguredWidgetAiAssembly({
   config,
-  runRepository: aiRunRepository
+  runRepository: aiRunRepository,
+  onSanitizedFailure(category) {
+    process.stderr.write(
+      `${JSON.stringify({ event: "widget_ai_runtime_failure", category })}\n`
+    );
+  }
 });
 const app = buildApi({
   repository,
