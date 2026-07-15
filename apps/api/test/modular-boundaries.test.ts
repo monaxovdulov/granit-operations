@@ -114,7 +114,7 @@ describe("ops-api modular monolith boundaries", () => {
       'APPROVED_G6_BASE_SHA = "ad40c27ad2cb97b5f2249f263a64073feaea1fcf"'
     );
     expect(harnessSource).toContain(
-      'SMOKE_IDEMPOTENCY_KEY = "m3-mastra-smoke-20260715-003"'
+      'SMOKE_IDEMPOTENCY_KEY = "m3-mastra-smoke-20260715-004"'
     );
     expect(harnessSource).toContain('M3_MASTRA_SMOKE_ONCE !== "approved"');
     expect(harnessSource).toContain("buildConfiguredWidgetAiAssembly");

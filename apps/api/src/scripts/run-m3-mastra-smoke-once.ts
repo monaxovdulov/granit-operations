@@ -27,7 +27,7 @@ import {
 import { assertM3SmokeGitProvenance } from "./m3-smoke-git-provenance.js";
 
 const APPROVED_G6_BASE_SHA = "ad40c27ad2cb97b5f2249f263a64073feaea1fcf";
-const SMOKE_IDEMPOTENCY_KEY = "m3-mastra-smoke-20260715-003";
+const SMOKE_IDEMPOTENCY_KEY = "m3-mastra-smoke-20260715-004";
 const SHA_PATTERN = /^[a-f0-9]{40}$/;
 
 let client: ReturnType<typeof createOperationsDb>["client"] | undefined;
@@ -79,11 +79,11 @@ try {
       schema_version: SITE_WIDGET_CONTRACT_VERSION,
       event_type: SITE_WIDGET_MESSAGE_EVENT_TYPE,
       idempotency_key: SMOKE_IDEMPOTENCY_KEY,
-      submitted_at: "2026-07-15T19:15:00.000Z",
+      submitted_at: "2026-07-15T19:30:00.000Z",
       source: {
         channel: "site_widget",
-        page_url: "https://botops.ru/m3-synthetic-smoke-003",
-        widget_instance_id: "m3-synthetic-smoke-003"
+        page_url: "https://botops.ru/m3-synthetic-smoke-004",
+        widget_instance_id: "m3-synthetic-smoke-004"
       },
       message: {
         role: "visitor",

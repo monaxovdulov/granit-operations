@@ -25,7 +25,7 @@ import {
 describe("M1 disabled Mastra live_v2 adapter", () => {
   it("canonicalizes only the pinned Mastra OpenAI Responses provider", () => {
     expect(canonicalizePinnedMastraOpenAiProvider("openai.responses")).toBe("openai");
-    expect(canonicalizePinnedMastraOpenAiProvider("openai")).toBeUndefined();
+    expect(canonicalizePinnedMastraOpenAiProvider("openai")).toBe("openai");
     expect(canonicalizePinnedMastraOpenAiProvider("openai.chat")).toBeUndefined();
     expect(canonicalizePinnedMastraOpenAiProvider(undefined)).toBeUndefined();
   });

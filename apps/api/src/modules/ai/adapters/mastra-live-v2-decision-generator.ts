@@ -71,7 +71,7 @@ export type RealMastraBoundaryConfig = {
   mastra: ApiConfig["widgetAi"]["mastra"];
 };
 
-const PINNED_MASTRA_OPENAI_RESPONSES_PROVIDER = "openai.responses" as const;
+const PINNED_MASTRA_OPENAI_RESPONSES_PROVIDERS = new Set(["openai", "openai.responses"]);
 
 type MastraLiveV2Message = {
   role: "user";
@@ -274,7 +274,9 @@ export async function createMastraOpenAiLiveV2DecisionGenerator(input: {
 export function canonicalizePinnedMastraOpenAiProvider(
   provider: string | undefined
 ): "openai" | undefined {
-  return provider === PINNED_MASTRA_OPENAI_RESPONSES_PROVIDER ? "openai" : undefined;
+  return provider && PINNED_MASTRA_OPENAI_RESPONSES_PROVIDERS.has(provider)
+    ? "openai"
+    : undefined;
 }
 
 export function classifyLiveV2RuntimeFailure(
