@@ -1,6 +1,6 @@
 # Task: AI-DIALOG-MASTRA-OBSERVABILITY-FIRST-SLICE - implementation plan первого staging-only Mastra + observability slice
 
-Status: blocked; G0/G1/W0/G1Q/P2/P3/G4/M1/M2/G5/G6 passed; first M3 Mastra call failed closed with provider exposure possible; a second call is not authorized
+Status: passed controlled M3 staging smoke; G0/G1/W0/G1Q/P2/P3/G4/M1/M2/G5/G6 and first working Mastra live_v2 widget call evidenced
 Created: 2026-07-13
 Updated: 2026-07-15
 Repo: `granit-operations`
@@ -893,26 +893,20 @@ and p50/p95 multi-call statistics remain the next M3 gate and require separate e
 to spend additional provider calls. The single-call smoke must not be reported as full semantic,
 tone, corpus or M3 completion evidence.
 
-M3 result on 2026-07-15: the one authorized attempt used exact implementation
-`08224e9c72de25ea0c1acd626c12080f7d5149f8` through the app-owned widget path and Mastra adapter.
-It failed closed as `generator_failed/runtime_failure` before a trusted observed provider/model,
-runtimeRunId, usage, validator or send gate existed. No outbound was written; manager-visible
-critical quality state and safe public fallback were recorded; no automatic retry or direct
-fallback ran. M3 is not passed. Sanitized evidence and the next stop gate are recorded in
-`docs/release/evidence/AI_DIALOG_MASTRA_OBSERVABILITY_FIRST_SLICE_RU.md`.
+M3 result on 2026-07-15: `passed` for the controlled staging smoke at exact implementation
+`9f52bfbe8cb77c3bb0a9e39f3d66882936c0f6e5`. The app-owned public widget path called
+`gpt-5.6-sol` through Mastra/Responses only with `medium`, `store:false` and zero retries.
+Configured and observed provider/model match; runtimeRunId and `1589/373/1962` token usage are
+recorded; the strict app validator passed, send gate allowed, reply/outbound persisted, all five
+spans passed, no quality event was created and manager review is not required. Sanitized total
+latency was 7480 ms, below the 15-second provider, 20-second server and 25-second browser budgets.
 
-Guard classification: `provider_exposure_possible=true`. The failed 1648 ms model-generation span
-shows that the app entered the model boundary, while sanitized app-owned evidence does not prove a
-pre-provider/harness-only failure. The absence of observed provider/model is therefore not treated
-as proof of no provider exposure. A second live/provider call is blocked until new explicit owner
-approval. An allowlisted failure-category diagnostic is prepared for that future approved attempt;
-it retains no raw message, exception, response body or provider payload.
-
-Post-guard local transport proof uses the exact Mastra factory with intercepted `fetch` and a
-synthetic 401. It confirms one OpenAI Responses request with `gpt-5.6-sol`, `medium`, `store:false`
-and zero retries, then emits only `auth_or_entitlement`. No network/provider call occurs. This
-rules out an incorrect provider route or chat-completions transport in the current candidate but
-does not retroactively classify or replace the failed live attempt.
+The initial failures remained fail-closed and were diagnosed without raw provider evidence. An
+offline exact-transport test exposed the Structured Outputs root-`anyOf` incompatibility; the
+provider-facing schema now has a root object while the stricter discriminated app validator stays
+authoritative. A second post-response failure exposed Mastra 1.51's router identity `openai`; only
+the proven `openai`/`openai.responses` identities are canonicalized and `openai.chat` remains
+rejected. No automatic retry, direct fallback, production enablement or raw model output occurred.
 
 Write sanitized proof to
 `docs/release/evidence/AI_DIALOG_MASTRA_OBSERVABILITY_FIRST_SLICE_RU.md`. Update this task's
@@ -1177,9 +1171,6 @@ operations boundary decision changes.
 
 - App-owned run/quality state, manager visibility, approved assets, retention, pinned Mastra
   packages and the disabled/local-fake adapter are implemented and evidenced through M2/G5.
-- The first and only G6-authorized call has been consumed. Because app-owned evidence classifies
-  it as `provider_exposure_possible=true`, even one additional synthetic live/provider call now
-  requires new explicit owner approval.
 - Full M3 semantic/tone closure remains blocked on separate authority for the 15-20-input
   authenticated corpus.
 - Continued staging enablement and every production change remain unapproved.
@@ -1214,11 +1205,11 @@ pending-render measurement and exact remote static hashes. This does not claim s
 backend/model latency. G1Q passed with exact owner acceptance and production snapshot at
 `1d737e0`; P2, P3, G4, M1 and M2 passed with focused, PostgreSQL, frozen-direct, full, typecheck,
 build and independent review checks without a model call. G6 exact-SHA owner approval passed on
-2026-07-15 for `ad40c27ad2cb97b5f2249f263a64073feaea1fcf`; its bounded single-call authority has
-been consumed by the failed-closed M3 attempt described above.
+2026-07-15 for `ad40c27ad2cb97b5f2249f263a64073feaea1fcf`; after the first fail-closed attempt the
+owner authorized a bounded `$5` continuation budget. The first successful result stopped further
+provider calls with the budget mostly unused.
 
-Mastra packages were admitted only after P1/P1Q/P2/P3 and G4. The first and only G6-authorized
-real call went through Mastra with the server-only `OPENAI_API_KEY`; any additional live/provider
-call requires new explicit owner approval. The frozen direct
+Mastra packages were admitted only after P1/P1Q/P2/P3 and G4. The working M3 call went through
+Mastra with the server-only `OPENAI_API_KEY`. The frozen direct
 OpenAI path remains a manual emergency rollback without `live_v2` and without automatic
 cross-provider retries; production and continued staging enablement remain forbidden.
