@@ -165,6 +165,10 @@ function loadMastraConfig(
     throw new Error("OPENAI_API_KEY is required for AI_RUNTIME_MODE=mastra_openai_api");
   }
 
+  if (env.OPENAI_BASE_URL !== undefined) {
+    throw new Error("OPENAI_BASE_URL is not allowed for AI_RUNTIME_MODE=mastra_openai_api");
+  }
+
   const model = env.MASTRA_OPENAI_MODEL ?? MASTRA_OPENAI_MODEL;
 
   if (model !== MASTRA_OPENAI_MODEL) {

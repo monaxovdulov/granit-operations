@@ -14,6 +14,8 @@ export const LIVE_V2_PROFILE = {
   promptVersion: LIVE_V2_PROMPT_VERSION,
   toneVersion: LIVE_V2_TONE_VERSION,
   factsVersion: LIVE_V2_FACTS_VERSION,
-  runtimeEnabled: false,
-  provider: null
+  runtimeEnabledByDefault: false,
+  runtimeMode: "mastra_openai_api",
+  deploymentTier: "staging",
+  provider: "openai"
 } as const;

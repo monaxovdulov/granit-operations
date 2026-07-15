@@ -80,12 +80,13 @@ describe("ops-api modular monolith boundaries", () => {
     }
   });
 
-  it("keeps the M2 local/fake Mastra adapter isolated from business mutation and transport layers", () => {
+  it("keeps the M3 staging Mastra adapter isolated from business mutation and transport layers", () => {
     const adapterSource = readSource(
       "modules/ai/adapters/mastra-live-v2-decision-generator.ts"
     );
     const appContextSource = readSource("app-context.ts");
     const indexSource = readSource("index.ts");
+    const runtimeAssemblySource = readSource("widget-ai-runtime-assembly.ts");
 
     expect(adapterSource).toContain('import("@mastra/core/agent")');
     expect(adapterSource).toContain('import("@mastra/core/logger")');
@@ -99,7 +100,29 @@ describe("ops-api modular monolith boundaries", () => {
     expect(appContextSource).toContain('"fake"');
     expect(appContextSource).not.toContain("createMastraOpenAiLiveV2DecisionGenerator");
     expect(indexSource).not.toContain("createMastraOpenAiLiveV2DecisionGenerator");
-    expect(indexSource).toContain("disabled until exact-SHA G6 owner approval");
+    expect(indexSource).toContain("buildConfiguredWidgetAiAssembly");
+    expect(indexSource).not.toContain("OpenAiWidgetAssistantProvider");
+    expect(runtimeAssemblySource).toContain("createMastraOpenAiLiveV2DecisionGenerator");
+    expect(runtimeAssemblySource).toContain("selectLiveV2ApprovedAssets");
+    expect(runtimeAssemblySource).toContain('runtimeMode === "direct_openai"');
+  });
+
+  it("keeps the M3 one-call harness explicit, idempotent and sanitized", () => {
+    const harnessSource = readSource("scripts/run-m3-mastra-smoke-once.ts");
+
+    expect(harnessSource).toContain(
+      'APPROVED_G6_BASE_SHA = "ad40c27ad2cb97b5f2249f263a64073feaea1fcf"'
+    );
+    expect(harnessSource).toContain(
+      'SMOKE_IDEMPOTENCY_KEY = "m3-mastra-smoke-20260715-001"'
+    );
+    expect(harnessSource).toContain('M3_MASTRA_SMOKE_ONCE !== "approved"');
+    expect(harnessSource).toContain("buildConfiguredWidgetAiAssembly");
+    expect(harnessSource).toContain("app.inject");
+    expect(harnessSource).toContain("logger: false");
+    expect(harnessSource).toContain("openai_api_key_present");
+    expect(harnessSource).not.toContain("OpenAiWidgetAssistantProvider");
+    expect(harnessSource).not.toMatch(/console\.(?:log|error)\((?:response|publicResult|run)\)/);
   });
 
   it("keeps conversation repository contracts split by responsibility", () => {

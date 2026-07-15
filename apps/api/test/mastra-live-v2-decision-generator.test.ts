@@ -3,8 +3,10 @@ import { describe, expect, it, vi } from "vitest";
 import { loadConfig } from "../src/config.js";
 import {
   MASTRA_LIVE_V2_MAX_OUTPUT_TOKENS,
+  MASTRA_LIVE_V2_PROVIDER_TIMEOUT_MS,
   MastraLiveV2DecisionGenerator,
   MastraLiveV2GenerationError,
+  canonicalizePinnedMastraOpenAiProvider,
   createMastraOpenAiLiveV2DecisionGenerator,
   type MastraLiveV2AgentPort
 } from "../src/modules/ai/adapters/mastra-live-v2-decision-generator.js";
@@ -20,6 +22,13 @@ import {
 } from "./fixtures/live-v2-synthetic.v1.js";
 
 describe("M1 disabled Mastra live_v2 adapter", () => {
+  it("canonicalizes only the pinned Mastra OpenAI Responses provider", () => {
+    expect(canonicalizePinnedMastraOpenAiProvider("openai.responses")).toBe("openai");
+    expect(canonicalizePinnedMastraOpenAiProvider("openai")).toBeUndefined();
+    expect(canonicalizePinnedMastraOpenAiProvider("openai.chat")).toBeUndefined();
+    expect(canonicalizePinnedMastraOpenAiProvider(undefined)).toBeUndefined();
+  });
+
   it("builds the exact bounded request and trusts only the injected agent observation", async () => {
     const candidate = {
       ...answerCandidate(),
@@ -90,6 +99,9 @@ describe("M1 disabled Mastra live_v2 adapter", () => {
       },
       structuredOutput: { schema: liveV2CandidateSchema }
     });
+    expect(options.abortSignal).toBeInstanceOf(AbortSignal);
+    expect(options.abortSignal.aborted).toBe(false);
+    expect(MASTRA_LIVE_V2_PROVIDER_TIMEOUT_MS).toBe(15_000);
     expect(messages).toHaveLength(1);
     const serializedModelInput = messages[0]!.content;
     expect(serializedModelInput).toContain('"decisionProfile":"live_v2"');
@@ -236,7 +248,7 @@ describe("M1 disabled Mastra live_v2 adapter", () => {
     try {
       await expect(
         createMastraOpenAiLiveV2DecisionGenerator({
-          config: config.widgetAi.mastra
+          config: realBoundaryConfig(config)
         })
       ).rejects.toThrow("provider boundary is not safely configured");
       expect(fetchSpy).not.toHaveBeenCalled();
@@ -273,7 +285,7 @@ describe("M1 disabled Mastra live_v2 adapter", () => {
 
     try {
       const generator = await createMastraOpenAiLiveV2DecisionGenerator({
-        config: config.widgetAi.mastra
+        config: realBoundaryConfig(config)
       });
 
       expect(generator).toBeInstanceOf(MastraLiveV2DecisionGenerator);
@@ -282,6 +294,33 @@ describe("M1 disabled Mastra live_v2 adapter", () => {
       for (const [name, value] of savedEnv) {
         restoreEnv(name, value);
       }
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("rejects a direct or non-staging boundary before dynamic import or fetch", async () => {
+    const config = loadConfig({
+      DATABASE_URL: "postgres://m3.invalid/granit",
+      AI_RUNTIME_MODE: "direct_openai",
+      DEPLOYMENT_TIER: "production"
+    });
+    const savedTelemetry = process.env.MASTRA_TELEMETRY_DISABLED;
+    const savedAutoRefresh = process.env.MASTRA_AUTO_REFRESH_PROVIDERS;
+    process.env.MASTRA_TELEMETRY_DISABLED = "true";
+    process.env.MASTRA_AUTO_REFRESH_PROVIDERS = "false";
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+
+    try {
+      await expect(
+        createMastraOpenAiLiveV2DecisionGenerator({
+          config: realBoundaryConfig(config)
+        })
+      ).rejects.toThrow("provider boundary is not safely configured");
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      restoreEnv("MASTRA_TELEMETRY_DISABLED", savedTelemetry);
+      restoreEnv("MASTRA_AUTO_REFRESH_PROVIDERS", savedAutoRefresh);
       vi.unstubAllGlobals();
     }
   });
@@ -309,4 +348,12 @@ function restoreEnv(name: string, value: string | undefined): void {
   } else {
     process.env[name] = value;
   }
+}
+
+function realBoundaryConfig(config: ReturnType<typeof loadConfig>) {
+  return {
+    deploymentTier: config.deploymentTier,
+    runtimeMode: config.widgetAi.runtimeMode,
+    mastra: config.widgetAi.mastra
+  };
 }

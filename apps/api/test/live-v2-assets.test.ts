@@ -308,8 +308,10 @@ describe("live_v2 versioned assets", () => {
     expect(LIVE_V2_PROFILE).toMatchObject({
       id: "live_v2",
       candidateVersion: "granit_live_v2_candidate.v1",
-      runtimeEnabled: false,
-      provider: null
+      runtimeEnabledByDefault: false,
+      runtimeMode: "mastra_openai_api",
+      deploymentTier: "staging",
+      provider: "openai"
     });
   });
 

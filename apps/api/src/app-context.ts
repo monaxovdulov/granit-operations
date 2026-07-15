@@ -11,8 +11,13 @@ import {
 } from "./modules/ai/repositories/recorded-site-widget-ai-reply-repository.js";
 import {
   MastraLiveV2DecisionGenerator,
-  type MastraLiveV2AgentPort
+  type MastraLiveV2AgentPort,
+  type ObservedLiveV2DecisionGenerator
 } from "./modules/ai/adapters/mastra-live-v2-decision-generator.js";
+import {
+  MASTRA_OPENAI_MODEL,
+  MASTRA_OPENAI_REASONING_EFFORT
+} from "./config.js";
 import {
   parseLiveV2FactsSnapshot,
   type LiveV2FactsSnapshot
@@ -63,9 +68,21 @@ type MastraLocalFakeWidgetAiAssemblyOptions = {
   };
 };
 
+type MastraStagingOpenAiWidgetAiAssemblyOptions = {
+  enabled: boolean;
+  runtimeMode: "mastra_openai_api";
+  runRepository?: AiRunRepository;
+  stagingOpenAi: {
+    generator: ObservedLiveV2DecisionGenerator;
+    modelName: typeof MASTRA_OPENAI_MODEL;
+    approvedFacts: LiveV2FactsSnapshot;
+  };
+};
+
 export type WidgetAiAssemblyOptions =
   | DirectWidgetAiAssemblyOptions
-  | MastraLocalFakeWidgetAiAssemblyOptions;
+  | MastraLocalFakeWidgetAiAssemblyOptions
+  | MastraStagingOpenAiWidgetAiAssemblyOptions;
 
 export function buildAppContext(options: AppContextOptions) {
   const approvedAiAssets = loadApprovedAiAssetManifest();
@@ -147,6 +164,12 @@ function buildWidgetAiTurnExecutor(
   const runRepository = options.runRepository ?? asAiRunRepository(repository);
 
   if (!runRepository) {
+    if (
+      options.runtimeMode === "mastra_openai_api" &&
+      "stagingOpenAi" in options
+    ) {
+      throw new Error("M3 staging Mastra runtime requires an app-owned run repository");
+    }
     return undefined;
   }
 
@@ -161,7 +184,7 @@ function buildWidgetAiTurnExecutor(
         approvedAiAssets
       );
     case "mastra_openai_api":
-      return buildMastraLocalFakeWidgetAiTurnExecutor(
+      return buildMastraLiveV2WidgetAiTurnExecutor(
         repository,
         options,
         runRepository,
@@ -217,34 +240,80 @@ function buildDirectWidgetAiTurnExecutor(
   );
 }
 
-function buildMastraLocalFakeWidgetAiTurnExecutor(
+function buildMastraLiveV2WidgetAiTurnExecutor(
   repository: IntakeRepository & RecordedSiteWidgetAiReplyRepository,
-  options: MastraLocalFakeWidgetAiAssemblyOptions,
+  options:
+    | MastraLocalFakeWidgetAiAssemblyOptions
+    | MastraStagingOpenAiWidgetAiAssemblyOptions,
   runRepository: AiRunRepository,
   approvedAiAssets: ApprovedAiAssetManifest
 ) {
-  if (!options.localFake) {
-    throw new Error("M2 Mastra runtime requires an explicit local fake boundary");
-  }
-
-  if (
-    !isRecordedSiteWidgetAiGateRepository(repository) ||
-    !isSafeWidgetAiModelName(options.localFake.modelName)
-  ) {
+  if (!isRecordedSiteWidgetAiGateRepository(repository)) {
+    if ("stagingOpenAi" in options) {
+      throw new Error("M3 staging Mastra runtime requires an app-owned send gate repository");
+    }
     return undefined;
   }
 
   const liveAssets = approvedAiAssets.liveV2;
-  const approvedFacts = parseLiveV2FactsSnapshot(options.localFake.approvedFacts);
-  const generator = new MastraLiveV2DecisionGenerator(
-    options.localFake.agent,
-    "fake",
-    options.localFake.modelName
-  );
+  const hasLocalFake = "localFake" in options && options.localFake !== undefined;
+  const hasStagingOpenAi =
+    "stagingOpenAi" in options && options.stagingOpenAi !== undefined;
+
+  if (hasLocalFake === hasStagingOpenAi) {
+    throw new Error("Mastra runtime requires exactly one trusted runtime boundary");
+  }
+
+  let boundary: {
+    generator: ObservedLiveV2DecisionGenerator;
+    modelProvider: "fake" | "openai";
+    modelName: string;
+    reasoningEffort: "none" | typeof MASTRA_OPENAI_REASONING_EFFORT;
+    approvedFacts: LiveV2FactsSnapshot;
+  };
+
+  if (hasLocalFake) {
+    const localFake = (options as MastraLocalFakeWidgetAiAssemblyOptions).localFake;
+    boundary = {
+      generator: new MastraLiveV2DecisionGenerator(
+        localFake.agent,
+        "fake",
+        localFake.modelName
+      ),
+      modelProvider: "fake",
+      modelName: localFake.modelName,
+      reasoningEffort: "none",
+      approvedFacts: localFake.approvedFacts
+    };
+  } else {
+    const stagingOpenAi = (
+      options as MastraStagingOpenAiWidgetAiAssemblyOptions
+    ).stagingOpenAi;
+    boundary = {
+      generator: stagingOpenAi.generator,
+      modelProvider: "openai",
+      modelName: stagingOpenAi.modelName,
+      reasoningEffort: MASTRA_OPENAI_REASONING_EFFORT,
+      approvedFacts: stagingOpenAi.approvedFacts
+    };
+  }
+
+  if (
+    hasStagingOpenAi &&
+    boundary.modelName !== MASTRA_OPENAI_MODEL
+  ) {
+    throw new Error(`M3 staging Mastra model must be ${MASTRA_OPENAI_MODEL}`);
+  }
+
+  if (!isSafeWidgetAiModelName(boundary.modelName)) {
+    return undefined;
+  }
+
+  const approvedFacts = parseLiveV2FactsSnapshot(boundary.approvedFacts);
   const turnService = new RecordedLiveV2TurnService({
     repository: runRepository,
     gateRepository: repository,
-    generator,
+    generator: boundary.generator,
     approvedFacts,
     versions: {
       policyVersion: liveAssets.policyVersion,
@@ -258,9 +327,9 @@ function buildMastraLocalFakeWidgetAiTurnExecutor(
       runtimeVersion: `node.v${process.versions.node}`
     },
     model: {
-      modelProvider: "fake",
-      requestedModelName: options.localFake.modelName,
-      reasoningEffort: "none"
+      modelProvider: boundary.modelProvider,
+      requestedModelName: boundary.modelName,
+      reasoningEffort: boundary.reasoningEffort
     }
   });
 

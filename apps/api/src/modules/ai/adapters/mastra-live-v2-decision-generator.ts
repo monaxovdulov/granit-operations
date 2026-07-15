@@ -3,7 +3,9 @@ import type { AgentExecutionOptionsBase } from "@mastra/core/agent";
 import {
   MASTRA_OPENAI_MODEL,
   MASTRA_OPENAI_REASONING_EFFORT,
-  type ApiConfig
+  type AiRuntimeMode,
+  type ApiConfig,
+  type DeploymentTier
 } from "../../../config.js";
 import type { LiveV2GeneratorInput } from "../profiles/live-v2/live-v2-orchestrator.js";
 import { liveV2CandidateSchema } from "../profiles/live-v2/live-v2-validator.js";
@@ -11,6 +13,7 @@ import { isSafeWidgetAiModelName } from "../widget-ai-model-name.js";
 
 export const MASTRA_LIVE_V2_MAX_INPUT_CHARACTERS = 64_000;
 export const MASTRA_LIVE_V2_MAX_OUTPUT_TOKENS = 4_000;
+export const MASTRA_LIVE_V2_PROVIDER_TIMEOUT_MS = 15_000;
 
 export type LiveV2RuntimeProvider = "openai" | "fake";
 
@@ -52,6 +55,14 @@ export interface ObservedLiveV2DecisionGenerator {
   ): Promise<LiveV2RuntimeGeneration>;
 }
 
+export type RealMastraBoundaryConfig = {
+  deploymentTier: DeploymentTier;
+  runtimeMode: AiRuntimeMode;
+  mastra: ApiConfig["widgetAi"]["mastra"];
+};
+
+const PINNED_MASTRA_OPENAI_RESPONSES_PROVIDER = "openai.responses" as const;
+
 type MastraLiveV2Message = {
   role: "user";
   content: string;
@@ -59,6 +70,7 @@ type MastraLiveV2Message = {
 
 export type MastraLiveV2GenerateOptions = AgentExecutionOptionsBase<unknown> & {
   runId: string;
+  abortSignal: AbortSignal;
   maxSteps: 1;
   maxProcessorRetries: 0;
   modelSettings: {
@@ -179,9 +191,10 @@ function toRejectedObservation(
 }
 
 export async function createMastraOpenAiLiveV2DecisionGenerator(input: {
-  config: ApiConfig["widgetAi"]["mastra"];
+  config: RealMastraBoundaryConfig;
 }): Promise<MastraLiveV2DecisionGenerator> {
   assertRealMastraBoundary(input.config, process.env);
+  const mastraConfig = input.config.mastra;
 
   const [{ Agent }, { noopLogger }] = await Promise.all([
     import("@mastra/core/agent"),
@@ -194,7 +207,7 @@ export async function createMastraOpenAiLiveV2DecisionGenerator(input: {
       "Use only the per-run app-owned instructions and return the requested structured candidate.",
     model: {
       id: `openai/${MASTRA_OPENAI_MODEL}`,
-      apiKey: input.config.openAiApiKey
+      apiKey: mastraConfig.openAiApiKey
     },
     maxRetries: 0
   });
@@ -223,7 +236,7 @@ export async function createMastraOpenAiLiveV2DecisionGenerator(input: {
 
       return {
         candidate: result.object,
-        modelProvider: finishProvider,
+        modelProvider: canonicalizePinnedMastraOpenAiProvider(finishProvider),
         providerModelName: result.response.modelId ?? finishModelName,
         runtimeRunId: result.runId ?? finishRunId,
         usage: result.totalUsage
@@ -231,7 +244,13 @@ export async function createMastraOpenAiLiveV2DecisionGenerator(input: {
     }
   };
 
-  return new MastraLiveV2DecisionGenerator(port, "openai", input.config.model);
+  return new MastraLiveV2DecisionGenerator(port, "openai", mastraConfig.model);
+}
+
+export function canonicalizePinnedMastraOpenAiProvider(
+  provider: string | undefined
+): "openai" | undefined {
+  return provider === PINNED_MASTRA_OPENAI_RESPONSES_PROVIDER ? "openai" : undefined;
 }
 
 function buildGenerateOptions(
@@ -244,6 +263,7 @@ function buildGenerateOptions(
 
   return {
     runId: invocation.appTraceId,
+    abortSignal: AbortSignal.timeout(MASTRA_LIVE_V2_PROVIDER_TIMEOUT_MS),
     instructions: input.assets.prompt.instructions.join("\n"),
     maxSteps: 1,
     maxProcessorRetries: 0,
@@ -280,18 +300,26 @@ function serializeModelInput(input: LiveV2GeneratorInput): string {
 }
 
 function assertRealMastraBoundary(
-  config: ApiConfig["widgetAi"]["mastra"],
+  config: RealMastraBoundaryConfig,
   env: NodeJS.ProcessEnv
-): asserts config is ApiConfig["widgetAi"]["mastra"] & { openAiApiKey: string } {
+): asserts config is RealMastraBoundaryConfig & {
+  runtimeMode: "mastra_openai_api";
+  mastra: ApiConfig["widgetAi"]["mastra"] & { openAiApiKey: string };
+} {
+  const mastra = config.mastra;
+
   if (
-    !config.openAiApiKey ||
-    config.model !== MASTRA_OPENAI_MODEL ||
-    config.reasoningEffort !== MASTRA_OPENAI_REASONING_EFFORT ||
-    config.traceExportEnabled !== false ||
-    config.telemetryDisabled !== true ||
-    config.autoRefreshProviders !== false ||
+    config.deploymentTier !== "staging" ||
+    config.runtimeMode !== "mastra_openai_api" ||
+    !mastra.openAiApiKey ||
+    mastra.model !== MASTRA_OPENAI_MODEL ||
+    mastra.reasoningEffort !== MASTRA_OPENAI_REASONING_EFFORT ||
+    mastra.traceExportEnabled !== false ||
+    mastra.telemetryDisabled !== true ||
+    mastra.autoRefreshProviders !== false ||
     env.MASTRA_TELEMETRY_DISABLED !== "true" ||
     env.MASTRA_AUTO_REFRESH_PROVIDERS !== "false" ||
+    env.OPENAI_BASE_URL !== undefined ||
     env.MASTRA_LICENSE_KEY !== undefined ||
     env.MASTRA_EE_LICENSE !== undefined
   ) {

@@ -500,7 +500,7 @@ describe("M2 app-owned live_v2 local/fake runtime", () => {
           provider: { providerKind: "openai", generateReply: directGenerate }
         } as never
       })
-    ).toThrow("requires an explicit local fake boundary");
+    ).toThrow("requires exactly one trusted runtime boundary");
 
     expect(directGenerate).not.toHaveBeenCalled();
     expect(repository.aiRunCount).toBe(0);
