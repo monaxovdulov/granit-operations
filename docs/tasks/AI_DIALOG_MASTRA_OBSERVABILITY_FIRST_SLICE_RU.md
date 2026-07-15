@@ -821,6 +821,13 @@ known low advisory with its mandatory G6 re-check are recorded in
 `docs/release/evidence/AI_DIALOG_MASTRA_G4_RU.md`. This result authorizes only M1 disabled and M2
 local/fake; it does not authorize staging or a provider/model call.
 
+M1 result on 2026-07-15: `passed` at implementation
+`de45913cd269c939f819e44dfb5aa774cab97231`. The guarded dynamic adapter, exact request profile,
+strict config, explicit telemetry/provider-refresh/license opt-outs, noop raw-error boundary,
+unchanged route inventory, focused/full/build results and independent no-P0/P1 re-review are
+recorded in `docs/release/evidence/AI_DIALOG_MASTRA_M1_RU.md`. The API runtime still rejects
+Mastra before assembly, so this result makes no provider call and enables no traffic.
+
 ### Slice M2 - connect app-owned observability and prove contract parity locally
 
 Work:
