@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
   "repo": "granit-operations",
-  "updated_at": "2026-07-15T00:07:25Z",
-  "git_head": "fa10c7c",
+  "updated_at": "2026-07-15T00:09:00Z",
+  "git_head": "c08128e",
   "mode": "implementation",
-  "state": "p2_implementation_verified",
+  "state": "p2_passed_p3_next",
   "dirty_worktree": {
-    "status": "intentional_p2_implementation_ready_to_commit",
-    "summary": "P2 schema, recorder, atomicity, replay and fail-closed provider truth are implemented and verified; exact-SHA evidence is next"
+    "status": "intentional_p2_evidence_docs_dirty",
+    "summary": "P2 implementation is committed and exact-SHA evidence is ready to commit; P3 is next"
   },
   "context": {
     "last_scan_at": "2026-07-15T00:07:25Z",
@@ -40,5 +40,5 @@
       "reason": "no dedicated lint script in root package.json"
     }
   },
-  "next_action": "Commit the verified P2 implementation, pin exact SHA and migration digests in release evidence, push, then implement P3; do not add Mastra or call a model yet."
+  "next_action": "Commit and push exact P2 evidence, then implement P3 manager visibility, versioned assets, centralized sanitizer and bounded retention; do not add Mastra or call a model yet."
 }

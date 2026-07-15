@@ -1,6 +1,6 @@
 # Task: AI-DIALOG-MASTRA-OBSERVABILITY-FIRST-SLICE - implementation plan первого staging-only Mastra + observability slice
 
-Status: in_progress; G0/G1/W0/G1Q passed; P2 next
+Status: in_progress; G0/G1/W0/G1Q/P2 passed; P3 next
 Created: 2026-07-13
 Updated: 2026-07-14
 Repo: `granit-operations`
@@ -187,7 +187,7 @@ implementation status; completed work after that baseline is recorded immediatel
 | G1/P1 | `passed` | App-owned neutral turn boundary passed locally at `84e61de`; evidence is in `docs/release/evidence/AI_DIALOG_APP_TURN_BOUNDARY_P1_RU.md`. |
 | W0 consumer + preview integration | `passed` | Source `business-ai-web-widget@2982de06e6f767af549e9f59aa5bf2fc042da51e` passed CI [29358217137](https://github.com/monaxovdulov/business-ai-web-widget/actions/runs/29358217137), 81/81 local unit tests, package verification and 24/24 one-worker Playwright tests. Content-addressed landing integration `151062cb6d19c12a25edb6a8d226bea8d96c8d83` deployed through [run 29358660849](https://github.com/monaxovdulov/landing-granit-static/actions/runs/29358660849). Hardened loopback browser smoke measured pending at 15.0 ms; remote static bytes matched exact loader/ESM hashes. Evidence: `docs/release/evidence/AI_DIALOG_W0_WIDGET_UX_INTEGRATION_RU.md`. This is local UI/static preview proof, not staging backend/model latency. |
 | P1Q/G1Q | `passed` | Provider-neutral core passed at `78c9947`; the exact 15-row owner-accepted snapshot and full-object parity tests passed at `1d737e0`. Evidence: `docs/release/evidence/AI_DIALOG_LIVE_V2_FACTS_G1Q_RU.md`. Runtime remains disabled and no model call occurred. |
-| P2 | `not_started; unblocked` | Next slice: minimum app-owned run/span/quality persistence, then P3 -> M1 disabled -> M2 local/fake -> G6 -> M3 staging. |
+| P2 | `passed` | App-owned run/span/quality persistence, configured/observed provider truth, atomic outbound linkage, fail-closed replay and real PostgreSQL fresh/upgrade evidence passed at `c08128e6bdf3e1b8f859e6349b4d6fb626de1287`. Evidence: `docs/release/evidence/AI_DIALOG_OBSERVABILITY_P2_RU.md`. |
 
 Conclusion for the planning baseline: Stage A and the app-owned send gate were real reusable
 seams. Since then P1 and G1Q have passed locally. App-owned run/trace state, manager-visible
@@ -688,7 +688,8 @@ accepted all 15 source-audited rows at exact source commit
 `23f2ee8c39ee2af30ca79cf9f2e5c4dd0229bf2a`. Matching `facts.v1.ts`, full-object parity tests and
 post-snapshot checks passed at implementation commit `1d737e0`. Evidence:
 `docs/release/evidence/AI_DIALOG_LIVE_V2_FACTS_G1Q_RU.md`. No model call, Mastra dependency,
-runtime switch or deploy occurred. P2 is unblocked and next.
+runtime switch or deploy occurred. At that checkpoint P2 became unblocked; P2 has since passed at
+the exact SHA recorded below, and P3 is next.
 
 ### Slice P2 - add minimum app-owned run, span and quality persistence
 
@@ -720,6 +721,12 @@ Work:
 Exit: `direct_openai` writes the minimum complete app-owned evidence for every tested outcome
 before any Mastra dependency is added. This proves the recorder independently; it does not enable
 `live_v2` on the frozen direct profile.
+
+P2 result on 2026-07-15: `passed` at exact implementation SHA
+`c08128e6bdf3e1b8f859e6349b4d6fb626de1287`. Fresh and upgrade PostgreSQL proofs, atomic
+rollback/collision/raw canaries, configured/observed provider truth, replay behavior and zero-live
+call evidence are recorded in `docs/release/evidence/AI_DIALOG_OBSERVABILITY_P2_RU.md`. P3 is next;
+no Mastra dependency, runtime switch, staging mutation or provider call occurred.
 
 ### Slice P3 - manager quality visibility, approved assets, redaction and retention
 
@@ -1138,7 +1145,7 @@ at source `2982de06...` and deployed landing commit `151062cb...`, including a 1
 pending-render measurement and exact remote static hashes. This does not claim staging
 backend/model latency. G1Q passed with exact owner acceptance and production snapshot at
 `1d737e0`; focused, frozen-direct, full, typecheck and build checks passed without a model call.
-The immediate backend action is P2, then P3, M1 disabled, M2 local/fake, G6 and M3 staging.
+The immediate backend action is P3, then M1 disabled, M2 local/fake, G6 and M3 staging.
 
 Mastra packages remain forbidden until P1/P1Q/P2/P3 and G4; staging config and every real
 `live_v2`/model call remain forbidden until the exact-SHA G6 approval immediately before M3. The

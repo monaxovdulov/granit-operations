@@ -32,8 +32,8 @@ Current task records:
   run/span/quality persistence, configured/observed provider truth, atomic outbound/run linkage,
   fail-closed recovery and terminal replay on the frozen direct path; exact-SHA evidence follows
   the implementation commit, and no `live_v2`, Mastra or model call is enabled.
-- `AI_DIALOG_MASTRA_OBSERVABILITY_FIRST_SLICE_RU.md` - active implementation plan: G0/G1 passed,
-  W0 and G1Q passed; P2 app-owned observability is next in the remaining operations lane
+- `AI_DIALOG_MASTRA_OBSERVABILITY_FIRST_SLICE_RU.md` - active implementation plan: G0/G1/W0,
+  G1Q and P2 passed; P3 quality/assets/privacy/retention is next in the operations lane
   `P1 -> P1Q -> P2 -> P3 -> M1 disabled -> M2 local/fake -> G6 owner gate -> M3 authenticated
   staging` (`OPENAI_API_KEY`, `gpt-5.6-sol`, medium), with frozen direct OpenAI emergency rollback
   and future `codex_subscription` outside the slice.

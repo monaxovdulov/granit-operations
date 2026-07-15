@@ -1,6 +1,6 @@
 # Live Widget AI - ускоренный staging-only дизайн
 
-Status: owner-confirmed design; W0/G1Q passed; P2 next; runtime not enabled
+Status: owner-confirmed design; W0/G1Q/P2 passed; P3 next; runtime not enabled
 Date: 2026-07-14
 Repo: `granit-operations`
 Related plan: `docs/tasks/AI_DIALOG_MASTRA_OBSERVABILITY_FIRST_SLICE_RU.md`

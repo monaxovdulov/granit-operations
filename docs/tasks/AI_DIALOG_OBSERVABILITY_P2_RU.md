@@ -1,6 +1,6 @@
 # Task: AI-DIALOG-OBSERVABILITY-P2 - минимальная app-owned запись AI run, span и quality event
 
-Status: implementation_verified; evidence_pending_exact_sha
+Status: passed at `c08128e6bdf3e1b8f859e6349b4d6fb626de1287`
 Created: 2026-07-14
 Repo: `granit-operations`
 Slice: P2 after accepted G1Q, before P3 and every Mastra dependency
@@ -76,8 +76,8 @@ send-gate transaction. Это prerequisite persistence slice, а не включ
 
 - `docs/tasks/AI_DIALOG_MASTRA_OBSERVABILITY_FIRST_SLICE_RU.md`
 - `docs/release/evidence/AI_DIALOG_LIVE_V2_FACTS_G1Q_RU.md`
-- P2 release evidence: create immediately after the implementation commit so it can pin the
-  immutable implementation SHA and migration blob/SHA256.
+- `docs/release/evidence/AI_DIALOG_OBSERVABILITY_P2_RU.md` pins the immutable implementation SHA,
+  migration blob/SHA256, fresh/upgrade schema output, rollback/raw canaries and no-live-call proof.
 
 ## Blockers
 
@@ -86,6 +86,5 @@ send-gate transaction. Это prerequisite persistence slice, а не включ
 
 ## Next Action
 
-Create the clean P2 implementation commit, rerun exact-tree checks, write the immutable release
-evidence with its implementation SHA and migration digests, push the slice, then start P3. P2
-closes persistence/atomicity; manager UI and complete sanitizer/retention remain deliberately P3.
+Push the exact P2 implementation/evidence commits, then start P3. P2 closes
+persistence/atomicity; manager UI and complete sanitizer/retention remain deliberately P3.
