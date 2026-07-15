@@ -814,6 +814,13 @@ Constraints:
 Exit: local/test contract tests exercise the adapter with fakes; no staging or production is
 enabled; route inventory is unchanged.
 
+G4 result on 2026-07-15: `passed` at implementation
+`aed13036a19490d8b8b0311fd1d2dbba93a5d39e`. Exact package/Node pins, official sources,
+transport/storage/telemetry defaults, the zero-fetch contract test, regression results and the
+known low advisory with its mandatory G6 re-check are recorded in
+`docs/release/evidence/AI_DIALOG_MASTRA_G4_RU.md`. This result authorizes only M1 disabled and M2
+local/fake; it does not authorize staging or a provider/model call.
+
 ### Slice M2 - connect app-owned observability and prove contract parity locally
 
 Work:
