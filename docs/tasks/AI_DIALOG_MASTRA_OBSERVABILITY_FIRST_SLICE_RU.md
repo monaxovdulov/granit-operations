@@ -1,8 +1,8 @@
 # Task: AI-DIALOG-MASTRA-OBSERVABILITY-FIRST-SLICE - implementation plan первого staging-only Mastra + observability slice
 
-Status: in_progress; G0/G1/W0/G1Q/P2/P3 passed; G4/M1 next
+Status: in_progress; G0/G1/W0/G1Q/P2/P3/G4/M1/M2 passed; G6 exact-SHA owner approval next
 Created: 2026-07-13
-Updated: 2026-07-14
+Updated: 2026-07-15
 Repo: `granit-operations`
 Slice: backend P1 -> P1Q -> P2 -> P3 -> M1 disabled -> M2 local/fake -> G6 -> M3 staging; W0 parallel after G0
 Owner/agent: owner approved implementation sequence / Codex implementation agent
@@ -849,6 +849,15 @@ Work:
 Exit: focused and full local suites pass in both runtime modes, route inventory has no new public
 surface, and the direct rollback test passes.
 
+M2 result on 2026-07-15: `passed` at implementation
+`b16ee6de8bf8e733b84fe6a5443828b5ce6e405c`. The explicit local/fake selector, canonical
+18-case adapter wiring, configured/observed model truth, trusted mismatch evidence, controlled
+no-reply migration 0011, post-fresh-read atomic takeover test, fresh/upgrade PostgreSQL proof,
+bounded full checks and final no-P0/P1 review are recorded in
+`docs/release/evidence/AI_DIALOG_MASTRA_M2_RU.md`. Token usage is recorded; cost remains absent
+until trusted evidence can rule out the documented cache-write premium. Environment-selected
+Mastra remains disabled, and no real provider/model call occurred.
+
 ### Slice M3 - controlled staging evidence
 
 After G5 and explicit G6 only:
@@ -1094,6 +1103,7 @@ operations boundary decision changes.
 | Planning-baseline deployed widget read-only audit | passed; W0 was partial | Verified immediate pending/separate sending status, same-key retry and honest errors at `business-ai-web-widget@47481d5`, exact `landing-granit-static@7007b982` bundle provenance, plus the baseline strict response-truth, <=300 ms browser timing and 15-second timeout-invariant gaps. |
 | W0 consumer + preview integration | passed | Source CI `29358217137`, local 81/81 unit and 24/24 browser tests, immutable landing commit `151062cb...`, deploy run `29358660849`, 15.0 ms loopback pending render and exact deployed hashes passed. No real intake/model request was made; see `docs/release/evidence/AI_DIALOG_W0_WIDGET_UX_INTEGRATION_RU.md`. |
 | P1Q provider-neutral core / G1Q | passed | Core checks passed at `78c9947`; exact owner approval, production `facts.v1.ts`, 5/112 focused, 3/9 frozen-direct and 17/211 full checks passed at `1d737e0`. Runtime stayed disabled with no model call. |
+| M2 deterministic local/fake runtime | passed | Implementation `b16ee6d`; final focused 67/67, local 313 pass, disposable PostgreSQL 16/16, bounded typecheck/build and independent no-P0/P1 review passed. No live provider call. |
 | Historical `granit-site-cms` read-only inspection | passed | Verified candidate content/import caveat and that this stale May checkout is supporting history rather than current preview ownership. |
 | `gh pr view 5`, branch/doc inspection at `cf04541` | passed | Verified draft PR metadata, owner-sequenced branch and source documents. |
 | Independent plan delta review | passed after fixes | Reconciled two-lane sequencing, frozen S05/live_v2 isolation, M3-only semantic proof, SHA-pinned external evidence, G0 authority and fail-fast hard gates. |
@@ -1114,6 +1124,7 @@ operations boundary decision changes.
 - Existing Stage A evidence: `docs/release/evidence/AI_DIALOG_BOUNDARY_STAGE_A_RU.md`
 - Existing website AI/takeover evidence: `docs/release/evidence/S05_WEBSITE_SAFE_AI_RU.md`,
   `docs/release/evidence/S06_MANAGER_TAKEOVER_RU.md`
+- M2 local/fake evidence: `docs/release/evidence/AI_DIALOG_MASTRA_M2_RU.md`
 - Accepted G0 cross-repo evidence:
   `docs/release/evidence/SITE_WIDGET_V1_CROSS_REPO_ACCEPTANCE_RU.md`
 - Existing channel-neutral evidence:
@@ -1164,9 +1175,9 @@ G0 and G1/P1 are recorded as passed. W0 consumer and content-addressed preview i
 at source `2982de06...` and deployed landing commit `151062cb...`, including a 15.0 ms local
 pending-render measurement and exact remote static hashes. This does not claim staging
 backend/model latency. G1Q passed with exact owner acceptance and production snapshot at
-`1d737e0`; P2 and P3 passed with focused, PostgreSQL, frozen-direct, full, typecheck and build
-checks without a model call. The immediate backend action is dated G4 review, then M1 disabled,
-M2 local/fake, G6 and M3 staging.
+`1d737e0`; P2, P3, G4, M1 and M2 passed with focused, PostgreSQL, frozen-direct, full, typecheck,
+build and independent review checks without a model call. The immediate backend action is G6
+exact-SHA owner approval. M3 staging remains forbidden before that approval.
 
 Mastra packages remain forbidden until P1/P1Q/P2/P3 and G4; staging config and every real
 `live_v2`/model call remain forbidden until the exact-SHA G6 approval immediately before M3. The

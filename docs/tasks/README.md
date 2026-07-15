@@ -36,7 +36,7 @@ Current task records:
   quality state, strict repo-owned asset manifest, centralized observability allowlist and bounded
   expired-span retention cleanup before any Mastra dependency.
 - `AI_DIALOG_MASTRA_OBSERVABILITY_FIRST_SLICE_RU.md` - active implementation plan: G0/G1/W0,
-  G1Q and P2 passed; P3 quality/assets/privacy/retention is next in the operations lane
+  G1Q/P2/P3/G4/M1/M2 passed; G6 exact-SHA owner approval is next in the operations lane
   `P1 -> P1Q -> P2 -> P3 -> M1 disabled -> M2 local/fake -> G6 owner gate -> M3 authenticated
   staging` (`OPENAI_API_KEY`, `gpt-5.6-sol`, medium), with frozen direct OpenAI emergency rollback
   and future `codex_subscription` outside the slice.
