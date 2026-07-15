@@ -119,6 +119,7 @@ describe("ops-api modular monolith boundaries", () => {
     expect(harnessSource).toContain('M3_MASTRA_SMOKE_ONCE !== "approved"');
     expect(harnessSource).toContain("buildConfiguredWidgetAiAssembly");
     expect(harnessSource).toContain("app.inject");
+    expect(harnessSource).toContain("conversationMessages.idempotencyKey");
     expect(harnessSource).toContain("logger: false");
     expect(harnessSource).toContain("openai_api_key_present");
     expect(harnessSource).not.toContain("OpenAiWidgetAssistantProvider");

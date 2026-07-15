@@ -4,6 +4,7 @@ import {
   aiQualityEvents,
   aiRunSpans,
   aiRuns,
+  conversationMessages,
   conversations,
   createOperationsDb
 } from "@granit/db";
@@ -52,9 +53,9 @@ try {
   const repository = new PostgresIntakeRepository(database.db);
   const runRepository = new PostgresAiRunRepository(database.db);
   const [existing] = await database.db
-    .select({ id: aiRuns.id })
-    .from(aiRuns)
-    .where(eq(aiRuns.idempotencyKey, SMOKE_IDEMPOTENCY_KEY))
+    .select({ id: conversationMessages.id })
+    .from(conversationMessages)
+    .where(eq(conversationMessages.idempotencyKey, SMOKE_IDEMPOTENCY_KEY))
     .limit(1);
 
   if (existing) {
@@ -108,9 +109,13 @@ try {
       runId: aiRuns.id
     })
     .from(aiRuns)
+    .innerJoin(
+      conversationMessages,
+      eq(aiRuns.inboundMessageId, conversationMessages.id)
+    )
     .where(
       and(
-        eq(aiRuns.idempotencyKey, SMOKE_IDEMPOTENCY_KEY),
+        eq(conversationMessages.idempotencyKey, SMOKE_IDEMPOTENCY_KEY),
         eq(aiRuns.runtimeMode, "mastra_openai_api")
       )
     )

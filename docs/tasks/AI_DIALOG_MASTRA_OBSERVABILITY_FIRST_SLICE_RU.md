@@ -1,6 +1,6 @@
 # Task: AI-DIALOG-MASTRA-OBSERVABILITY-FIRST-SLICE - implementation plan первого staging-only Mastra + observability slice
 
-Status: in_progress; G0/G1/W0/G1Q/P2/P3/G4/M1/M2/G5/G6 passed; M3 single-call staging smoke in progress
+Status: blocked; G0/G1/W0/G1Q/P2/P3/G4/M1/M2/G5/G6 passed; first M3 Mastra call failed closed before trusted provider observation
 Created: 2026-07-13
 Updated: 2026-07-15
 Repo: `granit-operations`
@@ -892,6 +892,14 @@ The fixed 15-20-input authenticated live corpus, provider-backed failure/handoff
 and p50/p95 multi-call statistics remain the next M3 gate and require separate explicit authority
 to spend additional provider calls. The single-call smoke must not be reported as full semantic,
 tone, corpus or M3 completion evidence.
+
+M3 result on 2026-07-15: the one authorized attempt used exact implementation
+`08224e9c72de25ea0c1acd626c12080f7d5149f8` through the app-owned widget path and Mastra adapter.
+It failed closed as `generator_failed/runtime_failure` before a trusted observed provider/model,
+runtimeRunId, usage, validator or send gate existed. No outbound was written; manager-visible
+critical quality state and safe public fallback were recorded; no automatic retry or direct
+fallback ran. M3 is not passed. Sanitized evidence and the next stop gate are recorded in
+`docs/release/evidence/AI_DIALOG_MASTRA_OBSERVABILITY_FIRST_SLICE_RU.md`.
 
 Write sanitized proof to
 `docs/release/evidence/AI_DIALOG_MASTRA_OBSERVABILITY_FIRST_SLICE_RU.md`. Update this task's
