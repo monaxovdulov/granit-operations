@@ -908,6 +908,12 @@ as proof of no provider exposure. A second live/provider call is blocked until n
 approval. An allowlisted failure-category diagnostic is prepared for that future approved attempt;
 it retains no raw message, exception, response body or provider payload.
 
+Post-guard local transport proof uses the exact Mastra factory with intercepted `fetch` and a
+synthetic 401. It confirms one OpenAI Responses request with `gpt-5.6-sol`, `medium`, `store:false`
+and zero retries, then emits only `auth_or_entitlement`. No network/provider call occurs. This
+rules out an incorrect provider route or chat-completions transport in the current candidate but
+does not retroactively classify or replace the failed live attempt.
+
 Write sanitized proof to
 `docs/release/evidence/AI_DIALOG_MASTRA_OBSERVABILITY_FIRST_SLICE_RU.md`. Update this task's
 checks/evidence status only after the evidence exists.

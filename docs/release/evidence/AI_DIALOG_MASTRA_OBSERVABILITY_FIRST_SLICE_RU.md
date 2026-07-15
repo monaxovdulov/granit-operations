@@ -50,6 +50,25 @@ The app entered the model-generation boundary and no sanitized evidence proves a
 pre-provider failure. The attempt is therefore counted conservatively as possible provider
 exposure. No second live/provider call is permitted without new explicit owner approval.
 
+After the stop gate, the exact factory was exercised without network access by intercepting
+`globalThis.fetch` and returning a local synthetic 401. This proves that the reviewed Mastra path
+constructs exactly one `POST` to the OpenAI Responses endpoint with allowlisted request facts:
+
+```text
+transport: fetch
+endpoint class: api.openai.com / v1 / responses
+model: gpt-5.6-sol
+reasoning effort: medium
+store: false
+max retries: 0
+sanitized local 401 category: auth_or_entitlement
+network/provider exposure: false
+```
+
+The test parsed those fields in memory and did not print or retain the request body. This local
+proof rules out a wrong Mastra provider route or chat-completions transport in the current
+candidate. It does not retroactively identify the first live error and is not live M3 success.
+
 ## Secret and call boundary
 
 `OPENAI_API_KEY` presence was checked as boolean only. The value was inherited by the one-shot
@@ -135,7 +154,8 @@ npx vitest run <M3 boundary/evidence files> --maxWorkers=1 --minWorkers=1
 30/30 PASS
 
 npx vitest run apps/api/test/mastra-live-v2-decision-generator.test.ts --maxWorkers=1 --minWorkers=1
-9/9 PASS after adding the allowlisted failure classifier; no provider call
+10/10 PASS after adding the allowlisted failure classifier and intercepted exact-transport proof;
+no provider call
 
 npm run typecheck:api
 PASS (source/packages and test batches 1-40), including the post-guard diagnostic change

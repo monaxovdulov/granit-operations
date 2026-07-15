@@ -322,6 +322,86 @@ describe("M1 disabled Mastra live_v2 adapter", () => {
     }
   });
 
+  it("reaches the pinned Responses transport once and sanitizes a local 401", async () => {
+    const config = loadConfig({
+      DATABASE_URL: "postgres://m3.invalid/granit",
+      AI_RUNTIME_MODE: "mastra_openai_api",
+      DEPLOYMENT_TIER: "staging",
+      OPENAI_API_KEY: "m3-local-not-a-real-key",
+      MASTRA_TELEMETRY_DISABLED: "true",
+      MASTRA_AUTO_REFRESH_PROVIDERS: "false"
+    });
+    const savedEnv = new Map(
+      [
+        "MASTRA_TELEMETRY_DISABLED",
+        "MASTRA_AUTO_REFRESH_PROVIDERS",
+        "OPENAI_BASE_URL",
+        "MASTRA_LICENSE_KEY",
+        "MASTRA_EE_LICENSE"
+      ].map((name) => [name, process.env[name]])
+    );
+    process.env.MASTRA_TELEMETRY_DISABLED = "true";
+    process.env.MASTRA_AUTO_REFRESH_PROVIDERS = "false";
+    delete process.env.OPENAI_BASE_URL;
+    delete process.env.MASTRA_LICENSE_KEY;
+    delete process.env.MASTRA_EE_LICENSE;
+    const rawCanary = "RAW_LOCAL_401_BODY_MUST_NOT_ESCAPE";
+    const fetchSpy = vi.fn<typeof fetch>(async () =>
+      new Response(JSON.stringify({ error: { message: rawCanary } }), {
+        status: 401,
+        headers: { "content-type": "application/json" }
+      })
+    );
+    vi.stubGlobal("fetch", fetchSpy);
+    const categories: string[] = [];
+
+    try {
+      const generator = await createMastraOpenAiLiveV2DecisionGenerator({
+        config: realBoundaryConfig(config),
+        onSanitizedFailure(category) {
+          categories.push(category);
+        }
+      });
+
+      let thrown: unknown;
+      try {
+        await generator.generateDecision(generatorInput(), {
+          appTraceId: "00000000-0000-4000-8000-000000000123"
+        });
+      } catch (error) {
+        thrown = error;
+      }
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const [requestInput, requestInit] = fetchSpy.mock.calls[0]!;
+      const requestUrl = new URL(
+        requestInput instanceof Request ? requestInput.url : String(requestInput)
+      );
+      expect(requestUrl.origin).toBe("https://api.openai.com");
+      expect(requestUrl.pathname).toBe("/v1/responses");
+      expect(requestInit?.method).toBe("POST");
+      expect(typeof requestInit?.body).toBe("string");
+      const requestBody = JSON.parse(String(requestInit?.body)) as Record<string, unknown>;
+      expect(requestBody).toMatchObject({
+        model: "gpt-5.6-sol",
+        max_output_tokens: MASTRA_LIVE_V2_MAX_OUTPUT_TOKENS,
+        reasoning: { effort: "medium" },
+        store: false
+      });
+      expect(categories).toEqual(["auth_or_entitlement"]);
+      expect(thrown).toBeInstanceOf(MastraLiveV2GenerationError);
+      expect((thrown as MastraLiveV2GenerationError).failureCategory).toBe(
+        "auth_or_entitlement"
+      );
+      expect(JSON.stringify(thrown)).not.toContain(rawCanary);
+    } finally {
+      for (const [name, value] of savedEnv) {
+        restoreEnv(name, value);
+      }
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("rejects a direct or non-staging boundary before dynamic import or fetch", async () => {
     const config = loadConfig({
       DATABASE_URL: "postgres://m3.invalid/granit",
