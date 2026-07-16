@@ -223,7 +223,9 @@ postgresDescribe("P2 PostgreSQL AI observability atomicity", () => {
     });
 
     expect(response.statusCode).toBe(202);
-    expect(response.json()).toMatchObject({ automation: { status: "disabled" } });
+    expect(response.json()).toMatchObject({
+      automation: { status: "fallback", reason: "agent_reply_blocked" }
+    });
     expect(generateReply).not.toHaveBeenCalled();
     expect(await database.db.select().from(aiRuns)).toHaveLength(0);
     expect(
