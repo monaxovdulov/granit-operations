@@ -1,7 +1,8 @@
 # Task: OPS-API-THICK-MODULE-REFACTOR-NEXT-TASKS - Следующие безопасные refactor slices после audit толстых модулей
 
-Status: planned
+Status: mostly_completed; remaining cleanup deferred
 Created: 2026-05-25
+Last updated: 2026-06-04
 Repo: `granit-operations`
 Slice: architecture/refactor
 Owner/agent: future Codex agents
@@ -32,6 +33,13 @@ Owner/agent: future Codex agents
 Best first move:
 
 - Split repository contracts/types before moving behavior. This makes module boundaries visible with the lowest behavioral risk.
+
+Current state as of 2026-06-04:
+
+- The originally recommended first move has already been completed and accepted through ADR evidence.
+- P1 and P2 backend boundary slices are accepted; do not restart them as new work unless a later code change reopens the same risk.
+- Remaining work in this task pack is optional cleanup: manager UI decomposition and public intake test fixture split.
+- New architecture smells found after this task pack should be tracked as separate focused follow-up tasks instead of being folded back into this historical refactor pack.
 
 ## Global Guardrails
 
@@ -75,6 +83,134 @@ Suggested ADR topics after implementation:
 Do not create placeholder ADRs with no decision. If a slice is purely mechanical and does not change a boundary, update this task's evidence instead and explain why no ADR was needed.
 
 ## Refactor Slices
+
+### Current Slice Status
+
+| Slice | Status | Evidence | Notes |
+|---|---|---|---|
+| P1-1 repository contract split | accepted | `docs/adr/ADR-004-CONVERSATION_REPOSITORY_PORT_SPLIT_RU.md` | Narrow ports exist; `IntakeRepository` remains an aggregate compatibility interface. |
+| P1-2 manager Telegram persistence extraction | accepted | `docs/adr/ADR-005-MANAGER_TELEGRAM_PERSISTENCE_BOUNDARY_RU.md` | Manager Telegram persistence lives in an explicit Postgres repository; aggregate facade remains. |
+| P2-1 Telegram inbound mapper/classifier extraction | accepted | `docs/adr/ADR-006-TELEGRAM_INBOUND_MAPPER_BOUNDARY_RU.md` | Mapper/classifier is separate; webhook adapter still orchestrates typed use cases. |
+| P2-2 timeline event input decoupling | accepted | `docs/adr/ADR-007-TIMELINE_EVENT_INPUT_BOUNDARY_RU.md` | Timeline inputs are neutral and protected by boundary tests. |
+| P2-3 public widget AI reply generator boundary | accepted | `docs/adr/ADR-008-PUBLIC_WIDGET_AI_REPLY_GENERATOR_BOUNDARY_RU.md` | Public widget intake depends on a narrow AI reply generator interface. |
+| P3-1 manager UI helpers/hooks split | deferred_optional | none | Only do this if `apps/manager/src/App.tsx` creates real state/locality friction. |
+| P3-2 compatibility export policy | accepted | `docs/adr/ADR-009-COMPATIBILITY_EXPORT_POLICY_RU.md` | Compatibility exports stay; production imports are guarded toward `modules/*`. |
+| P3-3 public intake test fixture split | deferred_optional | none | Only do this as test-maintenance cleanup; no production architecture change. |
+
+### 2026-06-04 Deepening Review Follow-ups
+
+These follow-ups came from a read-only pass using the external `improve-codebase-architecture` skill vocabulary: Module, Interface, Implementation, depth, deep, shallow, seam, adapter, leverage and locality. They are not approved implementation tasks yet. If selected, create a separate task doc and ADR only when the work changes a seam or dependency direction.
+
+#### Strong: deepen manager lead persistence/read model
+
+Files:
+
+- `apps/api/src/modules/conversations/repositories/postgres-intake-repository.ts`
+- `apps/api/src/modules/conversations/repositories/manager-lead-repository.ts`
+- `apps/api/src/modules/manager/use-cases/manager-lead-use-cases.ts`
+
+Problem:
+
+- `PostgresIntakeRepository` still holds public intake, inbound conversation persistence, widget AI send gate, manager read model/mutations and compatibility delegation.
+- The manager lead paths are a clear high-friction cluster: list/detail/status/takeover plus conversation read-model assembly live behind the broad aggregate implementation.
+
+Solution:
+
+- Extract the `ManagerLeadRepository` implementation into a deeper manager lead persistence/read-model Module.
+- Keep the existing aggregate facade for compatibility while composition still expects one repository object.
+- Do not change public API contracts, DB schema, migrations, env names, npm scripts or runtime topology.
+
+Expected benefits:
+
+- Locality: manager workflow query/mutation bugs concentrate in one Module.
+- Leverage: manager tests can target the manager Interface without crossing the full intake aggregate.
+- Smaller aggregate Interface pressure: future code has less reason to learn public intake, AI and Telegram details just to touch manager lead behavior.
+
+Recommendation strength: Strong.
+
+#### Worth exploring: deepen widget AI reply gate
+
+Files:
+
+- `apps/api/src/modules/intake/use-cases/public-widget-intake-service.ts`
+- `apps/api/src/modules/ai/policy/widget-ai-policy.ts`
+- `apps/api/src/modules/ai/ai-turn.ts`
+
+Problem:
+
+- `PublicWidgetIntakeService` has the narrow AI reply generator dependency from ADR-008, but still mixes contract validation, persist-before-AI sequencing, fallback response mapping and unsafe candidate text/evidence validation.
+
+Solution:
+
+- Extract an in-process reply gate Implementation behind a local seam.
+- Keep provider/model assembly out of this seam.
+- Preserve persistence-before-AI and public response sequencing exactly.
+
+Expected benefits:
+
+- Locality: unsafe model output rules and evidence checks live in one Module.
+- Leverage: fallback and safety tests can exercise one Interface.
+- Lower risk of touching public widget response mapping while changing safety rules.
+
+Recommendation strength: Worth exploring.
+
+#### Worth exploring: deepen manager UI workspace state
+
+Files:
+
+- `apps/manager/src/App.tsx`
+- `apps/manager/src/api.ts`
+- `apps/manager/src/display.ts`
+
+Problem:
+
+- `ManagerWorkspace` holds polling, selected lead, detail loading, status mutation, takeover, Telegram bind token and logout state in one UI Module.
+- This matches the existing P3-1 cleanup slice, but should only be done if it creates real state/locality friction.
+
+Solution:
+
+- Extract data-loading/mutation hooks only when they create a deeper Module.
+- Do not redesign the UI.
+- Do not move lead truth, takeover truth or assignment truth into UI state.
+
+Expected benefits:
+
+- Locality: workspace behavior and mutation state are easier to reason about.
+- Less props/state leakage through presentational code.
+- Tests can target workspace behavior without coupling to every visual detail.
+
+Recommendation strength: Worth exploring.
+
+#### Speculative: split test adapter and public intake fixture
+
+Files:
+
+- `apps/api/test/public-intake.test.ts`
+- `apps/api/test/helpers/memory-intake-repository.ts`
+- `apps/api/test/helpers/*`
+
+Problem:
+
+- `MemoryIntakeRepository` is a useful test adapter, but it now satisfies almost every narrow port and carries public intake, widget AI, Telegram manager reply context and idempotency behavior.
+
+Solution:
+
+- Split test helpers or scenario harnesses by domain workflow.
+- Keep helpers local to tests.
+- Do not turn test helpers into production abstractions.
+
+Expected benefits:
+
+- Test locality improves.
+- Scenario setup becomes easier to navigate.
+- Lower risk that memory behavior hides drift from the Postgres adapter.
+
+Recommendation strength: Speculative.
+
+#### Do not reopen now
+
+- Telegram inbound mapper/classifier: ADR-006 already accepted the pure mapper Module and the current shape passes the deletion test.
+- Compatibility exports: ADR-009 keeps compatibility exports available and guards production imports toward `modules/*`; do not remove them without a separate ADR.
 
 ### P1-1: Split repository contracts/types before behavior movement
 
@@ -327,6 +463,8 @@ Checks:
 | Command/check | Result | Notes |
 |---|---|---|
 | Read-only audit | completed | No code changes were made during audit. |
+| 2026-06-04 docs status review | completed | ADR-004 through ADR-009 confirm that P1-1, P1-2, P2-1, P2-2, P2-3 and P3-2 were accepted after the original task pack was written. |
+| 2026-06-04 deepening proposal review | completed | Read-only proposal only; no code or architecture changes were made and no tests were run. |
 
 ## Evidence Links
 
@@ -335,6 +473,13 @@ Checks:
 - Guardrails fix task: `docs/tasks/MODULAR_MONOLITH_GUARDRAILS_FIX_RU.md`
 - Ops API modular monolith architecture: `docs/architecture/OPS_API_MODULAR_MONOLITH_RU.md`
 - ADR index: `docs/adr/README.md`
+- Repository port split ADR: `docs/adr/ADR-004-CONVERSATION_REPOSITORY_PORT_SPLIT_RU.md`
+- Manager Telegram persistence ADR: `docs/adr/ADR-005-MANAGER_TELEGRAM_PERSISTENCE_BOUNDARY_RU.md`
+- Telegram inbound mapper ADR: `docs/adr/ADR-006-TELEGRAM_INBOUND_MAPPER_BOUNDARY_RU.md`
+- Timeline event input ADR: `docs/adr/ADR-007-TIMELINE_EVENT_INPUT_BOUNDARY_RU.md`
+- Public widget AI reply generator ADR: `docs/adr/ADR-008-PUBLIC_WIDGET_AI_REPLY_GENERATOR_BOUNDARY_RU.md`
+- Compatibility export policy ADR: `docs/adr/ADR-009-COMPATIBILITY_EXPORT_POLICY_RU.md`
+- External skill used for 2026-06-04 proposal vocabulary: `https://github.com/mattpocock/skills/tree/main/skills/engineering/improve-codebase-architecture`
 
 ## Blockers
 
@@ -344,4 +489,18 @@ Checks:
 
 ## Next Action
 
-Start with P1-1. Split repository contracts/types first, add or update a focused ADR for the repository boundary, then run the listed checks before moving any Postgres behavior.
+Do not restart P1-1 through P2-3 or P3-2; they are accepted via ADR-004 through ADR-009.
+
+If continuing this task pack, choose one of the remaining optional cleanup slices:
+
+- P3-1: split manager UI helpers/hooks only if `apps/manager/src/App.tsx` causes real state/locality friction.
+- P3-3: split the large public intake test fixture only as test-maintenance cleanup.
+
+If working from the newer architectural smells review, create separate focused task docs for new risks instead of editing this task pack into a catch-all. Good candidates are:
+
+- Strong first follow-up: deepen manager lead persistence/read model out of `PostgresIntakeRepository` while keeping the aggregate compatibility facade.
+- Worth exploring: deepen widget AI reply gate around unsafe model output and evidence validation.
+- Worth exploring: deepen manager UI workspace state only if the current `ManagerWorkspace` state shape creates real locality friction.
+- Speculative: split test adapter/public intake fixture as test-maintenance cleanup.
+
+Do not reopen Telegram inbound mapper/classifier or compatibility export removal from this task pack; ADR-006 and ADR-009 already record those decisions.
