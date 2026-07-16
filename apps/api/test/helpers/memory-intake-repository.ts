@@ -32,6 +32,7 @@ import type {
 import { publicWidgetManagerReviewTimelineEvent } from "../../src/modules/timeline/timeline-events.js";
 import {
   AgentReplyBlockedError,
+  AiControlVersionConflictError,
   IdempotencyConflictError,
   ManagerTelegramReplyContextMissingError,
   ManagerTelegramReplyRequiresTakeoverError,
@@ -52,6 +53,7 @@ import {
   type IntakeRepository,
   type ManagerLeadDetail,
   type ManagerLeadListItem,
+  type ManagerAiControl,
   type ManagerTelegramActor,
   type ManagerTelegramBindingStatus,
   type PersistManagerTelegramReplyInput,
@@ -65,6 +67,8 @@ import {
   type SaveSiteWidgetAiMessageInput,
   type SaveSiteWidgetAiMessageResult,
   type SetNextStepInput,
+  type SetConversationAiControlInput,
+  type SetManagerAiControlInput,
   type TakeoverConversationByPublicIdInput,
   type TakeoverConversationInput,
   type TakeoverSiteWidgetConversationInput
@@ -218,6 +222,11 @@ export class MemoryIntakeRepository
   private readonly aiContextMessages = new Map<string, MemoryAiContextMessage[]>();
   private readonly aiRunRepository: MemoryAiRunRepository;
   private lastAiContextCreatedAtMs = 0;
+  private managerAiControl: ManagerAiControl = {
+    enabled: true,
+    version: 1,
+    changedAt: "2026-07-16T00:00:00.000Z"
+  };
 
   constructor(
     private readonly options: {
@@ -747,7 +756,8 @@ export class MemoryIntakeRepository
       ?.conversations.find(
         (candidate) => candidate.channelIdentity.widgetPublicSessionId === publicSessionId
       );
-    const agentAllowedToReply = conversation?.agentAllowedToReply ?? false;
+    const agentAllowedToReply =
+      (conversation?.agentAllowedToReply ?? false) && this.managerAiControl.enabled;
     const aiState = conversation?.aiState ?? "ai_collecting_info";
 
     return {
@@ -1144,8 +1154,81 @@ export class MemoryIntakeRepository
 
     return {
       aiState: conversation.aiState,
-      agentAllowedToReply: conversation.agentAllowedToReply
+      agentAllowedToReply: conversation.agentAllowedToReply && this.managerAiControl.enabled
     };
+  }
+
+  async getManagerAiControl(): Promise<ManagerAiControl> {
+    return { ...this.managerAiControl };
+  }
+
+  async setManagerAiControl(input: SetManagerAiControlInput): Promise<ManagerAiControl> {
+    if (input.expectedVersion !== this.managerAiControl.version) {
+      throw new AiControlVersionConflictError();
+    }
+
+    this.managerAiControl = {
+      enabled: input.enabled,
+      version: input.expectedVersion + 1,
+      changedByManagerEmail: input.changedByManagerEmail,
+      changedAt: new Date().toISOString()
+    };
+
+    return { ...this.managerAiControl };
+  }
+
+  async setConversationAiControl(
+    input: SetConversationAiControlInput
+  ): Promise<ManagerLeadDetail | null> {
+    const lead = this.leads.get(input.leadId);
+
+    if (!lead) {
+      return null;
+    }
+
+    const conversation = lead.conversations.find(
+      (candidate) => candidate.publicConversationId === input.publicConversationId
+    );
+
+    if (!conversation) {
+      return null;
+    }
+
+    const changedAt = new Date().toISOString();
+    const nextAiState = input.enabled ? "ai_collecting_info" : "manager_active";
+
+    this.leads.set(input.leadId, {
+      ...lead,
+      updatedAt: changedAt,
+      timeline: [
+        ...lead.timeline,
+        {
+          eventType: "conversation.ai_control_changed",
+          summary: input.enabled
+            ? "Manager enabled AI replies"
+            : "Manager disabled AI replies",
+          metadata: {
+            public_conversation_id: input.publicConversationId,
+            enabled: input.enabled,
+            changed_by_manager_email: input.changedByManagerEmail,
+            changed_by_manager_role: input.changedByManagerRole
+          },
+          createdAt: changedAt
+        }
+      ],
+      conversations: lead.conversations.map((candidate) =>
+        candidate.publicConversationId === input.publicConversationId
+          ? {
+              ...candidate,
+              agentAllowedToReply: input.enabled,
+              aiState: nextAiState,
+              updatedAt: changedAt
+            }
+          : candidate
+      )
+    });
+
+    return this.getManagerLead(input.leadId);
   }
 
   async listManagerLeads(): Promise<ManagerLeadListItem[]> {

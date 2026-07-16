@@ -6,6 +6,7 @@ import {
   type SiteWidgetMessageRequest
 } from "@granit/contracts";
 import {
+  aiRuntimeControls,
   aiQualityEvents,
   aiRunSpans,
   aiRuns,
@@ -49,6 +50,15 @@ postgresDescribe("P2 PostgreSQL AI observability atomicity", () => {
 
   beforeEach(async () => {
     await database?.client.unsafe("TRUNCATE TABLE leads RESTART IDENTITY CASCADE");
+    await database?.db
+      .update(aiRuntimeControls)
+      .set({
+        enabled: true,
+        version: 1,
+        changedByManagerId: null,
+        changedByManagerEmail: null
+      })
+      .where(eq(aiRuntimeControls.scope, "site_widget"));
   });
 
   afterEach(async () => {
@@ -186,6 +196,92 @@ postgresDescribe("P2 PostgreSQL AI observability atomicity", () => {
     expect(eventRows).toMatchObject([
       { eventType: "blocked", reasonCode: "agent_reply_blocked", managerVisible: true }
     ]);
+  });
+
+  it("does not call the generator while the global AI control is stopped", async () => {
+    if (!database) throw new Error("expected test database");
+    await database.db
+      .update(aiRuntimeControls)
+      .set({ enabled: false, version: 2 })
+      .where(eq(aiRuntimeControls.scope, "site_widget"));
+    const repository = new PostgresIntakeRepository(database.db);
+    const runRepository = new PostgresAiRunRepository(database.db);
+    const generateReply = vi.fn(async () => ({
+      decision: "reply_candidate" as const,
+      text: "Этот генератор не должен быть вызван.",
+      metadata: { model_provider: "fake" }
+    }));
+    app = buildApi({
+      repository,
+      widgetAi: { enabled: true, replyGenerator: { generateReply }, runRepository }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/public/intake/site-widget/messages",
+      payload: widgetRequest("p2-global-stop-before-generation-0001")
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toMatchObject({ automation: { status: "disabled" } });
+    expect(generateReply).not.toHaveBeenCalled();
+    expect(await database.db.select().from(aiRuns)).toHaveLength(0);
+    expect(
+      await database.db
+        .select()
+        .from(conversationMessages)
+        .where(eq(conversationMessages.senderRole, "ai_assistant"))
+    ).toHaveLength(0);
+  });
+
+  it("blocks an in-flight reply when the global AI control is stopped", async () => {
+    if (!database) throw new Error("expected test database");
+    const repository = new PostgresIntakeRepository(database.db);
+    const runRepository = new PostgresAiRunRepository(database.db);
+    app = buildApi({
+      repository,
+      widgetAi: {
+        enabled: true,
+        replyGenerator: {
+          async generateReply() {
+            await database.db
+              .update(aiRuntimeControls)
+              .set({ enabled: false, version: 2 })
+              .where(eq(aiRuntimeControls.scope, "site_widget"));
+            return {
+              decision: "reply_candidate",
+              text: "Этот draft должен быть остановлен глобальным gate.",
+              metadata: { model_provider: "fake" }
+            };
+          }
+        },
+        runRepository
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/public/intake/site-widget/messages",
+      payload: widgetRequest("p2-global-stop-in-flight-0001")
+    });
+
+    expect(response.json()).toMatchObject({
+      automation: { status: "fallback", reason: "agent_reply_blocked" }
+    });
+    expect(await database.db.select().from(aiRuns)).toMatchObject([
+      {
+        status: "blocked",
+        outcomeReason: "agent_reply_blocked",
+        sendGateResult: "blocked",
+        outboundMessageId: null
+      }
+    ]);
+    expect(
+      await database.db
+        .select()
+        .from(conversationMessages)
+        .where(eq(conversationMessages.senderRole, "ai_assistant"))
+    ).toHaveLength(0);
   });
 
   it("rolls back outbound and gate when terminal success update fails", async () => {
