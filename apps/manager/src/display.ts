@@ -189,6 +189,7 @@ export function timelineEventLabel(eventType: string) {
     "conversation.message_received": "Сообщение получено",
     "conversation.ai_message_sent": "AI-ответ сохранен",
     "conversation.manager_takeover": "AI отключен менеджером",
+    "conversation.ai_control_changed": "Настройка AI изменена",
     "conversation.manager_message_queued": "Ответ ожидает отправки",
     "conversation.delivery_sent": "Сообщение доставлено",
     "conversation.delivery_retrying": "Повтор доставки",
@@ -223,6 +224,7 @@ export function timelineSummaryLabel(event: ManagerLeadDetail["timeline"][number
   const labels: Record<string, string> = {
     "lead.created_from_site_form": "Заявка создана из формы на сайте",
     "lead.created_from_site_widget": "Заявка создана из виджета сайта",
+    "conversation.ai_control_changed": "Менеджер изменил доступ AI к диалогу",
     "lead.created_from_telegram": "Заявка создана из Telegram",
     "conversation.message_received": "Получено сообщение клиента",
     "conversation.ai_message_sent": "AI-ответ сохранен в диалоге",

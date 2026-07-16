@@ -349,6 +349,29 @@ export const managerSessions = pgTable(
   })
 );
 
+export const aiRuntimeControls = pgTable(
+  "ai_runtime_controls",
+  {
+    scope: text("scope").primaryKey(),
+    enabled: boolean("enabled").notNull().default(true),
+    version: integer("version").notNull().default(1),
+    changedByManagerId: uuid("changed_by_manager_id").references(() => managerUsers.id, {
+      onDelete: "set null"
+    }),
+    changedByManagerEmail: text("changed_by_manager_email"),
+    changedAt: timestamp("changed_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => ({
+    scopeCheck: check("ai_runtime_controls_scope_check", sql`${table.scope} IN ('site_widget')`),
+    versionCheck: check("ai_runtime_controls_version_check", sql`${table.version} > 0`),
+    actorCheck: check(
+      "ai_runtime_controls_actor_check",
+      sql`(${table.changedByManagerId} IS NULL AND ${table.changedByManagerEmail} IS NULL)
+        OR (${table.changedByManagerId} IS NOT NULL AND ${table.changedByManagerEmail} IS NOT NULL)`
+    )
+  })
+);
+
 export const managerTelegramBindings = pgTable(
   "manager_telegram_bindings",
   {

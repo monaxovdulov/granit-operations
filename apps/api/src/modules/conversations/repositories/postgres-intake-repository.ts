@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { and, desc, eq, lt, or, sql, type SQLWrapper } from "drizzle-orm";
 
 import {
+  aiRuntimeControls,
   aiQualityEvents,
   aiRuns,
   channelIdentities,
@@ -86,14 +87,18 @@ import type {
   SiteWidgetAiMessageLookupResult
 } from "./conversation-message-repository.js";
 import type { IntakeRepository } from "./intake-repository.js";
+import { AiControlVersionConflictError } from "./manager-lead-repository.js";
 import type {
   ChangeManagerLeadStatusInput,
+  ManagerAiControl,
   ManagerAiQualitySummary,
   ManagerChannelIdentity,
   ManagerConversation,
   ManagerLeadDetail,
   ManagerLeadListItem,
   RecordManualContactInput,
+  SetConversationAiControlInput,
+  SetManagerAiControlInput,
   SetNextStepInput,
   TakeoverConversationByPublicIdInput,
   TakeoverConversationInput,
@@ -453,6 +458,16 @@ export class PostgresIntakeRepository
           });
         }
 
+        const [runtimeControl] =
+          input.channel === "site_widget"
+            ? await tx
+                .select({ enabled: aiRuntimeControls.enabled })
+                .from(aiRuntimeControls)
+                .where(eq(aiRuntimeControls.scope, "site_widget"))
+                .limit(1)
+            : [{ enabled: true }];
+        const effectiveAgentAllowedToReply =
+          conversation.agentAllowedToReply && runtimeControl?.enabled === true;
         const previousMessagesNewestFirst =
           input.channel === "site_widget"
             ? await loadPreviousAiTurnContextMessages(tx, conversation.id, message.id)
@@ -463,7 +478,7 @@ export class PostgresIntakeRepository
             publicConversationId: conversation.publicConversationId,
             publicMessageId: message.publicMessageId,
             publicSessionId: widgetSession?.publicSessionId,
-            agentAllowedToReply: conversation.agentAllowedToReply,
+            agentAllowedToReply: effectiveAgentAllowedToReply,
             aiState: toAiState(conversation.aiState)
           },
           previousMessagesNewestFirst
@@ -477,7 +492,7 @@ export class PostgresIntakeRepository
           inboundMessageId: message.id,
           publicMessageId: message.publicMessageId,
           widgetPublicSessionId: widgetSession?.publicSessionId ?? undefined,
-          agentAllowedToReply: conversation.agentAllowedToReply,
+          agentAllowedToReply: effectiveAgentAllowedToReply,
           aiState: toAiState(conversation.aiState),
           replayed: false,
           aiTurnInput,
@@ -705,7 +720,12 @@ export class PostgresIntakeRepository
             and(
               eq(conversations.id, input.conversationId),
               eq(conversations.leadId, input.leadId),
-              eq(conversations.agentAllowedToReply, true)
+              eq(conversations.agentAllowedToReply, true),
+              sql`EXISTS (
+                SELECT 1 FROM ${aiRuntimeControls}
+                WHERE ${aiRuntimeControls.scope} = 'site_widget'
+                  AND ${aiRuntimeControls.enabled} = true
+              )`
             )
           )
           .returning({
@@ -851,9 +871,15 @@ export class PostgresIntakeRepository
       throw new Error("recorded site widget AI gate is unavailable");
     }
 
+    const [runtimeControl] = await this.db
+      .select({ enabled: aiRuntimeControls.enabled })
+      .from(aiRuntimeControls)
+      .where(eq(aiRuntimeControls.scope, "site_widget"))
+      .limit(1);
+
     return {
       aiState: gate.aiState,
-      agentAllowedToReply: gate.agentAllowedToReply
+      agentAllowedToReply: gate.agentAllowedToReply && runtimeControl?.enabled === true
     };
   }
 
@@ -889,7 +915,12 @@ export class PostgresIntakeRepository
               eq(conversations.id, input.run.conversationId),
               eq(conversations.leadId, input.run.leadId),
               eq(conversations.agentAllowedToReply, true),
-              eq(conversations.aiState, "ai_collecting_info")
+              eq(conversations.aiState, "ai_collecting_info"),
+              sql`EXISTS (
+                SELECT 1 FROM ${aiRuntimeControls}
+                WHERE ${aiRuntimeControls.scope} = 'site_widget'
+                  AND ${aiRuntimeControls.enabled} = true
+              )`
             )
           )
           .returning({
@@ -1112,6 +1143,138 @@ export class PostgresIntakeRepository
         throw error;
       }
     }
+  }
+
+  async getManagerAiControl(): Promise<ManagerAiControl> {
+    const [control] = await this.db
+      .select({
+        enabled: aiRuntimeControls.enabled,
+        version: aiRuntimeControls.version,
+        changedByManagerEmail: aiRuntimeControls.changedByManagerEmail,
+        changedAt: aiRuntimeControls.changedAt
+      })
+      .from(aiRuntimeControls)
+      .where(eq(aiRuntimeControls.scope, "site_widget"))
+      .limit(1);
+
+    if (!control) {
+      throw new Error("site widget AI runtime control is unavailable");
+    }
+
+    return {
+      enabled: control.enabled,
+      version: control.version,
+      changedByManagerEmail: control.changedByManagerEmail ?? undefined,
+      changedAt: control.changedAt.toISOString()
+    };
+  }
+
+  async setManagerAiControl(input: SetManagerAiControlInput): Promise<ManagerAiControl> {
+    const [control] = await this.db
+      .update(aiRuntimeControls)
+      .set({
+        enabled: input.enabled,
+        version: sql`${aiRuntimeControls.version} + 1`,
+        changedByManagerId: input.changedByManagerId,
+        changedByManagerEmail: input.changedByManagerEmail,
+        changedAt: new Date()
+      })
+      .where(
+        and(
+          eq(aiRuntimeControls.scope, "site_widget"),
+          eq(aiRuntimeControls.version, input.expectedVersion)
+        )
+      )
+      .returning({
+        enabled: aiRuntimeControls.enabled,
+        version: aiRuntimeControls.version,
+        changedByManagerEmail: aiRuntimeControls.changedByManagerEmail,
+        changedAt: aiRuntimeControls.changedAt
+      });
+
+    if (!control) {
+      throw new AiControlVersionConflictError();
+    }
+
+    return {
+      enabled: control.enabled,
+      version: control.version,
+      changedByManagerEmail: control.changedByManagerEmail ?? undefined,
+      changedAt: control.changedAt.toISOString()
+    };
+  }
+
+  async setConversationAiControl(
+    input: SetConversationAiControlInput
+  ): Promise<ManagerLeadDetail | null> {
+    let found = false;
+
+    await this.db.transaction(async (tx) => {
+      const [conversation] = await tx
+        .select({
+          id: conversations.id,
+          agentAllowedToReply: conversations.agentAllowedToReply,
+          aiState: conversations.aiState
+        })
+        .from(conversations)
+        .where(
+          and(
+            eq(conversations.leadId, input.leadId),
+            eq(conversations.publicConversationId, input.publicConversationId)
+          )
+        )
+        .limit(1);
+
+      if (!conversation) {
+        return;
+      }
+
+      found = true;
+      const nextAiState: AiState = input.enabled ? "ai_collecting_info" : "manager_active";
+
+      if (
+        conversation.agentAllowedToReply === input.enabled &&
+        conversation.aiState === nextAiState
+      ) {
+        return;
+      }
+
+      const changedAt = new Date();
+
+      await tx
+        .update(conversations)
+        .set({
+          agentAllowedToReply: input.enabled,
+          aiState: nextAiState,
+          updatedAt: changedAt
+        })
+        .where(eq(conversations.id, conversation.id));
+
+      await tx
+        .update(leads)
+        .set({ updatedAt: changedAt })
+        .where(eq(leads.id, input.leadId));
+
+      await tx.insert(leadTimelineEvents).values({
+        leadId: input.leadId,
+        eventType: "conversation.ai_control_changed",
+        summary: input.enabled
+          ? "Manager enabled AI replies"
+          : "Manager disabled AI replies",
+        metadata: {
+          public_conversation_id: input.publicConversationId,
+          enabled: input.enabled,
+          previous_agent_allowed_to_reply: conversation.agentAllowedToReply,
+          previous_ai_state: conversation.aiState,
+          changed_by_manager_id: input.changedByManagerId,
+          changed_by_manager_email: input.changedByManagerEmail,
+          changed_by_manager_role: input.changedByManagerRole
+        },
+        createdAt: changedAt
+      });
+    });
+
+    return found ? this.getManagerLead(input.leadId) : null;
   }
 
   async listManagerLeads(): Promise<ManagerLeadListItem[]> {

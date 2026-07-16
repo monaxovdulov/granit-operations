@@ -2,6 +2,7 @@ import type {
   LeadStatus,
   ManagerLeadDetail,
   ManagerLeadListItem,
+  ManagerAiControl,
   ManagerTelegramBindingStatus,
   ManagerUser
 } from "./types";
@@ -40,6 +41,15 @@ export const managerApi = {
   async listLeads() {
     return requestJson<{ leads: ManagerLeadListItem[] }>("/manager/leads");
   },
+  async getAiControl() {
+    return requestJson<{ control: ManagerAiControl }>("/manager/ai-control");
+  },
+  async setAiControl(enabled: boolean, version: number) {
+    return requestJson<{ control: ManagerAiControl }>("/manager/ai-control", {
+      method: "PATCH",
+      body: JSON.stringify({ enabled, version })
+    });
+  },
   async getLead(leadId: string) {
     return requestJson<{ lead: ManagerLeadDetail }>(`/manager/leads/${encodeURIComponent(leadId)}`);
   },
@@ -59,6 +69,21 @@ export const managerApi = {
       )}/takeover`,
       {
         method: "PATCH"
+      }
+    );
+  },
+  async setConversationAiControl(
+    leadId: string,
+    publicConversationId: string,
+    enabled: boolean
+  ) {
+    return requestJson<{ lead: ManagerLeadDetail }>(
+      `/manager/leads/${encodeURIComponent(leadId)}/conversations/${encodeURIComponent(
+        publicConversationId
+      )}/ai-control`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ enabled })
       }
     );
   },
