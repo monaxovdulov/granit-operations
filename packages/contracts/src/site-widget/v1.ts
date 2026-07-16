@@ -110,6 +110,7 @@ export const SiteWidgetAutomationSchema = z
       .object({
         status: z.literal("replied"),
         next_step: z.literal("ai_reply_shown"),
+        conversation_state: z.enum(["ai_active", "manager_pending"]),
         disclosure: z
           .object({
             shown: z.literal(true),

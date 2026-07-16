@@ -2,6 +2,12 @@ import type { SiteWidgetUtm } from "@granit/contracts";
 
 import type { AiTurnInput } from "../../ai/ai-turn.js";
 import type {
+  AiHandoffReason,
+  AiSlotUpdate,
+  AiTurnAction,
+  AiTurnIntent
+} from "../../ai/ai-dialog-contract.js";
+import type {
   AiState,
   ChannelProvider,
   ConversationContentType,
@@ -91,6 +97,21 @@ export type PersistAiReplyWithSendGateInput = {
   sourcePageUrl?: string;
   metadata: Record<string, unknown>;
   agentAllowedToReplyAfterSend?: boolean;
+  slotUpdates?: AiSlotUpdate[];
+  aiRun?: {
+    inputFingerprint: string;
+    action: AiTurnAction;
+    intent: AiTurnIntent;
+    promptVersion?: string;
+    policyVersion?: string;
+    knowledgeVersion?: string;
+    modelVersion?: string;
+  };
+  handoff?: {
+    reason: AiHandoffReason;
+    summary: string;
+    slotsSnapshot: Record<string, unknown>;
+  };
 };
 
 export type SaveSiteWidgetAiMessageInput = Omit<

@@ -1,20 +1,39 @@
-export const WIDGET_AI_POLICY_VERSION = "granit_widget_ai_policy.s05.v1";
+import type {
+  AiHandoffReason,
+  AiRiskFlag,
+  AiSlotName,
+  AiTurnAction,
+  AiTurnIntent
+} from "../ai-dialog-contract.js";
+import type { AiTurnInput } from "../ai-turn.js";
+
+export const WIDGET_AI_POLICY_VERSION = "granit_widget_ai_policy.consult_first.v1";
 
 export type WidgetAiPolicyReply = {
   text: string;
   fallbackMode: "manager_required";
   reason: string;
+  action: AiTurnAction;
+  intent: AiTurnIntent;
+  requestedSlots: AiSlotName[];
+  riskFlags: AiRiskFlag[];
+  handoffReason: AiHandoffReason;
   stopAiAfterReply?: boolean;
 };
 
-export function buildWidgetAiPolicyReply(message: string): WidgetAiPolicyReply | null {
-  const normalized = message.toLocaleLowerCase("ru-RU");
+export function buildWidgetAiPolicyReply(input: AiTurnInput): WidgetAiPolicyReply | null {
+  const normalized = input.inboundMessage.text.toLocaleLowerCase("ru-RU");
 
   if (/(менеджер|оператор|человек|живой|позвон|свяж|перезвон|manager|human|operator)/i.test(normalized)) {
     return {
-      text: "Передам менеджеру. Напишите телефон или удобный способ связи.",
+      text: handoffText(input, "Передам менеджеру."),
       fallbackMode: "manager_required",
       reason: "manager_requested",
+      action: "handoff",
+      intent: "manager_request",
+      requestedSlots: [],
+      riskFlags: ["manager_requested"],
+      handoffReason: "manager_requested",
       stopAiAfterReply: true
     };
   }
@@ -24,38 +43,61 @@ export function buildWidgetAiPolicyReply(message: string): WidgetAiPolicyReply |
       text:
         "По юридическим и похоронным вопросам не консультирую. По памятнику менеджер подскажет после уточнения деталей.",
       fallbackMode: "manager_required",
-      reason: "out_of_scope_legal_funeral_inheritance"
+      reason: "out_of_scope_legal_funeral_inheritance",
+      action: "handoff",
+      intent: "out_of_scope",
+      requestedSlots: [],
+      riskFlags: ["legal_funeral_topic"],
+      handoffReason: "out_of_scope",
+      stopAiAfterReply: true
     };
   }
 
-  if (/(цен|стоим|стоить|стоит|сколько.*сто|прайс|руб|₽|price|cost)/i.test(normalized)) {
+  if (/(точн|финальн|окончательн).{0,24}(цен|стоим|смет)|(?:цен|стоим|смет).{0,24}(точн|финальн|окончательн)|коммерческ(?:ое|ого) предложен/i.test(normalized)) {
     return {
       text:
-        "Цену подтвердит менеджер после уточнения материала, размера, гравировки и установки. Не буду называть неподтвержденные суммы.",
+        handoffText(input, "Финальную стоимость подготовит менеджер."),
       fallbackMode: "manager_required",
-      reason: "price_requires_approved_source"
-    };
-  }
-
-  if (/(срок|когда|дата|сегодня|завтра|дней|часов|deadline|timing|when)/i.test(normalized)) {
-    return {
-      text:
-        "Сроки зависят от модели, гравировки, установки и условий на месте. Возможные даты подтвердит менеджер.",
-      fallbackMode: "manager_required",
-      reason: "deadline_requires_manager_confirmation"
+      reason: "final_quote_pressure",
+      action: "handoff",
+      intent: "binding_terms",
+      requestedSlots: [],
+      riskFlags: ["exact_price_requested", "final_quote_pressure"],
+      handoffReason: "final_quote_pressure",
+      stopAiAfterReply: true
     };
   }
 
   if (/(гарант|договор|контракт|скидк|наличи|оплат|рассроч|кредит|warranty|contract|discount|available|payment|installment)/i.test(normalized)) {
     return {
       text:
-        "Такие условия подтверждает менеджер. Сообщение сохранено, менеджер уточнит детали и ответит по условиям.",
+        handoffText(input, "Такие условия подтверждает менеджер."),
       fallbackMode: "manager_required",
-      reason: "binding_terms_require_manager_confirmation"
+      reason: "binding_terms_require_manager_confirmation",
+      action: "handoff",
+      intent: "binding_terms",
+      requestedSlots: [],
+      riskFlags: ["binding_terms_requested"],
+      handoffReason: "binding_terms",
+      stopAiAfterReply: true
     };
   }
 
   return null;
+}
+
+function handoffText(input: AiTurnInput, prefix: string): string {
+  const contactKnown = Boolean(
+    input.customer.phoneProvided ||
+      input.customer.emailProvided ||
+      input.customer.preferredContact ||
+      input.knownSlots.values.phone ||
+      input.knownSlots.values.preferredContact
+  );
+
+  return contactKnown
+    ? `${prefix} Передам ему диалог вместе с уже указанным контактом.`
+    : `${prefix} Напишите телефон или удобный способ связи.`;
 }
 
 export function unsafeWidgetAiModelReplyReason(text: string): string | null {

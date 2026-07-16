@@ -1,8 +1,11 @@
-import { and, desc, eq, or, type SQLWrapper } from "drizzle-orm";
+import { and, desc, eq, ne, or, type SQLWrapper } from "drizzle-orm";
 
 import {
+  aiRuns,
   channelIdentities,
+  conversationHandoffs,
   conversationMessages,
+  conversationSlots,
   conversations,
   intakeSubmissions,
   leadTimelineEvents,
@@ -20,6 +23,11 @@ import {
   buildStageASiteWidgetAiTurnInput,
   type AiTurnInput
 } from "../../ai/ai-turn.js";
+import {
+  AI_SLOT_NAMES,
+  type AiKnownSlots,
+  type AiSlotName
+} from "../../ai/ai-dialog-contract.js";
 import {
   aiMessageSentTimelineEvent,
   conversationMessageReceivedTimelineEvent,
@@ -86,7 +94,9 @@ import type {
   SaveAcceptedSiteFormSubmissionInput,
   SaveAcceptedSiteFormSubmissionResult,
   SaveAcceptedSiteWidgetMessageInput,
-  SaveAcceptedSiteWidgetMessageResult
+  SaveAcceptedSiteWidgetMessageResult,
+  RecordSiteWidgetAiDegradationInput,
+  SiteWidgetHistoryResult
 } from "./public-intake-repository.js";
 
 export class PostgresIntakeRepository implements IntakeRepository {
@@ -401,6 +411,36 @@ export class PostgresIntakeRepository implements IntakeRepository {
           });
         }
 
+        const [recentMessageRows, slotRows] =
+          input.channel === "site_widget"
+            ? await Promise.all([
+                tx
+                  .select({
+                    publicMessageId: conversationMessages.publicMessageId,
+                    direction: conversationMessages.direction,
+                    senderRole: conversationMessages.senderRole,
+                    contentType: conversationMessages.contentType,
+                    submittedAt: conversationMessages.submittedAt,
+                    body: conversationMessages.body
+                  })
+                  .from(conversationMessages)
+                  .where(eq(conversationMessages.conversationId, conversation.id))
+                  .orderBy(desc(conversationMessages.createdAt))
+                  .limit(13),
+                tx
+                  .select({
+                    name: conversationSlots.name,
+                    value: conversationSlots.value,
+                    source: conversationSlots.source,
+                    sourcePublicMessageId: conversationSlots.sourcePublicMessageId,
+                    confidencePermille: conversationSlots.confidencePermille,
+                    updatedAt: conversationSlots.updatedAt
+                  })
+                  .from(conversationSlots)
+                  .where(eq(conversationSlots.conversationId, conversation.id))
+              ])
+            : [[], []];
+
         return {
           leadId: conversation.leadId,
           conversationId: conversation.id,
@@ -416,7 +456,9 @@ export class PostgresIntakeRepository implements IntakeRepository {
             publicMessageId: message.publicMessageId,
             publicSessionId: widgetSession?.publicSessionId,
             agentAllowedToReply: conversation.agentAllowedToReply,
-            aiState: toAiState(conversation.aiState)
+            aiState: toAiState(conversation.aiState),
+            recentMessages: toAiRecentMessages(recentMessageRows, message.publicMessageId),
+            persistedSlots: toAiKnownSlots(slotRows)
           })
         };
       });
@@ -569,6 +611,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
             createdAt: now
           })
           .returning({
+            id: conversationMessages.id,
             publicMessageId: conversationMessages.publicMessageId,
             body: conversationMessages.body,
             createdAt: conversationMessages.createdAt
@@ -576,6 +619,96 @@ export class PostgresIntakeRepository implements IntakeRepository {
 
         if (!message) {
           throw new Error("AI message insert returned no row");
+        }
+
+        if (input.slotUpdates?.length) {
+          for (const slot of input.slotUpdates) {
+            await tx
+              .insert(conversationSlots)
+              .values({
+                conversationId: input.conversationId,
+                leadId: input.leadId,
+                name: slot.name,
+                value: slot.value,
+                source: slot.source,
+                sourcePublicMessageId: slot.sourceMessageId,
+                confidencePermille: Math.round(slot.confidence * 1000),
+                createdAt: now,
+                updatedAt: now
+              })
+              .onConflictDoUpdate({
+                target: [conversationSlots.conversationId, conversationSlots.name],
+                setWhere: ne(conversationSlots.source, "manager"),
+                set: {
+                  value: slot.value,
+                  source: slot.source,
+                  sourcePublicMessageId: slot.sourceMessageId,
+                  confidencePermille: Math.round(slot.confidence * 1000),
+                  updatedAt: now
+                }
+              });
+          }
+        }
+
+        if (input.aiRun) {
+          await tx.insert(aiRuns).values({
+            conversationId: input.conversationId,
+            leadId: input.leadId,
+            inboundPublicMessageId: input.inboundPublicMessageId,
+            outboundPublicMessageId: message.publicMessageId,
+            status: input.handoff ? "handoff" : "replied",
+            action: input.aiRun.action,
+            intent: input.aiRun.intent,
+            inputFingerprint: input.aiRun.inputFingerprint,
+            promptVersion: input.aiRun.promptVersion ?? null,
+            policyVersion: input.aiRun.policyVersion ?? null,
+            knowledgeVersion: input.aiRun.knowledgeVersion ?? null,
+            modelName: input.aiRun.modelVersion ?? null,
+            reason: input.handoff?.reason ?? null,
+            metadata: input.metadata,
+            createdAt: now
+          });
+        }
+
+        if (input.handoff) {
+          await tx.insert(conversationHandoffs).values({
+            conversationId: input.conversationId,
+            leadId: input.leadId,
+            inboundPublicMessageId: input.inboundPublicMessageId,
+            outboundPublicMessageId: message.publicMessageId,
+            reason: input.handoff.reason,
+            summary: input.handoff.summary,
+            status: "active",
+            slotsSnapshot: input.handoff.slotsSnapshot,
+            createdAt: now
+          });
+
+          await tx.insert(leadTimelineEvents).values({
+            leadId: input.leadId,
+            eventType: "conversation.ai_handoff_created",
+            summary: "AI dialog handed to a manager",
+            metadata: {
+              public_conversation_id: sendGate.publicConversationId,
+              inbound_public_message_id: input.inboundPublicMessageId,
+              outbound_public_message_id: message.publicMessageId,
+              reason: input.handoff.reason,
+              handoff_summary: input.handoff.summary,
+              slots: input.handoff.slotsSnapshot
+            },
+            createdAt: now
+          });
+
+          await enqueueAiHandoffManagerNotifications(tx, {
+            leadId: input.leadId,
+            conversationId: input.conversationId,
+            conversationMessageId: message.id,
+            publicConversationId: sendGate.publicConversationId,
+            publicMessageId: message.publicMessageId,
+            reason: input.handoff.reason,
+            summary: input.handoff.summary,
+            slotsSnapshot: input.handoff.slotsSnapshot,
+            createdAt: now
+          });
         }
 
         await tx
@@ -628,6 +761,116 @@ export class PostgresIntakeRepository implements IntakeRepository {
       channel: "site_widget",
       provider: "site_widget"
     });
+  }
+
+  async recordSiteWidgetAiDegradation(
+    input: RecordSiteWidgetAiDegradationInput
+  ): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      const now = new Date();
+      const [conversation] = await tx
+        .update(conversations)
+        .set({
+          agentAllowedToReply: false,
+          aiState: "needs_manager",
+          updatedAt: now
+        })
+        .where(
+          and(
+            eq(conversations.id, input.conversationId),
+            eq(conversations.leadId, input.leadId)
+          )
+        )
+        .returning({ publicConversationId: conversations.publicConversationId });
+
+      if (!conversation) {
+        throw new Error("conversation not found for AI degradation");
+      }
+
+      const [run] = await tx
+        .insert(aiRuns)
+        .values({
+          conversationId: input.conversationId,
+          leadId: input.leadId,
+          inboundPublicMessageId: input.inboundPublicMessageId,
+          status: "degraded",
+          inputFingerprint: input.inputFingerprint,
+          reason: input.reason,
+          metadata: input.metadata,
+          createdAt: now
+        })
+        .onConflictDoNothing({ target: aiRuns.inboundPublicMessageId })
+        .returning({ id: aiRuns.id });
+
+      if (!run) {
+        return;
+      }
+
+      await tx.insert(leadTimelineEvents).values({
+        leadId: input.leadId,
+        eventType: "conversation.ai_degraded",
+        summary: "AI reply unavailable; manager review required",
+        metadata: {
+          public_conversation_id: conversation.publicConversationId,
+          inbound_public_message_id: input.inboundPublicMessageId,
+          reason: input.reason,
+          ...input.metadata
+        },
+        createdAt: now
+      });
+    });
+  }
+
+  async getSiteWidgetHistory(publicSessionId: string): Promise<SiteWidgetHistoryResult | null> {
+    const [session] = await this.db
+      .select({
+        publicSessionId: widgetSessions.publicSessionId,
+        conversationId: conversations.id,
+        publicConversationId: conversations.publicConversationId,
+        aiState: conversations.aiState,
+        status: conversations.status
+      })
+      .from(widgetSessions)
+      .innerJoin(conversations, eq(conversations.widgetSessionId, widgetSessions.id))
+      .where(eq(widgetSessions.publicSessionId, publicSessionId))
+      .limit(1);
+
+    if (!session) {
+      return null;
+    }
+
+    const rows = await this.db
+      .select({
+        publicMessageId: conversationMessages.publicMessageId,
+        senderRole: conversationMessages.senderRole,
+        body: conversationMessages.body,
+        contentType: conversationMessages.contentType,
+        submittedAt: conversationMessages.submittedAt
+      })
+      .from(conversationMessages)
+      .where(eq(conversationMessages.conversationId, session.conversationId))
+      .orderBy(conversationMessages.createdAt)
+      .limit(100);
+
+    return {
+      publicSessionId: session.publicSessionId,
+      publicConversationId: session.publicConversationId,
+      state: toPublicWidgetConversationState(session.aiState, session.status),
+      messages: rows
+        .filter(
+          (row) =>
+            row.contentType === "text" &&
+            (row.senderRole === "visitor" ||
+              row.senderRole === "ai_assistant" ||
+              row.senderRole === "manager")
+        )
+        .map((row) => ({
+          publicMessageId: row.publicMessageId,
+          senderRole: row.senderRole as "visitor" | "ai_assistant" | "manager",
+          text: row.body,
+          submittedAt: row.submittedAt.toISOString()
+        }))
+    };
   }
 
   async listManagerLeads(): Promise<ManagerLeadListItem[]> {
@@ -1220,6 +1463,10 @@ export class PostgresIntakeRepository implements IntakeRepository {
     const existingAiReply = await this.findExistingAiMessageByIdempotencyKey(
       `ai:${existing.publicMessageId}`
     );
+    const context = await this.loadAiDialogContext(
+      existing.conversationId,
+      existing.publicMessageId
+    );
 
     return {
       leadId: existing.leadId,
@@ -1239,7 +1486,41 @@ export class PostgresIntakeRepository implements IntakeRepository {
             createdAt: existingAiReply.createdAt
           }
         : undefined,
-      aiTurnInput: buildPersistedSiteWidgetAiTurnInput(existing)
+      aiTurnInput: buildPersistedSiteWidgetAiTurnInput(existing, context)
+    };
+  }
+
+  private async loadAiDialogContext(conversationId: string, currentPublicMessageId: string) {
+    const [recentMessageRows, slotRows] = await Promise.all([
+      this.db
+        .select({
+          publicMessageId: conversationMessages.publicMessageId,
+          direction: conversationMessages.direction,
+          senderRole: conversationMessages.senderRole,
+          contentType: conversationMessages.contentType,
+          submittedAt: conversationMessages.submittedAt,
+          body: conversationMessages.body
+        })
+        .from(conversationMessages)
+        .where(eq(conversationMessages.conversationId, conversationId))
+        .orderBy(desc(conversationMessages.createdAt))
+        .limit(13),
+      this.db
+        .select({
+          name: conversationSlots.name,
+          value: conversationSlots.value,
+          source: conversationSlots.source,
+          sourcePublicMessageId: conversationSlots.sourcePublicMessageId,
+          confidencePermille: conversationSlots.confidencePermille,
+          updatedAt: conversationSlots.updatedAt
+        })
+        .from(conversationSlots)
+        .where(eq(conversationSlots.conversationId, conversationId))
+    ]);
+
+    return {
+      recentMessages: toAiRecentMessages(recentMessageRows, currentPublicMessageId),
+      persistedSlots: toAiKnownSlots(slotRows)
     };
   }
 
@@ -1271,6 +1552,21 @@ function nextAiStateForInbound(currentAiState: string, needsManager: boolean): A
   return current === "manager_active" ? "manager_active" : "needs_manager";
 }
 
+function toPublicWidgetConversationState(
+  aiState: string,
+  status: string
+): SiteWidgetHistoryResult["state"] {
+  if (status === "closed" || aiState === "closed") {
+    return "closed";
+  }
+
+  if (aiState === "manager_active") {
+    return "manager_active";
+  }
+
+  return aiState === "needs_manager" ? "manager_pending" : "ai_active";
+}
+
 function buildSiteWidgetAiTurnInput(
   input: AcceptInboundMessageInput,
   accepted: {
@@ -1279,6 +1575,8 @@ function buildSiteWidgetAiTurnInput(
     publicSessionId?: string;
     agentAllowedToReply: boolean;
     aiState: AiState;
+    recentMessages: AiTurnInput["compactContext"]["messages"];
+    persistedSlots: AiKnownSlots;
   }
 ): AiTurnInput | undefined {
   if (
@@ -1316,7 +1614,9 @@ function buildSiteWidgetAiTurnInput(
     gate: {
       aiState: accepted.aiState,
       agentAllowedToReply: accepted.agentAllowedToReply
-    }
+    },
+    recentMessages: accepted.recentMessages,
+    persistedSlots: accepted.persistedSlots
   });
 }
 
@@ -1342,6 +1642,9 @@ function buildPersistedSiteWidgetAiTurnInput(input: {
   contactPreferred: string | null;
   contactCity: string | null;
   requestFingerprint: string;
+}, context: {
+  recentMessages: AiTurnInput["compactContext"]["messages"];
+  persistedSlots: AiKnownSlots;
 }): AiTurnInput | undefined {
   const pageUrl = input.sourcePageUrl ?? input.conversationSourcePageUrl;
   const widgetInstanceId = input.widgetInstanceId ?? input.sessionWidgetInstanceId;
@@ -1381,8 +1684,105 @@ function buildPersistedSiteWidgetAiTurnInput(input: {
     gate: {
       aiState: toAiState(input.aiState),
       agentAllowedToReply: input.agentAllowedToReply
-    }
+    },
+    recentMessages: context.recentMessages,
+    persistedSlots: context.persistedSlots
   });
+}
+
+type AiContextMessageRow = {
+  publicMessageId: string;
+  direction: string;
+  senderRole: string;
+  contentType: string;
+  submittedAt: Date;
+  body: string;
+};
+
+function toAiRecentMessages(
+  rows: AiContextMessageRow[],
+  currentPublicMessageId: string
+): AiTurnInput["compactContext"]["messages"] {
+  const chronological = rows
+    .filter(
+      (row) =>
+        row.publicMessageId !== currentPublicMessageId &&
+        row.contentType === "text" &&
+        (row.direction === "inbound" || row.direction === "outbound") &&
+        (row.senderRole === "visitor" || row.senderRole === "ai_assistant") &&
+        row.body.trim()
+    )
+    .slice(0, 12)
+    .reverse();
+  const bounded: AiTurnInput["compactContext"]["messages"] = [];
+  let remainingCharacters = 12_000;
+
+  for (let index = chronological.length - 1; index >= 0 && remainingCharacters > 0; index -= 1) {
+    const row = chronological[index];
+
+    if (!row) {
+      continue;
+    }
+
+    const fullText = row.body.trim();
+    const text =
+      fullText.length <= remainingCharacters
+        ? fullText
+        : fullText.slice(fullText.length - remainingCharacters);
+
+    bounded.unshift({
+      publicMessageId: row.publicMessageId,
+      direction: row.direction as "inbound" | "outbound",
+      senderRole: row.senderRole as "visitor" | "ai_assistant",
+      contentType: "text",
+      submittedAt: row.submittedAt.toISOString(),
+      text
+    });
+    remainingCharacters -= text.length;
+  }
+
+  return bounded;
+}
+
+type AiSlotRow = {
+  name: string;
+  value: string;
+  source: string;
+  sourcePublicMessageId: string | null;
+  confidencePermille: number;
+  updatedAt: Date;
+};
+
+function toAiKnownSlots(rows: AiSlotRow[]): AiKnownSlots {
+  const slots: AiKnownSlots = {};
+
+  for (const row of rows) {
+    if (
+      !AI_SLOT_NAMES.includes(row.name as AiSlotName) ||
+      !isAiSlotSource(row.source)
+    ) {
+      continue;
+    }
+
+    slots[row.name as AiSlotName] = {
+      value: row.value,
+      source: row.source,
+      sourceMessageId: row.sourcePublicMessageId ?? undefined,
+      confidence: row.confidencePermille / 1000,
+      updatedAt: row.updatedAt.toISOString()
+    };
+  }
+
+  return slots;
+}
+
+function isAiSlotSource(value: string): value is "contact" | "visitor_message" | "ai_extraction" | "manager" {
+  return (
+    value === "contact" ||
+    value === "visitor_message" ||
+    value === "ai_extraction" ||
+    value === "manager"
+  );
 }
 
 function normalizeAiPreferredContact(value: string | null | undefined) {
@@ -1400,6 +1800,91 @@ function readOptionalString(
   const entry = value?.[key];
 
   return typeof entry === "string" && entry.trim() ? entry : undefined;
+}
+
+async function enqueueAiHandoffManagerNotifications(
+  tx: Transaction,
+  input: {
+    leadId: string;
+    conversationId: string;
+    conversationMessageId: string;
+    publicConversationId: string;
+    publicMessageId: string;
+    reason: string;
+    summary: string;
+    slotsSnapshot: Record<string, unknown>;
+    createdAt: Date;
+  }
+) {
+  const destinations = await tx
+    .select({
+      bindingId: managerTelegramBindings.id,
+      managerUserId: managerTelegramBindings.managerUserId,
+      managerEmail: managerUsers.email,
+      managerRole: managerUsers.role,
+      managerStatus: managerUsers.status
+    })
+    .from(managerTelegramBindings)
+    .innerJoin(managerUsers, eq(managerTelegramBindings.managerUserId, managerUsers.id))
+    .where(eq(managerTelegramBindings.status, "active"));
+  const activeDestinations = destinations.filter(
+    (destination) =>
+      destination.managerStatus === "active" &&
+      (destination.managerRole === "owner" || destination.managerRole === "manager")
+  );
+  const metadata = {
+    public_conversation_id: input.publicConversationId,
+    public_message_id: input.publicMessageId,
+    handoff_reason: input.reason,
+    handoff_summary: input.summary,
+    text_preview: input.summary,
+    content_type: "site_widget_text",
+    needs_manager_reason: input.reason,
+    slots: input.slotsSnapshot
+  };
+
+  if (!activeDestinations.length) {
+    await tx.insert(managerNotificationOutbox).values({
+      leadId: input.leadId,
+      conversationId: input.conversationId,
+      conversationMessageId: input.conversationMessageId,
+      notificationType: "site_widget_ai_handoff",
+      destinationKind: "manager_telegram_private",
+      destinationIdentityId: null,
+      managerTelegramBindingId: null,
+      status: "blocked_no_destination",
+      provider: "telegram_bot",
+      metadata: {
+        ...metadata,
+        reason: "manager_telegram_destination_not_bound"
+      },
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt
+    });
+    return;
+  }
+
+  await tx.insert(managerNotificationOutbox).values(
+    activeDestinations.map((destination) => ({
+      leadId: input.leadId,
+      conversationId: input.conversationId,
+      conversationMessageId: input.conversationMessageId,
+      notificationType: "site_widget_ai_handoff",
+      destinationKind: "manager_telegram_private",
+      destinationIdentityId: null,
+      managerTelegramBindingId: destination.bindingId,
+      status: "pending",
+      provider: "telegram_bot",
+      metadata: {
+        ...metadata,
+        manager_user_id: destination.managerUserId,
+        manager_email: destination.managerEmail,
+        manager_role: destination.managerRole
+      },
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt
+    }))
+  );
 }
 
 async function enqueueTelegramManagerNotifications(

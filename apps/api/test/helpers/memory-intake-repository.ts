@@ -9,6 +9,7 @@ import {
   buildStageASiteWidgetAiTurnInput,
   type AiTurnInput
 } from "../../src/modules/ai/ai-turn.js";
+import type { AiKnownSlots } from "../../src/modules/ai/ai-dialog-contract.js";
 import {
   AgentReplyBlockedError,
   IdempotencyConflictError,
@@ -37,12 +38,14 @@ import {
   type PersistManagerTelegramReplyResult,
   type PersistAiReplyWithSendGateInput,
   type RecordManualContactInput,
+  type RecordSiteWidgetAiDegradationInput,
   type SaveAcceptedSiteFormSubmissionInput,
   type SaveAcceptedSiteFormSubmissionResult,
   type SaveAcceptedSiteWidgetMessageInput,
   type SaveAcceptedSiteWidgetMessageResult,
   type SaveSiteWidgetAiMessageInput,
   type SaveSiteWidgetAiMessageResult,
+  type SiteWidgetHistoryResult,
   type SetNextStepInput,
   type TakeoverConversationByPublicIdInput,
   type TakeoverConversationInput,
@@ -98,6 +101,7 @@ export class MemoryIntakeRepository implements IntakeRepository {
   private readonly conversationPublicIds = new Map<string, string>();
   private readonly publicConversationIds = new Map<string, string>();
   private readonly conversationIdentityIds = new Map<string, string>();
+  private readonly aiSlotsByConversation = new Map<string, AiKnownSlots>();
   private readonly telegramIdentityLeads = new Map<string, string>();
   private readonly telegramIdentityConversations = new Map<string, string>();
   private readonly telegramProviderMessages = new Map<string, string>();
@@ -481,6 +485,12 @@ export class MemoryIntakeRepository implements IntakeRepository {
           publicMessageId: existing.publicMessageId,
           agentAllowedToReply,
           aiState
+        }, {
+          recentMessages: toMemoryAiRecentMessages(
+            conversation?.messages ?? [],
+            existing.publicMessageId
+          ),
+          persistedSlots: this.aiSlotsByConversation.get(conversationId) ?? {}
         })
       };
     }
@@ -590,6 +600,12 @@ export class MemoryIntakeRepository implements IntakeRepository {
         publicMessageId: input.publicMessageId,
         agentAllowedToReply,
         aiState
+      }, {
+        recentMessages: toMemoryAiRecentMessages(
+          conversation?.messages ?? [],
+          input.publicMessageId
+        ),
+        persistedSlots: this.aiSlotsByConversation.get(conversationId) ?? {}
       })
     };
   }
@@ -660,7 +676,24 @@ export class MemoryIntakeRepository implements IntakeRepository {
             inbound_public_message_id: input.inboundPublicMessageId
           },
           createdAt
-        }
+        },
+        ...(input.handoff
+          ? [
+              {
+                eventType: "conversation.ai_handoff_created",
+                summary: "AI dialog handed to a manager",
+                metadata: {
+                  public_conversation_id: conversation.publicConversationId,
+                  inbound_public_message_id: input.inboundPublicMessageId,
+                  outbound_public_message_id: input.publicMessageId,
+                  reason: input.handoff.reason,
+                  handoff_summary: input.handoff.summary,
+                  slots: input.handoff.slotsSnapshot
+                },
+                createdAt
+              }
+            ]
+          : [])
       ],
       conversations: lead.conversations.map((candidate) =>
         candidate.channelIdentity.widgetPublicSessionId === publicSessionId
@@ -690,6 +723,29 @@ export class MemoryIntakeRepository implements IntakeRepository {
     };
 
     this.leads.set(lead.leadId, updatedLead);
+
+    if (input.slotUpdates?.length) {
+      const slots = {
+        ...(this.aiSlotsByConversation.get(input.conversationId) ?? {})
+      };
+
+      for (const slot of input.slotUpdates) {
+        if (slots[slot.name]?.source === "manager") {
+          continue;
+        }
+
+        slots[slot.name] = {
+          value: slot.value,
+          source: slot.source,
+          sourceMessageId: slot.sourceMessageId,
+          confidence: slot.confidence,
+          updatedAt: createdAt
+        };
+      }
+
+      this.aiSlotsByConversation.set(input.conversationId, slots);
+    }
+
     this.widgetAiIdempotency.set(input.idempotencyKey, {
       publicMessageId: input.publicMessageId,
       body: input.body,
@@ -701,6 +757,87 @@ export class MemoryIntakeRepository implements IntakeRepository {
       publicMessageId: input.publicMessageId,
       body: input.body,
       createdAt
+    };
+  }
+
+  async recordSiteWidgetAiDegradation(
+    input: RecordSiteWidgetAiDegradationInput
+  ): Promise<void> {
+    const lead = this.leads.get(input.leadId);
+    const publicSessionId = this.conversationSessions.get(input.conversationId);
+
+    if (!lead || !publicSessionId) {
+      throw new Error("memory conversation not found for AI degradation");
+    }
+
+    const createdAt = new Date().toISOString();
+    this.leads.set(input.leadId, {
+      ...lead,
+      updatedAt: createdAt,
+      timeline: [
+        ...lead.timeline,
+        {
+          eventType: "conversation.ai_degraded",
+          summary: "AI reply unavailable; manager review required",
+          metadata: {
+            inbound_public_message_id: input.inboundPublicMessageId,
+            input_fingerprint: input.inputFingerprint,
+            reason: input.reason,
+            ...input.metadata
+          },
+          createdAt
+        }
+      ],
+      conversations: lead.conversations.map((conversation) =>
+        conversation.channelIdentity.widgetPublicSessionId === publicSessionId
+          ? {
+              ...conversation,
+              aiState: "needs_manager",
+              agentAllowedToReply: false,
+              updatedAt: createdAt
+            }
+          : conversation
+      )
+    });
+  }
+
+  async getSiteWidgetHistory(publicSessionId: string): Promise<SiteWidgetHistoryResult | null> {
+    const conversationId = this.sessionConversations.get(publicSessionId);
+    const leadId = conversationId ? this.conversationLeads.get(conversationId) : undefined;
+    const lead = leadId ? this.leads.get(leadId) : undefined;
+    const conversation = lead?.conversations.find(
+      (candidate) => candidate.channelIdentity.widgetPublicSessionId === publicSessionId
+    );
+
+    if (!conversation) {
+      return null;
+    }
+
+    return {
+      publicSessionId,
+      publicConversationId: conversation.publicConversationId,
+      state:
+        conversation.aiState === "closed"
+          ? "closed"
+          : conversation.aiState === "manager_active"
+            ? "manager_active"
+            : conversation.aiState === "needs_manager"
+              ? "manager_pending"
+              : "ai_active",
+      messages: conversation.messages
+        .filter(
+          (message) =>
+            message.contentType === "text" &&
+            (message.senderRole === "visitor" ||
+              message.senderRole === "ai_assistant" ||
+              message.senderRole === "manager")
+        )
+        .map((message) => ({
+          publicMessageId: message.publicMessageId,
+          senderRole: message.senderRole as "visitor" | "ai_assistant" | "manager",
+          text: message.body,
+          submittedAt: message.createdAt
+        }))
     };
   }
 
@@ -1372,6 +1509,10 @@ function buildMemorySiteWidgetAiTurnInput(
     publicMessageId: string;
     agentAllowedToReply: boolean;
     aiState: SaveAcceptedSiteWidgetMessageResult["aiState"];
+  },
+  context: {
+    recentMessages: AiTurnInput["compactContext"]["messages"];
+    persistedSlots: AiKnownSlots;
   }
 ): AiTurnInput {
   return buildStageASiteWidgetAiTurnInput({
@@ -1400,8 +1541,54 @@ function buildMemorySiteWidgetAiTurnInput(
     gate: {
       aiState: accepted.aiState,
       agentAllowedToReply: accepted.agentAllowedToReply
-    }
+    },
+    recentMessages: context.recentMessages,
+    persistedSlots: context.persistedSlots
   });
+}
+
+function toMemoryAiRecentMessages(
+  messages: ManagerLeadDetail["conversations"][number]["messages"],
+  currentPublicMessageId: string
+): AiTurnInput["compactContext"]["messages"] {
+  const eligible = messages
+    .filter(
+      (message) =>
+        message.publicMessageId !== currentPublicMessageId &&
+        message.contentType === "text" &&
+        (message.direction === "inbound" || message.direction === "outbound") &&
+        (message.senderRole === "visitor" || message.senderRole === "ai_assistant") &&
+        message.body.trim()
+    )
+    .slice(-12);
+  const bounded: AiTurnInput["compactContext"]["messages"] = [];
+  let remainingCharacters = 12_000;
+
+  for (let index = eligible.length - 1; index >= 0 && remainingCharacters > 0; index -= 1) {
+    const message = eligible[index];
+
+    if (!message) {
+      continue;
+    }
+
+    const fullText = message.body.trim();
+    const text =
+      fullText.length <= remainingCharacters
+        ? fullText
+        : fullText.slice(fullText.length - remainingCharacters);
+
+    bounded.unshift({
+      publicMessageId: message.publicMessageId,
+      direction: message.direction as "inbound" | "outbound",
+      senderRole: message.senderRole as "visitor" | "ai_assistant",
+      contentType: "text",
+      submittedAt: message.createdAt,
+      text
+    });
+    remainingCharacters -= text.length;
+  }
+
+  return bounded;
 }
 
 function toManagerTelegramLead(

@@ -6,6 +6,10 @@ import {
 } from "../services/widget-ai-service.js";
 import { WIDGET_AI_POLICY_VERSION } from "../policy/widget-ai-policy.js";
 import { WIDGET_AI_PROMPT_VERSION } from "../prompts/widget-ai-prompt.js";
+import {
+  AI_TURN_DECISION_JSON_SCHEMA,
+  AiTurnCandidateDecisionSchema
+} from "../ai-dialog-contract.js";
 
 export type OpenAiWidgetAssistantProviderOptions = {
   apiKey: string;
@@ -32,12 +36,18 @@ export class OpenAiWidgetAssistantProvider implements WidgetAiProvider {
           store: false,
           instructions: input.instructions,
           input: input.userInput,
-          max_output_tokens: 120,
+          max_output_tokens: 700,
           reasoning: {
             effort: "low"
           },
           text: {
-            verbosity: "low"
+            verbosity: "low",
+            format: {
+              type: "json_schema",
+              name: "granit_widget_ai_turn_decision",
+              strict: true,
+              schema: AI_TURN_DECISION_JSON_SCHEMA
+            }
           },
           metadata: {
             channel: "site_widget",
@@ -53,9 +63,11 @@ export class OpenAiWidgetAssistantProvider implements WidgetAiProvider {
       }
 
       const body = (await response.json()) as OpenAiResponseBody;
+      const outputText = extractOutputText(body);
+      const decision = AiTurnCandidateDecisionSchema.parse(JSON.parse(outputText));
 
       return {
-        text: extractOutputText(body),
+        decision,
         modelProvider: "openai",
         modelName: typeof body.model === "string" ? body.model : this.options.model,
         responseId: typeof body.id === "string" ? body.id : undefined,

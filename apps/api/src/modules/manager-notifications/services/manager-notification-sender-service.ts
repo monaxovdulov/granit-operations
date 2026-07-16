@@ -191,7 +191,9 @@ export class ManagerNotificationSenderService {
 
 function buildNotificationText(notification: PendingManagerNotification) {
   const lines = [
-    "Новое сообщение клиента в Telegram",
+    notification.notificationType === "site_widget_ai_handoff"
+      ? "AI передал диалог сайта менеджеру"
+      : "Новое сообщение клиента в Telegram",
     notification.contentType ? `Тип: ${notification.contentType}` : undefined,
     notification.needsManagerReason ? `Причина: ${notification.needsManagerReason}` : undefined,
     notification.textPreview ? `Сообщение: ${truncateText(notification.textPreview, 2800)}` : undefined

@@ -1,6 +1,6 @@
 # Widget Intake Contract
 
-Status: S05 additive AI response
+Status: Consult-first Stage B additive AI dialog
 Provider: `granit-operations`
 Consumer: `granit-site-cms`
 Version: `site_widget.v1`
@@ -14,6 +14,7 @@ public site widget
   -> lead/conversation/message persisted
   -> manager-visible dialog created
   -> optional safe AI reply persisted
+  -> slots, AI run and handoff/degradation evidence persisted
   -> safe public receipt returned
 ```
 
@@ -62,6 +63,7 @@ Allowed public response fields:
 - `action: "show_widget_saved"`;
 - `automation.status: "disabled" | "fallback" | "replied"`;
 - for `automation.status: "replied"`, only public AI message id and safe reply text;
+- for `automation.status: "replied"`, `conversation_state: "ai_active" | "manager_pending"`;
 - for `automation.status: "fallback"`, a public fallback reason without raw provider/internal errors;
 - safe localized `message_to_user`.
 
@@ -115,6 +117,7 @@ Allowed replied shape:
   "automation": {
     "status": "replied",
     "next_step": "ai_reply_shown",
+    "conversation_state": "ai_active",
     "reply": {
       "public_message_id": "uuid",
       "sender_role": "ai_assistant",
@@ -129,3 +132,42 @@ Safety policy:
 - no final price, exact deadline, warranty, contract, discount, availability, payment, or legal/funeral/inheritance advice;
 - no price amounts in S05 because no approved price-list source is implemented;
 - important conditions require manager confirmation.
+
+## Consult-first Stage B Addendum
+
+- the provider receives a bounded app-owned history of up to 12 prior messages and 12,000 characters;
+- the current inbound message remains separate from prior history;
+- extracted request slots are validated and persisted with provenance;
+- provider output uses a strict typed JSON decision; the model cannot write state or authorize sending;
+- an ordinary first price/deadline question remains consultative and asks at most one useful unknown slot;
+- an explicit manager request, final quote pressure, binding terms or an out-of-scope legal topic creates a persisted terminal handoff;
+- terminal handoff sets `agent_allowed_to_reply=false`, moves the conversation to `needs_manager`, writes manager-visible timeline evidence and creates an outbox work item;
+- provider, schema, source or persistence degradation creates manager-visible evidence and a safe public fallback.
+
+## Safe History Read
+
+```text
+GET /public/intake/site-widget/sessions/:publicSessionId/history
+```
+
+The endpoint accepts only a UUID public session id and returns at most 100 public text messages:
+
+```json
+{
+  "ok": true,
+  "schema_version": "site_widget.history.v1",
+  "public_session_id": "uuid",
+  "public_conversation_id": "uuid",
+  "conversation_state": "ai_active",
+  "messages": [
+    {
+      "public_message_id": "uuid",
+      "sender_role": "visitor",
+      "text": "message",
+      "submitted_at": "2026-07-16T00:00:00.000Z"
+    }
+  ]
+}
+```
+
+Allowed states are `ai_active`, `manager_pending`, `manager_active`, and `closed`. Internal lead/conversation ids, slots, run metadata and manager destinations are never returned.

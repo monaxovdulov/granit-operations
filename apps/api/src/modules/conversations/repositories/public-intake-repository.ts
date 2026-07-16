@@ -42,6 +42,27 @@ export type SaveAcceptedSiteWidgetMessageResult = {
   aiTurnInput?: AiTurnInput;
 };
 
+export type RecordSiteWidgetAiDegradationInput = {
+  leadId: string;
+  conversationId: string;
+  inboundPublicMessageId: string;
+  inputFingerprint: string;
+  reason: string;
+  metadata: Record<string, unknown>;
+};
+
+export type SiteWidgetHistoryResult = {
+  publicSessionId: string;
+  publicConversationId: string;
+  state: "ai_active" | "manager_pending" | "manager_active" | "closed";
+  messages: Array<{
+    publicMessageId: string;
+    senderRole: "visitor" | "ai_assistant" | "manager";
+    text: string;
+    submittedAt: string;
+  }>;
+};
+
 export interface PublicIntakeRepository {
   saveAcceptedSiteFormSubmission(
     input: SaveAcceptedSiteFormSubmissionInput
@@ -52,4 +73,6 @@ export interface PublicIntakeRepository {
   saveSiteWidgetAiMessage(
     input: SaveSiteWidgetAiMessageInput
   ): Promise<SaveSiteWidgetAiMessageResult>;
+  recordSiteWidgetAiDegradation?(input: RecordSiteWidgetAiDegradationInput): Promise<void>;
+  getSiteWidgetHistory?(publicSessionId: string): Promise<SiteWidgetHistoryResult | null>;
 }

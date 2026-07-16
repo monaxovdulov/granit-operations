@@ -1,5 +1,10 @@
 import type { AiReplyCandidateDecision, AiTurnInput } from "../ai-turn.js";
 import {
+  AiTurnCandidateDecisionSchema,
+  type AiSlotName,
+  type AiTurnCandidateDecision
+} from "../ai-dialog-contract.js";
+import {
   WIDGET_AI_DISCLOSURE_VERSION,
   type PublicWidgetAiReplyGenerator
 } from "../../intake/ports/public-widget-ai-reply-generator.js";
@@ -36,7 +41,7 @@ export type WidgetAiProviderInput = {
 };
 
 export type WidgetAiProviderResult = {
-  text: string;
+  decision: AiTurnCandidateDecision;
   modelProvider: "openai" | "fake";
   modelName: string;
   responseId?: string;
@@ -67,13 +72,19 @@ export class WidgetAiService implements PublicWidgetAiReplyGenerator {
       fallback_mode: "none"
     };
 
-    const policyReply = buildWidgetAiPolicyReply(input.inboundMessage.text);
+    const policyReply = buildWidgetAiPolicyReply(input);
 
     if (policyReply) {
       return {
         decision: "reply_candidate",
         text: policyReply.text,
         agentAllowedToReplyAfterSend: policyReply.stopAiAfterReply ? false : undefined,
+        action: policyReply.action,
+        intent: policyReply.intent,
+        requestedSlots: policyReply.requestedSlots,
+        riskFlags: policyReply.riskFlags,
+        handoffReason: policyReply.handoffReason,
+        confidence: 1,
         metadata: {
           ...baseMetadata,
           model_provider: "policy",
@@ -104,7 +115,25 @@ export class WidgetAiService implements PublicWidgetAiReplyGenerator {
         instructions: buildWidgetAiInstructions(),
         userInput: buildWidgetAiUserInput(input)
       });
-      const text = normalizeReply(providerResult.text);
+      const candidate = validateProviderDecision(providerResult.decision, input);
+
+      if (!candidate) {
+        return {
+          decision: "no_reply",
+          reason: "unsafe_model_response",
+          metadata: {
+            ...baseMetadata,
+            model_provider: providerResult.modelProvider,
+            model_name: providerResult.modelName,
+            openai_response_id: providerResult.responseId,
+            fallback_mode: "manager_required",
+            error_type: "invalid_typed_decision",
+            ...usageMetadata(providerResult.usage)
+          }
+        };
+      }
+
+      const text = normalizeReply(candidate.replyText ?? "");
 
       if (!text) {
         return {
@@ -145,11 +174,31 @@ export class WidgetAiService implements PublicWidgetAiReplyGenerator {
       return {
         decision: "reply_candidate",
         text,
+        agentAllowedToReplyAfterSend: candidate.action === "handoff" ? false : undefined,
+        action: candidate.action,
+        intent: candidate.intent,
+        slotUpdates: candidate.extractedSlots.map((slot) => ({
+          ...slot,
+          source: "ai_extraction" as const,
+          sourceMessageId: input.inboundMessage.publicMessageId
+        })),
+        requestedSlots: candidate.requestedSlots,
+        riskFlags: candidate.riskFlags,
+        handoffReason: candidate.handoffReason ?? undefined,
+        sourceEvidence: candidate.sourceEvidence,
+        confidence: candidate.confidence,
         metadata: {
           ...baseMetadata,
           model_provider: providerResult.modelProvider,
           model_name: providerResult.modelName,
           openai_response_id: providerResult.responseId,
+          ai_decision_version: candidate.version,
+          ai_action: candidate.action,
+          ai_intent: candidate.intent,
+          requested_slots: candidate.requestedSlots,
+          risk_flags: candidate.riskFlags,
+          handoff_reason: candidate.handoffReason,
+          confidence: candidate.confidence,
           ...usageMetadata(providerResult.usage)
         }
       };
@@ -167,6 +216,73 @@ export class WidgetAiService implements PublicWidgetAiReplyGenerator {
       };
     }
   }
+}
+
+function validateProviderDecision(
+  value: unknown,
+  input: AiTurnInput
+): AiTurnCandidateDecision | null {
+  const parsed = AiTurnCandidateDecisionSchema.safeParse(value);
+
+  if (!parsed.success) {
+    return null;
+  }
+
+  const decision = parsed.data;
+  const replyRequired =
+    decision.action === "answer" ||
+    decision.action === "clarify" ||
+    decision.action === "handoff";
+
+  if (!replyRequired || !decision.replyText?.trim()) {
+    return null;
+  }
+
+  if (decision.action === "clarify" && decision.requestedSlots.length !== 1) {
+    return null;
+  }
+
+  const extractedNames = new Set<AiSlotName>();
+
+  for (const slot of decision.extractedSlots) {
+    if (extractedNames.has(slot.name)) {
+      return null;
+    }
+
+    extractedNames.add(slot.name);
+  }
+
+  const requestedSlot = decision.requestedSlots[0];
+
+  if (
+    requestedSlot &&
+    (input.knownSlots.values[requestedSlot] || extractedNames.has(requestedSlot))
+  ) {
+    return null;
+  }
+
+  if (!hasOnlyApprovedSourceEvidence(decision, input)) {
+    return null;
+  }
+
+  return decision;
+}
+
+function hasOnlyApprovedSourceEvidence(
+  decision: AiTurnCandidateDecision,
+  input: AiTurnInput
+): boolean {
+  return decision.sourceEvidence.every((evidence) => {
+    if (evidence.kind === "price") {
+      return false;
+    }
+
+    return input.approvedSources.businessFacts.some(
+      (source) =>
+        source.sourceId === evidence.sourceId &&
+        source.version === evidence.version
+    );
+  });
 }
 
 function normalizeReply(value: string): string {

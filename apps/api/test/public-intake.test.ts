@@ -12,8 +12,13 @@ import {
 import { afterEach, describe, expect, it } from "vitest";
 
 import { AI_TURN_INPUT_VERSION, type AiTurnInput } from "../src/modules/ai/ai-turn.js";
+import {
+  AI_TURN_DECISION_VERSION,
+  type AiTurnCandidateDecision
+} from "../src/modules/ai/ai-dialog-contract.js";
 import { WIDGET_AI_POLICY_VERSION } from "../src/modules/ai/policy/widget-ai-policy.js";
 import { WIDGET_AI_PROMPT_VERSION } from "../src/modules/ai/prompts/widget-ai-prompt.js";
+import { APPROVED_WIDGET_KNOWLEDGE_VERSION } from "../src/modules/ai/knowledge/approved-widget-knowledge.js";
 import { buildApi } from "../src/app.js";
 import { TelegramOutboundBlockedError } from "../src/repositories/intake-repository.js";
 import type { PublicWidgetAiReplyGenerator } from "../src/modules/intake/ports/public-widget-ai-reply-generator.js";
@@ -42,6 +47,24 @@ afterEach(async () => {
 function track<T extends ReturnType<typeof buildApi>>(app: T): T {
   openApps.push(app);
   return app;
+}
+
+function aiDecision(
+  overrides: Partial<AiTurnCandidateDecision> = {}
+): AiTurnCandidateDecision {
+  return {
+    version: AI_TURN_DECISION_VERSION,
+    action: "answer",
+    intent: "general_question",
+    replyText: "Могу помочь собрать детали заявки.",
+    extractedSlots: [],
+    requestedSlots: [],
+    riskFlags: [],
+    handoffReason: null,
+    sourceEvidence: [],
+    confidence: 0.9,
+    ...overrides
+  };
 }
 
 async function waitForNextClockTick() {
@@ -782,22 +805,19 @@ describe("public site_widget intake", () => {
         phoneProvided: true
       },
       compactContext: {
-        messages: [
-          {
-            publicMessageId: response.json().public_message_id,
-            direction: "inbound",
-            senderRole: "visitor",
-            contentType: "text",
-            submittedAt: "2026-05-13T10:00:00.000Z",
-            text: "Расскажите про варианты гранита"
-          }
-        ]
+        messages: []
       },
       knownSlots: {
         customerNameProvided: true,
         phoneProvided: true,
         emailProvided: false,
-        preferredContact: "phone"
+        preferredContact: "phone",
+        values: {
+          customerName: {
+            value: "Widget Visitor",
+            source: "contact"
+          }
+        }
       },
       boundaryConfig: {
         replyCapableChannel: "site_widget",
@@ -807,7 +827,13 @@ describe("public site_widget intake", () => {
       },
       approvedSources: {
         price: null,
-        businessFacts: []
+        businessFacts: [
+          {
+            sourceId: "public_site.catalog.monument_types",
+            version: APPROVED_WIDGET_KNOWLEDGE_VERSION,
+            reviewBasis: "published_site_content"
+          }
+        ]
       },
       evidence: {
         boundary: "stage_a_neutral_ai_turn",
@@ -1020,6 +1046,44 @@ describe("public site_widget intake", () => {
     expect(repository.aiSaveCalls).toBe(0);
   });
 
+  it("allows a selected published-site fact only with matching typed source evidence", async () => {
+    const repository = new MemoryIntakeRepository();
+    const provider = new FakeWidgetAiProvider({
+      decision: aiDecision({
+        intent: "product_selection",
+        replyText:
+          "На сайте представлены вертикальные, горизонтальные, двойные и семейные памятники, а также мемориальные комплексы.",
+        sourceEvidence: [
+          {
+            sourceId: "public_site.catalog.monument_types",
+            version: APPROVED_WIDGET_KNOWLEDGE_VERSION,
+            kind: "business_fact"
+          }
+        ]
+      })
+    });
+    const app = track(
+      buildApi({
+        repository,
+        widgetAi: { enabled: true, provider, modelName: "gpt-5.5" }
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/public/intake/site-widget/messages",
+      payload: validWidgetRequest({
+        idempotencyKey: "widget-approved-fact-0001",
+        messageText: "Какие варианты памятников у вас есть?"
+      })
+    });
+
+    expect(response.json().automation.status).toBe("replied");
+    expect(repository.lastAiSaveInput?.metadata).toMatchObject({
+      ai_intent: "product_selection"
+    });
+  });
+
   it("fails closed when a Stage A price candidate gives amount, range or from-X orientation", async () => {
     const unsafePriceTexts = ["Цена 10000.", "Цена от 10000.", "Стоимость 10000-15000."];
 
@@ -1189,6 +1253,16 @@ describe("public site_widget intake", () => {
     });
     expect(response.json().automation.reply).toBeUndefined();
     expect(repository.onlyLead().conversations[0]?.messages).toHaveLength(1);
+    expect(repository.onlyLead().conversations[0]).toMatchObject({
+      aiState: "needs_manager",
+      agentAllowedToReply: false
+    });
+    expect(repository.onlyLead().timeline).toContainEqual(
+      expect.objectContaining({
+        eventType: "conversation.ai_degraded",
+        metadata: expect.objectContaining({ reason: "ai_persistence_unconfirmed" })
+      })
+    );
   });
 
   it("falls back without false AI success when the model provider fails", async () => {
@@ -1222,6 +1296,16 @@ describe("public site_widget intake", () => {
     });
     expect(response.json().automation.reply).toBeUndefined();
     expect(repository.onlyLead().conversations[0]?.messages).toHaveLength(1);
+    expect(repository.onlyLead().conversations[0]).toMatchObject({
+      aiState: "needs_manager",
+      agentAllowedToReply: false
+    });
+    expect(repository.onlyLead().timeline).toContainEqual(
+      expect.objectContaining({
+        eventType: "conversation.ai_degraded",
+        metadata: expect.objectContaining({ reason: "model_error" })
+      })
+    );
   });
 
   it("falls back without saving an AI reply when the model output is unsafe", async () => {
@@ -1262,30 +1346,81 @@ describe("public site_widget intake", () => {
     expect(repository.onlyLead().conversations[0]?.messages).toHaveLength(1);
   });
 
-  it("keeps safe wording for price, deadline, warranty, contract, discount, availability, payment and legal prompts", async () => {
-    const unsafePrompts = [
+  it("keeps ordinary price and deadline questions in a useful Consult-first dialog", async () => {
+    const consultPrompts = [
       {
-        text: "Сколько точно будет стоить памятник?",
-        reason: "price_requires_approved_source"
+        text: "Сколько примерно будет стоить памятник?",
+        decision: aiDecision({
+          action: "clarify",
+          intent: "price_intake",
+          replyText:
+            "Стоимость зависит от материала и размера. Какой материал вы рассматриваете?",
+          requestedSlots: ["material"],
+          riskFlags: ["exact_price_requested", "missing_approved_source"]
+        })
       },
       {
-        text: "Сделаете завтра и в какой точный срок?",
-        reason: "deadline_requires_manager_confirmation"
+        text: "Какие обычно сроки изготовления?",
+        decision: aiDecision({
+          action: "clarify",
+          intent: "deadline_intake",
+          replyText:
+            "Срок зависит от модели и оформления. Какой тип памятника вы рассматриваете?",
+          requestedSlots: ["monumentType"]
+        })
+      }
+    ];
+
+    for (const [index, prompt] of consultPrompts.entries()) {
+      const repository = new MemoryIntakeRepository();
+      let providerCalls = 0;
+      const provider = new FakeWidgetAiProvider({
+        decision: prompt.decision,
+        onGenerate: () => {
+          providerCalls += 1;
+        }
+      });
+      const app = track(
+        buildApi({
+          repository,
+          widgetAi: {
+            enabled: true,
+            provider,
+            modelName: "gpt-5.5"
+          }
+        })
+      );
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/public/intake/site-widget/messages",
+        payload: validWidgetRequest({
+          idempotencyKey: `widget-consult-first-${String(index).padStart(4, "0")}`,
+          messageText: prompt.text
+        })
+      });
+
+      expect(response.statusCode).toBe(202);
+      expect(response.json().automation.status).toBe("replied");
+      expect(response.json().automation.reply.text).not.toMatch(/\d[\d\s]*(?:₽|руб|р\.)/i);
+      expect(providerCalls).toBe(1);
+      expect(repository.lastAiSaveInput?.agentAllowedToReplyAfterSend).not.toBe(false);
+      expect(repository.lastAiSaveInput?.metadata).toMatchObject({
+        model_provider: "fake",
+        ai_action: "clarify",
+        prompt_version: WIDGET_AI_PROMPT_VERSION
+      });
+    }
+  });
+
+  it("hands final quote, binding terms and legal topics to a manager without model improvisation", async () => {
+    const handoffPrompts = [
+      {
+        text: "Назовите точную финальную цену памятника",
+        reason: "final_quote_pressure"
       },
       {
         text: "Какая гарантия?",
-        reason: "binding_terms_require_manager_confirmation"
-      },
-      {
-        text: "Какие условия договора?",
-        reason: "binding_terms_require_manager_confirmation"
-      },
-      {
-        text: "Дадите скидку?",
-        reason: "binding_terms_require_manager_confirmation"
-      },
-      {
-        text: "Есть ли модель в наличии?",
         reason: "binding_terms_require_manager_confirmation"
       },
       {
@@ -1298,7 +1433,7 @@ describe("public site_widget intake", () => {
       }
     ];
 
-    for (const [index, prompt] of unsafePrompts.entries()) {
+    for (const [index, prompt] of handoffPrompts.entries()) {
       const repository = new MemoryIntakeRepository();
       let providerCalls = 0;
       const provider = new FakeWidgetAiProvider({
@@ -1322,7 +1457,7 @@ describe("public site_widget intake", () => {
         method: "POST",
         url: "/public/intake/site-widget/messages",
         payload: validWidgetRequest({
-          idempotencyKey: `widget-safe-ai-${String(index).padStart(4, "0")}`,
+          idempotencyKey: `widget-handoff-ai-${String(index).padStart(4, "0")}`,
           messageText: prompt.text
         })
       });
@@ -1335,6 +1470,20 @@ describe("public site_widget intake", () => {
       expect(replyText).not.toMatch(/гарантируем|скидк[ауи]\s*\d|в наличии|рассрочк[ау]/i);
       expect(replyText).toMatch(/менеджер|подтвердит|сохранено|передам/i);
       expect(providerCalls).toBe(0);
+      expect(repository.lastAiSaveInput?.agentAllowedToReplyAfterSend).toBe(false);
+      expect(repository.lastAiSaveInput?.handoff).toMatchObject({
+        reason:
+          prompt.reason === "final_quote_pressure"
+            ? "final_quote_pressure"
+            : prompt.reason === "out_of_scope_legal_funeral_inheritance"
+              ? "out_of_scope"
+              : "binding_terms"
+      });
+      expect(repository.onlyLead().timeline).toContainEqual(
+        expect.objectContaining({
+          eventType: "conversation.ai_handoff_created"
+        })
+      );
       expect(repository.lastAiSaveInput?.metadata).toMatchObject({
         model_provider: "policy",
         model_name: "deterministic",
@@ -1344,6 +1493,95 @@ describe("public site_widget intake", () => {
         prompt_version: WIDGET_AI_PROMPT_VERSION
       });
     }
+  });
+
+  it("carries prior visitor and AI messages plus extracted slots into the next turn", async () => {
+    const repository = new MemoryIntakeRepository();
+    const seenTurns: AiTurnInput[] = [];
+    const provider = new FakeWidgetAiProvider({
+      decisions: [
+        aiDecision({
+          action: "clarify",
+          intent: "product_selection",
+          replyText: "Чёрный гранит подходит. Какой размер памятника нужен?",
+          extractedSlots: [
+            { name: "material", value: "чёрный гранит", confidence: 0.96 }
+          ],
+          requestedSlots: ["size"]
+        }),
+        aiDecision({
+          action: "clarify",
+          intent: "product_selection",
+          replyText: "Размер записал. На каком кладбище планируется установка?",
+          extractedSlots: [{ name: "size", value: "120 × 60 см", confidence: 0.94 }],
+          requestedSlots: ["cemetery"]
+        })
+      ],
+      onGenerate: (input) => {
+        seenTurns.push(input.turn);
+      }
+    });
+    const app = track(
+      buildApi({
+        repository,
+        widgetAi: { enabled: true, provider, modelName: "gpt-5.5" }
+      })
+    );
+
+    const first = await app.inject({
+      method: "POST",
+      url: "/public/intake/site-widget/messages",
+      payload: validWidgetRequest({
+        idempotencyKey: "widget-multiturn-0001",
+        messageText: "Нужен памятник из чёрного гранита"
+      })
+    });
+    const second = await app.inject({
+      method: "POST",
+      url: "/public/intake/site-widget/messages",
+      payload: validWidgetRequest({
+        idempotencyKey: "widget-multiturn-0002",
+        publicSessionId: first.json().public_session_id,
+        messageText: "Размер примерно 120 на 60 сантиметров"
+      })
+    });
+
+    expect(first.json().automation.status).toBe("replied");
+    expect(second.json().automation.status).toBe("replied");
+    expect(seenTurns).toHaveLength(2);
+    expect(seenTurns[0]?.compactContext.messages).toEqual([]);
+    expect(seenTurns[1]?.compactContext.messages).toMatchObject([
+      { senderRole: "visitor", text: "Нужен памятник из чёрного гранита" },
+      { senderRole: "ai_assistant", text: "Чёрный гранит подходит. Какой размер памятника нужен?" }
+    ]);
+    expect(seenTurns[1]?.knownSlots.values.material).toMatchObject({
+      value: "чёрный гранит",
+      source: "ai_extraction",
+      confidence: 0.96
+    });
+    expect(repository.lastAiSaveInput?.slotUpdates).toMatchObject([
+      { name: "size", value: "120 × 60 см", source: "ai_extraction" }
+    ]);
+    expect(repository.onlyLead().conversations[0]?.messages).toHaveLength(4);
+
+    const restored = await app.inject({
+      method: "GET",
+      url: `/public/intake/site-widget/sessions/${first.json().public_session_id}/history`
+    });
+
+    expect(restored.statusCode).toBe(200);
+    expect(restored.json()).toMatchObject({
+      ok: true,
+      schema_version: "site_widget.history.v1",
+      public_session_id: first.json().public_session_id,
+      conversation_state: "ai_active",
+      messages: [
+        { sender_role: "visitor", text: "Нужен памятник из чёрного гранита" },
+        { sender_role: "ai_assistant" },
+        { sender_role: "visitor", text: "Размер примерно 120 на 60 сантиметров" },
+        { sender_role: "ai_assistant" }
+      ]
+    });
   });
 
   it("lets a manager takeover disable later AI replies for the widget session", async () => {
@@ -1630,6 +1868,11 @@ describe("public site_widget intake", () => {
       policy_version: WIDGET_AI_POLICY_VERSION,
       prompt_version: WIDGET_AI_PROMPT_VERSION
     });
+    const restored = await app.inject({
+      method: "GET",
+      url: `/public/intake/site-widget/sessions/${publicSessionId}/history`
+    });
+    expect(restored.json()).toMatchObject({ conversation_state: "manager_pending" });
     expect(second.statusCode).toBe(202);
     expect(second.json()).toMatchObject({
       automation: {

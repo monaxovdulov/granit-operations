@@ -8,8 +8,21 @@ import {
   type SiteWidgetValidationIssue
 } from "@granit/contracts";
 import { sha256Hex, stableStringify } from "@granit/shared";
+import { z } from "zod";
 
 import type { AiReplyCandidateEvidence, AiTurnInput } from "../../ai/ai-turn.js";
+import {
+  AI_SLOT_NAMES,
+  AI_HANDOFF_REASONS,
+  AI_TURN_ACTIONS,
+  AI_TURN_INTENTS,
+  type AiHandoffReason,
+  type AiSlotName,
+  type AiSlotUpdate
+} from "../../ai/ai-dialog-contract.js";
+import { APPROVED_WIDGET_KNOWLEDGE_VERSION } from "../../ai/knowledge/approved-widget-knowledge.js";
+import { WIDGET_AI_POLICY_VERSION } from "../../ai/policy/widget-ai-policy.js";
+import { WIDGET_AI_PROMPT_VERSION } from "../../ai/prompts/widget-ai-prompt.js";
 import {
   AgentReplyBlockedError,
   IdempotencyConflictError
@@ -25,6 +38,25 @@ import {
 export type PublicWidgetIntakeServiceResult = {
   statusCode: number;
   body: SiteWidgetResponse;
+};
+
+export type PublicWidgetHistoryServiceResult = {
+  statusCode: 200 | 404;
+  body:
+    | {
+        ok: true;
+        schema_version: "site_widget.history.v1";
+        public_session_id: string;
+        public_conversation_id: string;
+        conversation_state: "ai_active" | "manager_pending" | "manager_active" | "closed";
+        messages: Array<{
+          public_message_id: string;
+          sender_role: "visitor" | "ai_assistant" | "manager";
+          text: string;
+          submitted_at: string;
+        }>;
+      }
+    | { ok: false; error: { code: "widget_history_not_found" } };
 };
 
 export type PublicWidgetIntakeServiceOptions = {
@@ -43,6 +75,37 @@ export class PublicWidgetIntakeService {
     private readonly repository: PublicIntakeRepository,
     private readonly options: PublicWidgetIntakeServiceOptions = {}
   ) {}
+
+  async getSiteWidgetHistory(rawPublicSessionId: string): Promise<PublicWidgetHistoryServiceResult> {
+    const parsed = z.string().uuid().safeParse(rawPublicSessionId);
+
+    if (!parsed.success || !this.repository.getSiteWidgetHistory) {
+      return widgetHistoryNotFound();
+    }
+
+    const history = await this.repository.getSiteWidgetHistory(parsed.data);
+
+    if (!history) {
+      return widgetHistoryNotFound();
+    }
+
+    return {
+      statusCode: 200,
+      body: {
+        ok: true,
+        schema_version: "site_widget.history.v1",
+        public_session_id: history.publicSessionId,
+        public_conversation_id: history.publicConversationId,
+        conversation_state: history.state,
+        messages: history.messages.map((message) => ({
+          public_message_id: message.publicMessageId,
+          sender_role: message.senderRole,
+          text: message.text,
+          submitted_at: message.submittedAt
+        }))
+      }
+    };
+  }
 
   async acceptSiteWidgetMessage(rawBody: unknown): Promise<PublicWidgetIntakeServiceResult> {
     const schemaVersion = readSchemaVersion(rawBody);
@@ -98,7 +161,10 @@ export class PublicWidgetIntakeService {
           saved.publicSessionId,
           saved.publicMessageId,
           saved.aiReply.publicMessageId,
-          saved.aiReply.body
+          saved.aiReply.body,
+          saved.aiState === "needs_manager" || saved.aiState === "manager_active"
+            ? "manager_pending"
+            : "ai_active"
         );
       }
 
@@ -107,6 +173,7 @@ export class PublicWidgetIntakeService {
       }
 
       if (!aiReplyGenerator) {
+        await recordDegradationIfPossible(this.repository, saved, "missing_openai_config");
         return fallbackSuccess(
           saved.replayed,
           saved.publicSessionId,
@@ -153,10 +220,23 @@ export class PublicWidgetIntakeService {
         }
       };
       const aiReply = validateAiReplyCandidate(
-        await aiReplyGenerator.generateReply(aiTurnInputWithFingerprint)
+        await aiReplyGenerator.generateReply(aiTurnInputWithFingerprint),
+        aiTurnInputWithFingerprint
       );
 
       if (aiReply.status === "unavailable") {
+        await this.repository.recordSiteWidgetAiDegradation?.({
+          leadId: saved.leadId,
+          conversationId: saved.conversationId,
+          inboundPublicMessageId: saved.publicMessageId,
+          inputFingerprint: aiInputFingerprint,
+          reason: aiReply.reason,
+          metadata: {
+            prompt_version: WIDGET_AI_PROMPT_VERSION,
+            policy_version: WIDGET_AI_POLICY_VERSION,
+            knowledge_version: APPROVED_WIDGET_KNOWLEDGE_VERSION
+          }
+        }).catch(() => undefined);
         return fallbackSuccess(
           saved.replayed,
           saved.publicSessionId,
@@ -172,7 +252,8 @@ export class PublicWidgetIntakeService {
             inbound_public_message_id: saved.publicMessageId,
             public_conversation_id: saved.publicConversationId,
             body: aiReply.text,
-            metadata: aiReply.metadata
+            metadata: aiReply.metadata,
+            slot_updates: aiReply.slotUpdates
           })
         );
         const persistedAiReply = await this.repository.saveSiteWidgetAiMessage({
@@ -185,6 +266,30 @@ export class PublicWidgetIntakeService {
           body: aiReply.text,
           sourcePageUrl: aiTurnInputWithFingerprint.page.url,
           agentAllowedToReplyAfterSend: aiReply.agentAllowedToReplyAfterSend,
+          slotUpdates: aiReply.slotUpdates,
+          aiRun:
+            aiReply.action && aiReply.intent
+              ? {
+                  inputFingerprint: aiInputFingerprint,
+                  action: aiReply.action,
+                  intent: aiReply.intent,
+                  promptVersion: readOptionalMetadataString(aiReply.metadata, "prompt_version"),
+                  policyVersion: readOptionalMetadataString(aiReply.metadata, "policy_version"),
+                  knowledgeVersion: APPROVED_WIDGET_KNOWLEDGE_VERSION,
+                  modelVersion: readOptionalMetadataString(aiReply.metadata, "model_name")
+                }
+              : undefined,
+          handoff:
+            aiReply.action === "handoff" && aiReply.handoffReason
+              ? {
+                  reason: aiReply.handoffReason,
+                  summary: buildHandoffSummary(aiTurnInputWithFingerprint, aiReply.slotUpdates),
+                  slotsSnapshot: buildSlotSnapshot(
+                    aiTurnInputWithFingerprint,
+                    aiReply.slotUpdates
+                  )
+                }
+              : undefined,
           metadata: {
             ...aiReply.metadata,
             channel: "site_widget",
@@ -199,16 +304,35 @@ export class PublicWidgetIntakeService {
           saved.publicSessionId,
           saved.publicMessageId,
           persistedAiReply.publicMessageId,
-          persistedAiReply.body
+          persistedAiReply.body,
+          aiReply.action === "handoff" ? "manager_pending" : "ai_active"
         );
       } catch (error) {
+        const fallbackReason =
+          error instanceof AgentReplyBlockedError
+            ? "agent_reply_blocked"
+            : "ai_persistence_unconfirmed";
+
+        if (fallbackReason === "ai_persistence_unconfirmed") {
+          await this.repository.recordSiteWidgetAiDegradation?.({
+            leadId: saved.leadId,
+            conversationId: saved.conversationId,
+            inboundPublicMessageId: saved.publicMessageId,
+            inputFingerprint: aiInputFingerprint,
+            reason: fallbackReason,
+            metadata: {
+              prompt_version: WIDGET_AI_PROMPT_VERSION,
+              policy_version: WIDGET_AI_POLICY_VERSION,
+              knowledge_version: APPROVED_WIDGET_KNOWLEDGE_VERSION
+            }
+          }).catch(() => undefined);
+        }
+
         return fallbackSuccess(
           saved.replayed,
           saved.publicSessionId,
           saved.publicMessageId,
-          error instanceof AgentReplyBlockedError
-            ? "agent_reply_blocked"
-            : "ai_persistence_unconfirmed"
+          fallbackReason
         );
       }
     } catch (error) {
@@ -240,6 +364,13 @@ export class PublicWidgetIntakeService {
       };
     }
   }
+}
+
+function widgetHistoryNotFound(): PublicWidgetHistoryServiceResult {
+  return {
+    statusCode: 404,
+    body: { ok: false, error: { code: "widget_history_not_found" } }
+  };
 }
 
 function disabledSuccess(
@@ -301,6 +432,10 @@ type ValidatedAiReplyCandidate =
       status: "replied";
       text: string;
       agentAllowedToReplyAfterSend?: boolean;
+      slotUpdates?: AiSlotUpdate[];
+      action?: (typeof AI_TURN_ACTIONS)[number];
+      intent?: (typeof AI_TURN_INTENTS)[number];
+      handoffReason?: AiHandoffReason;
       metadata: Record<string, unknown>;
     }
   | {
@@ -313,7 +448,8 @@ function aiReplySuccess(
   publicSessionId: string,
   publicMessageId: string,
   publicReplyMessageId: string,
-  replyText: string
+  replyText: string,
+  conversationState: "ai_active" | "manager_pending"
 ): PublicWidgetIntakeServiceResult {
   return {
     statusCode: 202,
@@ -327,6 +463,7 @@ function aiReplySuccess(
       automation: {
         status: "replied",
         next_step: "ai_reply_shown",
+        conversation_state: conversationState,
         disclosure: {
           shown: true,
           version: WIDGET_AI_DISCLOSURE_VERSION,
@@ -380,7 +517,10 @@ function isReplyCapableSiteWidgetTurn(input: AiTurnInput | undefined): input is 
   );
 }
 
-function validateAiReplyCandidate(value: unknown): ValidatedAiReplyCandidate {
+function validateAiReplyCandidate(
+  value: unknown,
+  input: AiTurnInput
+): ValidatedAiReplyCandidate {
   if (!isRecord(value)) {
     return unavailable("unsafe_model_response");
   }
@@ -430,15 +570,222 @@ function validateAiReplyCandidate(value: unknown): ValidatedAiReplyCandidate {
     return unavailable("unsafe_model_response");
   }
 
+  const action = readEnumValue(value.action, AI_TURN_ACTIONS);
+  const intent = readEnumValue(value.intent, AI_TURN_INTENTS);
+  const requestedSlots = readRequestedSlots(value.requestedSlots);
+  const slotUpdates = readSlotUpdates(value.slotUpdates, input.inboundMessage.publicMessageId);
+  const sourceEvidenceIsValid = hasValidTypedSourceEvidence(value.sourceEvidence, input);
+  const handoffReason = readEnumValue(value.handoffReason, AI_HANDOFF_REASONS);
+
+  if (
+    ("action" in value && value.action !== undefined && !action) ||
+    ("intent" in value && value.intent !== undefined && !intent) ||
+    ("handoffReason" in value && value.handoffReason !== undefined && !handoffReason) ||
+    requestedSlots === null ||
+    slotUpdates === null ||
+    !sourceEvidenceIsValid ||
+    action === "block" ||
+    action === "fallback"
+  ) {
+    return unavailable("unsafe_model_response");
+  }
+
+  const requestedSlot = requestedSlots?.[0];
+
+  if (
+    requestedSlot &&
+    (input.knownSlots.values[requestedSlot] ||
+      slotUpdates?.some((slot) => slot.name === requestedSlot))
+  ) {
+    return unavailable("unsafe_model_response");
+  }
+
+  if (action === "clarify" && requestedSlots?.length !== 1) {
+    return unavailable("unsafe_model_response");
+  }
+
+  if (action === "handoff" && !handoffReason) {
+    return unavailable("unsafe_model_response");
+  }
+
   return {
     status: "replied",
     text,
     agentAllowedToReplyAfterSend:
-      typeof value.agentAllowedToReplyAfterSend === "boolean"
+      action === "handoff"
+        ? false
+        : typeof value.agentAllowedToReplyAfterSend === "boolean"
         ? value.agentAllowedToReplyAfterSend
         : undefined,
+    slotUpdates: slotUpdates ?? undefined,
+    action,
+    intent,
+    handoffReason,
     metadata: value.metadata
   };
+}
+
+async function recordDegradationIfPossible(
+  repository: PublicIntakeRepository,
+  saved: {
+    leadId: string;
+    conversationId: string;
+    publicMessageId: string;
+    aiTurnInput?: AiTurnInput;
+  },
+  reason: PublicWidgetAiUnavailableReason
+) {
+  if (!repository.recordSiteWidgetAiDegradation || !saved.aiTurnInput) {
+    return;
+  }
+
+  const inputFingerprint = sha256Hex(stableStringify(saved.aiTurnInput));
+  await repository.recordSiteWidgetAiDegradation({
+    leadId: saved.leadId,
+    conversationId: saved.conversationId,
+    inboundPublicMessageId: saved.publicMessageId,
+    inputFingerprint,
+    reason,
+    metadata: {
+      prompt_version: WIDGET_AI_PROMPT_VERSION,
+      policy_version: WIDGET_AI_POLICY_VERSION,
+      knowledge_version: APPROVED_WIDGET_KNOWLEDGE_VERSION
+    }
+  }).catch(() => undefined);
+}
+
+function buildSlotSnapshot(
+  input: AiTurnInput,
+  updates: AiSlotUpdate[] | undefined
+): Record<string, unknown> {
+  const snapshot: Record<string, unknown> = {};
+
+  for (const [name, slot] of Object.entries(input.knownSlots.values)) {
+    if (slot) {
+      snapshot[name] = slot.value;
+    }
+  }
+
+  for (const slot of updates ?? []) {
+    snapshot[slot.name] = slot.value;
+  }
+
+  return snapshot;
+}
+
+function buildHandoffSummary(input: AiTurnInput, updates: AiSlotUpdate[] | undefined): string {
+  const summaryUpdate = updates?.find((slot) => slot.name === "questionSummary");
+  return (summaryUpdate?.value ?? input.inboundMessage.text).trim().slice(0, 900);
+}
+
+function readOptionalMetadataString(
+  metadata: Record<string, unknown>,
+  key: string
+): string | undefined {
+  const value = metadata[key];
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function hasValidTypedSourceEvidence(value: unknown, input: AiTurnInput): boolean {
+  if (value === undefined) {
+    return true;
+  }
+
+  if (!Array.isArray(value)) {
+    return false;
+  }
+
+  return value.every((candidate) => {
+    if (
+      !isRecord(candidate) ||
+      typeof candidate.sourceId !== "string" ||
+      typeof candidate.version !== "string"
+    ) {
+      return false;
+    }
+
+    if (candidate.kind === "price") {
+      return false;
+    }
+
+    return (
+      candidate.kind === "business_fact" &&
+      input.approvedSources.businessFacts.some(
+        (source) =>
+          source.sourceId === candidate.sourceId &&
+          source.version === candidate.version
+      )
+    );
+  });
+}
+
+function readRequestedSlots(value: unknown): AiSlotName[] | null | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!Array.isArray(value) || value.length > 1) {
+    return null;
+  }
+
+  const slots = value.filter(isAiSlotName);
+  return slots.length === value.length ? slots : null;
+}
+
+function readSlotUpdates(
+  value: unknown,
+  inboundPublicMessageId: string
+): AiSlotUpdate[] | null | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!Array.isArray(value) || value.length > AI_SLOT_NAMES.length) {
+    return null;
+  }
+
+  const updates: AiSlotUpdate[] = [];
+  const names = new Set<AiSlotName>();
+
+  for (const candidate of value) {
+    if (
+      !isRecord(candidate) ||
+      !isAiSlotName(candidate.name) ||
+      names.has(candidate.name) ||
+      typeof candidate.value !== "string" ||
+      !candidate.value.trim() ||
+      candidate.value.trim().length > 240 ||
+      candidate.source !== "ai_extraction" ||
+      candidate.sourceMessageId !== inboundPublicMessageId ||
+      typeof candidate.confidence !== "number" ||
+      candidate.confidence < 0 ||
+      candidate.confidence > 1
+    ) {
+      return null;
+    }
+
+    names.add(candidate.name);
+    updates.push({
+      name: candidate.name,
+      value: candidate.value.trim(),
+      source: "ai_extraction",
+      sourceMessageId: inboundPublicMessageId,
+      confidence: candidate.confidence
+    });
+  }
+
+  return updates;
+}
+
+function isAiSlotName(value: unknown): value is AiSlotName {
+  return typeof value === "string" && AI_SLOT_NAMES.includes(value as AiSlotName);
+}
+
+function readEnumValue<T extends readonly string[]>(
+  value: unknown,
+  values: T
+): T[number] | undefined {
+  return typeof value === "string" && values.includes(value) ? value : undefined;
 }
 
 function unavailable(reason: PublicWidgetAiUnavailableReason): ValidatedAiReplyCandidate {

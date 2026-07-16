@@ -1,4 +1,19 @@
-export const AI_TURN_INPUT_VERSION = "granit_ai_turn_input.stage_a.v1";
+import type {
+  AiHandoffReason,
+  AiKnownSlots,
+  AiRiskFlag,
+  AiSlotName,
+  AiSlotUpdate,
+  AiTurnAction,
+  AiTurnIntent,
+  ApprovedSourceEvidence
+} from "./ai-dialog-contract.js";
+import {
+  lookupApprovedWidgetKnowledge,
+  type ApprovedWidgetKnowledgeFact
+} from "./knowledge/approved-widget-knowledge.js";
+
+export const AI_TURN_INPUT_VERSION = "granit_ai_turn_input.stage_b.v1";
 
 export type AiReplyCapableChannel = "site_widget";
 
@@ -57,8 +72,8 @@ export type AiTurnInput = {
   compactContext: {
     messages: Array<{
       publicMessageId: string;
-      direction: "inbound";
-      senderRole: "visitor";
+      direction: "inbound" | "outbound";
+      senderRole: "visitor" | "ai_assistant";
       contentType: "text";
       submittedAt: string;
       text: string;
@@ -70,6 +85,7 @@ export type AiTurnInput = {
     emailProvided: boolean;
     preferredContact?: AiTurnPreferredContact;
     city?: string;
+    values: AiKnownSlots;
   };
   boundaryConfig: {
     replyCapableChannel: AiReplyCapableChannel;
@@ -79,7 +95,7 @@ export type AiTurnInput = {
   };
   approvedSources: {
     price: null;
-    businessFacts: [];
+    businessFacts: ApprovedWidgetKnowledgeFact[];
   };
   evidence: {
     acceptedRequestFingerprint: string;
@@ -108,6 +124,14 @@ export type AiReplyCandidateDecision =
       agentAllowedToReplyAfterSend?: boolean;
       metadata: Record<string, unknown>;
       evidence?: AiReplyCandidateEvidence;
+      action?: AiTurnAction;
+      intent?: AiTurnIntent;
+      slotUpdates?: AiSlotUpdate[];
+      requestedSlots?: AiSlotName[];
+      riskFlags?: AiRiskFlag[];
+      handoffReason?: AiHandoffReason;
+      sourceEvidence?: ApprovedSourceEvidence[];
+      confidence?: number;
     }
   | {
       decision: "no_reply";
@@ -156,6 +180,8 @@ export type BuildStageASiteWidgetAiTurnInput = {
     aiState: AiTurnAiState;
     agentAllowedToReply: boolean;
   };
+  recentMessages?: AiTurnInput["compactContext"]["messages"];
+  persistedSlots?: AiKnownSlots;
 };
 
 export function buildStageASiteWidgetAiTurnInput(
@@ -190,23 +216,37 @@ export function buildStageASiteWidgetAiTurnInput(
     customer: input.customer,
     visitor: input.visitor,
     compactContext: {
-      messages: [
-        {
-          publicMessageId: input.publicMessageId,
-          direction: "inbound",
-          senderRole: "visitor",
-          contentType: "text",
-          submittedAt: input.submittedAt,
-          text: input.text
-        }
-      ]
+      messages: input.recentMessages ?? []
     },
     knownSlots: {
       customerNameProvided: Boolean(input.customer.name),
       phoneProvided: input.customer.phoneProvided,
       emailProvided: input.customer.emailProvided,
       preferredContact: input.customer.preferredContact,
-      city: input.customer.city
+      city: input.customer.city,
+      values: {
+        ...input.persistedSlots,
+        ...(input.customer.name && !input.persistedSlots?.customerName
+          ? {
+              customerName: {
+                value: input.customer.name,
+                source: "contact" as const,
+                confidence: 1,
+                updatedAt: input.submittedAt
+              }
+            }
+          : {}),
+        ...(input.customer.city && !input.persistedSlots?.city
+          ? {
+              city: {
+                value: input.customer.city,
+                source: "contact" as const,
+                confidence: 1,
+                updatedAt: input.submittedAt
+              }
+            }
+          : {})
+      }
     },
     boundaryConfig: {
       replyCapableChannel: "site_widget",
@@ -216,7 +256,7 @@ export function buildStageASiteWidgetAiTurnInput(
     },
     approvedSources: {
       price: null,
-      businessFacts: []
+      businessFacts: lookupApprovedWidgetKnowledge(input.text)
     },
     evidence: {
       acceptedRequestFingerprint: input.requestFingerprint,

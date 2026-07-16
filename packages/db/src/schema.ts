@@ -242,6 +242,101 @@ export const conversationMessages = pgTable(
   })
 );
 
+export const conversationSlots = pgTable(
+  "conversation_slots",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    leadId: uuid("lead_id")
+      .notNull()
+      .references(() => leads.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    value: text("value").notNull(),
+    source: text("source").notNull(),
+    sourcePublicMessageId: uuid("source_public_message_id"),
+    confidencePermille: integer("confidence_permille").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => ({
+    conversationNameIdx: uniqueIndex("conversation_slots_conversation_name_idx").on(
+      table.conversationId,
+      table.name
+    ),
+    leadUpdatedIdx: index("conversation_slots_lead_updated_idx").on(
+      table.leadId,
+      table.updatedAt
+    )
+  })
+);
+
+export const aiRuns = pgTable(
+  "ai_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    leadId: uuid("lead_id")
+      .notNull()
+      .references(() => leads.id, { onDelete: "cascade" }),
+    inboundPublicMessageId: uuid("inbound_public_message_id").notNull(),
+    outboundPublicMessageId: uuid("outbound_public_message_id"),
+    status: text("status").notNull(),
+    action: text("action"),
+    intent: text("intent"),
+    inputFingerprint: text("input_fingerprint").notNull(),
+    promptVersion: text("prompt_version"),
+    policyVersion: text("policy_version"),
+    knowledgeVersion: text("knowledge_version"),
+    modelName: text("model_name"),
+    reason: text("reason"),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => ({
+    inboundIdx: uniqueIndex("ai_runs_inbound_public_message_id_idx").on(
+      table.inboundPublicMessageId
+    ),
+    conversationCreatedIdx: index("ai_runs_conversation_created_idx").on(
+      table.conversationId,
+      table.createdAt
+    )
+  })
+);
+
+export const conversationHandoffs = pgTable(
+  "conversation_handoffs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    leadId: uuid("lead_id")
+      .notNull()
+      .references(() => leads.id, { onDelete: "cascade" }),
+    inboundPublicMessageId: uuid("inbound_public_message_id").notNull(),
+    outboundPublicMessageId: uuid("outbound_public_message_id").notNull(),
+    reason: text("reason").notNull(),
+    summary: text("summary").notNull(),
+    status: text("status").notNull().default("active"),
+    slotsSnapshot: jsonb("slots_snapshot").$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true })
+  },
+  (table) => ({
+    inboundIdx: uniqueIndex("conversation_handoffs_inbound_public_message_id_idx").on(
+      table.inboundPublicMessageId
+    ),
+    conversationStatusIdx: index("conversation_handoffs_conversation_status_idx").on(
+      table.conversationId,
+      table.status
+    )
+  })
+);
+
 export const messageDeliveries = pgTable(
   "message_deliveries",
   {
