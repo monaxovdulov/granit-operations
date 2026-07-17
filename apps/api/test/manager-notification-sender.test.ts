@@ -101,6 +101,32 @@ describe("Manager notification sender", () => {
     expect(repository.failed[0]?.failedAt).toBeInstanceOf(Date);
   });
 
+  it("includes the structured intake in an AI handoff notification", async () => {
+    const repository = new FakeManagerNotificationRepository([
+      pendingNotification({
+        notificationType: "site_widget_ai_handoff",
+        textPreview: "Клиент просит финальный расчет",
+        needsManagerReason: "final_quote_pressure",
+        slots: {
+          monumentType: "двойной",
+          material: "черный гранит",
+          size: "120 на 60"
+        }
+      })
+    ]);
+    const provider = new FakeTelegramProvider({ messageId: "handoff-1" });
+    const service = new ManagerNotificationSenderService(repository, provider, {
+      providerAccountId: "bot-main"
+    });
+
+    await service.deliverPendingBatch();
+
+    expect(provider.payloads[0]?.text).toContain("AI передал диалог сайта менеджеру");
+    expect(provider.payloads[0]?.text).toContain(
+      "Заявка: тип: двойной; материал: черный гранит; размер: 120 на 60"
+    );
+  });
+
   it("records retrying and then failed for retryable provider errors with a bounded retry budget", async () => {
     const repository = new FakeManagerNotificationRepository([
       pendingNotification({ attemptCount: 0 })

@@ -115,7 +115,10 @@ export type AiUnavailableReason =
   | "missing_openai_config"
   | "model_error"
   | "empty_model_response"
-  | "unsafe_model_response";
+  | "unsafe_model_response"
+  | "semantic_verifier_error"
+  | "grounding_validation_failed"
+  | "turn_timeout";
 
 export type AiReplyCandidateDecision =
   | {

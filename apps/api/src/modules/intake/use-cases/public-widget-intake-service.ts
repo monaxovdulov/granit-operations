@@ -18,8 +18,10 @@ import {
   AI_TURN_INTENTS,
   type AiHandoffReason,
   type AiSlotName,
+  type AiTextEvidence,
   type AiSlotUpdate
 } from "../../ai/ai-dialog-contract.js";
+import { validateSlotEvidence } from "../../ai/grounding/ai-slot-evidence-service.js";
 import { APPROVED_WIDGET_KNOWLEDGE_VERSION } from "../../ai/knowledge/approved-widget-knowledge.js";
 import { WIDGET_AI_POLICY_VERSION } from "../../ai/policy/widget-ai-policy.js";
 import { WIDGET_AI_PROMPT_VERSION } from "../../ai/prompts/widget-ai-prompt.js";
@@ -234,7 +236,8 @@ export class PublicWidgetIntakeService {
           metadata: {
             prompt_version: WIDGET_AI_PROMPT_VERSION,
             policy_version: WIDGET_AI_POLICY_VERSION,
-            knowledge_version: APPROVED_WIDGET_KNOWLEDGE_VERSION
+            knowledge_version: APPROVED_WIDGET_KNOWLEDGE_VERSION,
+            ...aiReply.metadata
           }
         }).catch(() => undefined);
         return fallbackSuccess(
@@ -275,8 +278,35 @@ export class PublicWidgetIntakeService {
                   intent: aiReply.intent,
                   promptVersion: readOptionalMetadataString(aiReply.metadata, "prompt_version"),
                   policyVersion: readOptionalMetadataString(aiReply.metadata, "policy_version"),
-                  knowledgeVersion: APPROVED_WIDGET_KNOWLEDGE_VERSION,
-                  modelVersion: readOptionalMetadataString(aiReply.metadata, "model_name")
+                  knowledgeVersion:
+                    readOptionalMetadataString(aiReply.metadata, "catalog_version") ??
+                    readOptionalMetadataString(aiReply.metadata, "knowledge_version") ??
+                    APPROVED_WIDGET_KNOWLEDGE_VERSION,
+                  modelVersion: readOptionalMetadataString(aiReply.metadata, "model_name"),
+                  generatorModelName: readOptionalMetadataString(
+                    aiReply.metadata,
+                    "model_name"
+                  ),
+                  verifierModelName: readOptionalMetadataString(
+                    aiReply.metadata,
+                    "verifier_model_name"
+                  ),
+                  verifierVersion: readOptionalMetadataString(
+                    aiReply.metadata,
+                    "verifier_version"
+                  ),
+                  verifierVerdict: readOptionalMetadataString(
+                    aiReply.metadata,
+                    "verifier_verdict"
+                  ),
+                  catalogVersion: readOptionalMetadataString(
+                    aiReply.metadata,
+                    "catalog_version"
+                  ),
+                  catalogContentHash: readOptionalMetadataString(
+                    aiReply.metadata,
+                    "catalog_content_hash"
+                  )
                 }
               : undefined,
           handoff:
@@ -402,6 +432,28 @@ function fallbackSuccess(
   publicMessageId: string,
   reason: PublicWidgetFallbackReason
 ): PublicWidgetIntakeServiceResult {
+  if (reason !== "agent_reply_blocked") {
+    return {
+      statusCode: 202,
+      body: {
+        ok: true,
+        schema_version: SITE_WIDGET_CONTRACT_VERSION,
+        status: replayed ? "replayed" : "accepted",
+        public_session_id: publicSessionId,
+        public_message_id: publicMessageId,
+        action: "show_widget_saved",
+        automation: {
+          status: "degraded",
+          next_step: "retry_available",
+          conversation_state: "ai_active",
+          reason
+        },
+        message_to_user:
+          "Сообщение сохранено, но AI не смог ответить на этот ход. Можно продолжить диалог или повторить вопрос."
+      }
+    };
+  }
+
   return {
     statusCode: 202,
     body: {
@@ -441,6 +493,7 @@ type ValidatedAiReplyCandidate =
   | {
       status: "unavailable";
       reason: PublicWidgetAiUnavailableReason;
+      metadata?: Record<string, unknown>;
     };
 
 function aiReplySuccess(
@@ -530,7 +583,8 @@ function validateAiReplyCandidate(
       status: "unavailable",
       reason: isPublicWidgetAiUnavailableReason(value.reason)
         ? value.reason
-        : "unsafe_model_response"
+        : "unsafe_model_response",
+      metadata: isRecord(value.metadata) ? value.metadata : undefined
     };
   }
 
@@ -558,13 +612,14 @@ function validateAiReplyCandidate(
     );
   }
 
+  const groundingVerified = value.metadata.grounding_verified === true;
   const evidence = isRecord(value.evidence) ? readCandidateEvidence(value.evidence) : undefined;
 
-  if (hasBusinessFactWithoutAppApprovedSource(evidence)) {
+  if (!groundingVerified && hasBusinessFactWithoutAppApprovedSource(evidence)) {
     return unavailable("unsafe_model_response");
   }
 
-  const unsafeReason = unsafeCandidateReplyReason(text, evidence);
+  const unsafeReason = groundingVerified ? null : unsafeCandidateReplyReason(text, evidence);
 
   if (unsafeReason) {
     return unavailable("unsafe_model_response");
@@ -573,7 +628,7 @@ function validateAiReplyCandidate(
   const action = readEnumValue(value.action, AI_TURN_ACTIONS);
   const intent = readEnumValue(value.intent, AI_TURN_INTENTS);
   const requestedSlots = readRequestedSlots(value.requestedSlots);
-  const slotUpdates = readSlotUpdates(value.slotUpdates, input.inboundMessage.publicMessageId);
+  const slotUpdates = readSlotUpdates(value.slotUpdates, input, groundingVerified);
   const sourceEvidenceIsValid = hasValidTypedSourceEvidence(value.sourceEvidence, input);
   const handoffReason = readEnumValue(value.handoffReason, AI_HANDOFF_REASONS);
 
@@ -734,7 +789,8 @@ function readRequestedSlots(value: unknown): AiSlotName[] | null | undefined {
 
 function readSlotUpdates(
   value: unknown,
-  inboundPublicMessageId: string
+  input: AiTurnInput,
+  requireEvidence = false
 ): AiSlotUpdate[] | null | undefined {
   if (value === undefined) {
     return undefined;
@@ -748,15 +804,28 @@ function readSlotUpdates(
   const names = new Set<AiSlotName>();
 
   for (const candidate of value) {
+    if (!isRecord(candidate) || !isAiSlotName(candidate.name)) {
+      return null;
+    }
+
+    const evidence = readSlotEvidence(candidate.evidence);
+    const legacyCurrentMessageEvidence =
+      !requireEvidence &&
+      !evidence &&
+      candidate.sourceMessageId === input.inboundMessage.publicMessageId;
+    const groundedEvidenceIsValid =
+      evidence &&
+      evidence.messageId === candidate.sourceMessageId &&
+      !validateSlotEvidence(candidate.name as AiSlotName, evidence, input);
+
     if (
-      !isRecord(candidate) ||
-      !isAiSlotName(candidate.name) ||
       names.has(candidate.name) ||
       typeof candidate.value !== "string" ||
       !candidate.value.trim() ||
       candidate.value.trim().length > 240 ||
       candidate.source !== "ai_extraction" ||
-      candidate.sourceMessageId !== inboundPublicMessageId ||
+      typeof candidate.sourceMessageId !== "string" ||
+      (!legacyCurrentMessageEvidence && !groundedEvidenceIsValid) ||
       typeof candidate.confidence !== "number" ||
       candidate.confidence < 0 ||
       candidate.confidence > 1
@@ -769,12 +838,33 @@ function readSlotUpdates(
       name: candidate.name,
       value: candidate.value.trim(),
       source: "ai_extraction",
-      sourceMessageId: inboundPublicMessageId,
+      sourceMessageId: candidate.sourceMessageId,
+      evidence,
       confidence: candidate.confidence
     });
   }
 
   return updates;
+}
+
+function readSlotEvidence(value: unknown): AiTextEvidence | undefined {
+  if (
+    !isRecord(value) ||
+    typeof value.messageId !== "string" ||
+    typeof value.quote !== "string" ||
+    !value.quote ||
+    typeof value.start !== "number" ||
+    typeof value.end !== "number"
+  ) {
+    return undefined;
+  }
+
+  return {
+    messageId: value.messageId,
+    quote: value.quote,
+    start: value.start,
+    end: value.end
+  };
 }
 
 function isAiSlotName(value: unknown): value is AiSlotName {
@@ -802,7 +892,10 @@ function isPublicWidgetAiUnavailableReason(
     value === "missing_openai_config" ||
     value === "model_error" ||
     value === "empty_model_response" ||
-    value === "unsafe_model_response"
+    value === "unsafe_model_response" ||
+    value === "semantic_verifier_error" ||
+    value === "grounding_validation_failed" ||
+    value === "turn_timeout"
   );
 }
 

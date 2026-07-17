@@ -1,5 +1,7 @@
 import type { SiteFormUtm, SiteWidgetUtm } from "@granit/contracts";
 
+import type { AiSlotName } from "../../ai/ai-dialog-contract.js";
+
 import type {
   AiState,
   ConversationContentType,
@@ -98,9 +100,87 @@ export type ManagerLeadListItem = {
   updatedAt: string;
 };
 
+export type ManagerStructuredIntakeSlot = {
+  publicConversationId: string;
+  name: AiSlotName;
+  value: string;
+  source: "contact" | "visitor_message" | "ai_extraction" | "manager";
+  sourceMessageId?: string;
+  confidence: number;
+  evidence?: {
+    quote: string;
+    start: number;
+    end: number;
+  };
+  updatedAt: string;
+};
+
+export type ManagerStructuredIntake = {
+  slots: ManagerStructuredIntakeSlot[];
+  conflicts: Array<{
+    publicConversationId: string;
+    name: AiSlotName;
+    candidateValue: string;
+    currentValue?: string;
+    sourceMessageId?: string;
+    evidence?: {
+      quote: string;
+      start: number;
+      end: number;
+    };
+    applied: boolean;
+    createdAt: string;
+  }>;
+  missingFields: AiSlotName[];
+  handoff?: {
+    reason: string;
+    summary: string;
+    status: "active" | "resolved";
+    createdAt: string;
+  };
+  verification?: {
+    aiRunId: string;
+    status: "replied" | "handoff" | "degraded";
+    verdict?: string;
+    generatorModelName?: string;
+    verifierModelName?: string;
+    verifierVersion?: string;
+    catalogVersion?: string;
+    reviewLabels: Array<{
+      label: AiReviewLabel;
+      note?: string;
+      createdAt: string;
+    }>;
+    createdAt: string;
+  };
+};
+
+export const AI_REVIEW_LABELS = [
+  "correct",
+  "unsupported_fact",
+  "wrong_slot",
+  "missed_handoff",
+  "unnecessary_handoff",
+  "poor_tone",
+  "other"
+] as const;
+
+export type AiReviewLabel = (typeof AI_REVIEW_LABELS)[number];
+
+export type RecordAiReviewLabelInput = {
+  leadId: string;
+  aiRunId: string;
+  label: AiReviewLabel;
+  note?: string;
+  changedByManagerId: string;
+  changedByManagerEmail: string;
+  changedByManagerRole: string;
+};
+
 export type ManagerLeadDetail = ManagerLeadListItem & {
   timeline: ManagerTimelineEvent[];
   conversations: ManagerConversation[];
+  structuredIntake: ManagerStructuredIntake;
   internalNotePlaceholder: string;
 };
 
@@ -160,6 +240,7 @@ export type TakeoverConversationByPublicIdInput = {
 export interface ManagerLeadRepository {
   listManagerLeads(): Promise<ManagerLeadListItem[]>;
   getManagerLead(leadId: string): Promise<ManagerLeadDetail | null>;
+  recordAiReviewLabel(input: RecordAiReviewLabelInput): Promise<ManagerLeadDetail | null>;
   changeManagerLeadStatus(input: ChangeManagerLeadStatusInput): Promise<ManagerLeadDetail | null>;
   setNextStep(input: SetNextStepInput): Promise<ManagerLeadDetail | null>;
   recordManualContact(input: RecordManualContactInput): Promise<ManagerLeadDetail | null>;

@@ -990,8 +990,8 @@ describe("public site_widget intake", () => {
     expect(response.statusCode).toBe(202);
     expect(response.json()).toMatchObject({
       automation: {
-        status: "fallback",
-        next_step: "manager_review",
+        status: "degraded",
+        next_step: "retry_available",
         reason: "unsafe_model_response"
       }
     });
@@ -1038,7 +1038,7 @@ describe("public site_widget intake", () => {
     expect(response.statusCode).toBe(202);
     expect(response.json()).toMatchObject({
       automation: {
-        status: "fallback",
+        status: "degraded",
         reason: "unsafe_model_response"
       }
     });
@@ -1123,7 +1123,7 @@ describe("public site_widget intake", () => {
       expect(response.statusCode).toBe(202);
       expect(response.json()).toMatchObject({
         automation: {
-          status: "fallback",
+          status: "degraded",
           reason: "unsafe_model_response"
         }
       });
@@ -1171,7 +1171,7 @@ describe("public site_widget intake", () => {
     expect(response.statusCode).toBe(202);
     expect(response.json()).toMatchObject({
       automation: {
-        status: "fallback",
+        status: "degraded",
         reason: "unsafe_model_response"
       }
     });
@@ -1246,16 +1246,16 @@ describe("public site_widget intake", () => {
     expect(response.json()).toMatchObject({
       ok: true,
       automation: {
-        status: "fallback",
-        next_step: "manager_review",
+        status: "degraded",
+        next_step: "retry_available",
         reason: "ai_persistence_unconfirmed"
       }
     });
     expect(response.json().automation.reply).toBeUndefined();
     expect(repository.onlyLead().conversations[0]?.messages).toHaveLength(1);
     expect(repository.onlyLead().conversations[0]).toMatchObject({
-      aiState: "needs_manager",
-      agentAllowedToReply: false
+      aiState: "ai_collecting_info",
+      agentAllowedToReply: true
     });
     expect(repository.onlyLead().timeline).toContainEqual(
       expect.objectContaining({
@@ -1289,16 +1289,16 @@ describe("public site_widget intake", () => {
     expect(response.json()).toMatchObject({
       ok: true,
       automation: {
-        status: "fallback",
-        next_step: "manager_review",
+        status: "degraded",
+        next_step: "retry_available",
         reason: "model_error"
       }
     });
     expect(response.json().automation.reply).toBeUndefined();
     expect(repository.onlyLead().conversations[0]?.messages).toHaveLength(1);
     expect(repository.onlyLead().conversations[0]).toMatchObject({
-      aiState: "needs_manager",
-      agentAllowedToReply: false
+      aiState: "ai_collecting_info",
+      agentAllowedToReply: true
     });
     expect(repository.onlyLead().timeline).toContainEqual(
       expect.objectContaining({
@@ -1337,8 +1337,8 @@ describe("public site_widget intake", () => {
     expect(response.json()).toMatchObject({
       ok: true,
       automation: {
-        status: "fallback",
-        next_step: "manager_review",
+        status: "degraded",
+        next_step: "retry_available",
         reason: "unsafe_model_response"
       }
     });

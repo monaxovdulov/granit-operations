@@ -96,6 +96,7 @@ export type AiKnownSlot = {
   value: string;
   source: "contact" | "visitor_message" | "ai_extraction" | "manager";
   sourceMessageId?: string;
+  evidence?: AiTextEvidence;
   confidence: number;
   updatedAt: string;
 };
@@ -105,7 +106,89 @@ export type AiKnownSlots = Partial<Record<AiSlotName, AiKnownSlot>>;
 export type AiSlotUpdate = AiExtractedSlotCandidate & {
   source: "ai_extraction";
   sourceMessageId: string;
+  evidence?: AiTextEvidence;
 };
+
+export const GROUNDED_AI_TURN_DECISION_VERSION =
+  "granit_ai_turn_decision.grounded.v2" as const;
+
+export const GROUNDED_AI_TURN_ACTIONS = ["answer", "clarify", "handoff"] as const;
+export type GroundedAiTurnAction = (typeof GROUNDED_AI_TURN_ACTIONS)[number];
+
+export const AI_CLAIM_GROUNDING_KINDS = [
+  "catalog",
+  "visitor_message",
+  "system_policy",
+  "conversation_only"
+] as const;
+export type AiClaimGroundingKind = (typeof AI_CLAIM_GROUNDING_KINDS)[number];
+
+const AiTextEvidenceSchema = z
+  .object({
+    messageId: z.string().uuid(),
+    quote: z.string().min(1).max(900),
+    start: z.number().int().min(0).max(12000),
+    end: z.number().int().min(1).max(12000)
+  })
+  .strict();
+
+const CatalogReferenceSchema = z
+  .object({
+    recordId: z.string().trim().min(1).max(160),
+    revision: z.number().int().min(1),
+    path: z.string().max(300),
+    catalogVersion: z.string().trim().min(1).max(160)
+  })
+  .strict();
+
+const AiGroundedSlotCandidateSchema = z
+  .object({
+    name: z.enum(AI_SLOT_NAMES),
+    value: z.string().trim().min(1).max(240),
+    confidence: z.number().min(0).max(1),
+    evidence: AiTextEvidenceSchema
+  })
+  .strict();
+
+const AiClaimGroundingSchema = z
+  .object({
+    kind: z.enum(AI_CLAIM_GROUNDING_KINDS),
+    catalogReference: CatalogReferenceSchema.nullable(),
+    messageEvidence: AiTextEvidenceSchema.nullable(),
+    systemPolicyId: z.string().trim().min(1).max(120).nullable()
+  })
+  .strict();
+
+const AiClaimAnnotationSchema = z
+  .object({
+    text: z.string().min(1).max(900),
+    start: z.number().int().min(0).max(900),
+    end: z.number().int().min(1).max(900),
+    grounding: AiClaimGroundingSchema
+  })
+  .strict();
+
+export const GroundedAiTurnCandidateDecisionSchema = z
+  .object({
+    version: z.literal(GROUNDED_AI_TURN_DECISION_VERSION),
+    action: z.enum(GROUNDED_AI_TURN_ACTIONS),
+    intent: z.enum(AI_TURN_INTENTS),
+    replyText: z.string().trim().min(1).max(900),
+    extractedSlots: z.array(AiGroundedSlotCandidateSchema).max(AI_SLOT_NAMES.length),
+    requestedSlots: z.array(z.enum(AI_SLOT_NAMES)).max(1),
+    claims: z.array(AiClaimAnnotationSchema).max(24),
+    riskFlags: z.array(z.enum(AI_RISK_FLAGS)).max(AI_RISK_FLAGS.length),
+    handoffReason: z.enum(AI_HANDOFF_REASONS).nullable(),
+    confidence: z.number().min(0).max(1)
+  })
+  .strict();
+
+export type AiTextEvidence = z.infer<typeof AiTextEvidenceSchema>;
+export type AiGroundedSlotCandidate = z.infer<typeof AiGroundedSlotCandidateSchema>;
+export type AiClaimAnnotation = z.infer<typeof AiClaimAnnotationSchema>;
+export type GroundedAiTurnCandidateDecision = z.infer<
+  typeof GroundedAiTurnCandidateDecisionSchema
+>;
 
 const stringEnumSchema = (values: readonly string[]) => ({
   type: "string",
@@ -173,6 +256,116 @@ export const AI_TURN_DECISION_JSON_SCHEMA = {
     "riskFlags",
     "handoffReason",
     "sourceEvidence",
+    "confidence"
+  ]
+} as const;
+
+const nullableObjectSchema = (schema: Record<string, unknown>) => ({
+  anyOf: [schema, { type: "null" }]
+});
+
+const AI_TEXT_EVIDENCE_JSON_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    messageId: { type: "string", minLength: 36, maxLength: 36 },
+    quote: { type: "string", minLength: 1, maxLength: 900 },
+    start: { type: "integer", minimum: 0, maximum: 12000 },
+    end: { type: "integer", minimum: 1, maximum: 12000 }
+  },
+  required: ["messageId", "quote", "start", "end"]
+} as const;
+
+const CATALOG_REFERENCE_JSON_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    recordId: { type: "string", minLength: 1, maxLength: 160 },
+    revision: { type: "integer", minimum: 1 },
+    path: { type: "string", maxLength: 300 },
+    catalogVersion: { type: "string", minLength: 1, maxLength: 160 }
+  },
+  required: ["recordId", "revision", "path", "catalogVersion"]
+} as const;
+
+export const GROUNDED_AI_TURN_DECISION_JSON_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    version: { type: "string", const: GROUNDED_AI_TURN_DECISION_VERSION },
+    action: stringEnumSchema(GROUNDED_AI_TURN_ACTIONS),
+    intent: stringEnumSchema(AI_TURN_INTENTS),
+    replyText: { type: "string", minLength: 1, maxLength: 900 },
+    extractedSlots: {
+      type: "array",
+      maxItems: AI_SLOT_NAMES.length,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          name: stringEnumSchema(AI_SLOT_NAMES),
+          value: { type: "string", minLength: 1, maxLength: 240 },
+          confidence: { type: "number", minimum: 0, maximum: 1 },
+          evidence: AI_TEXT_EVIDENCE_JSON_SCHEMA
+        },
+        required: ["name", "value", "confidence", "evidence"]
+      }
+    },
+    requestedSlots: {
+      type: "array",
+      maxItems: 1,
+      items: stringEnumSchema(AI_SLOT_NAMES)
+    },
+    claims: {
+      type: "array",
+      maxItems: 24,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          text: { type: "string", minLength: 1, maxLength: 900 },
+          start: { type: "integer", minimum: 0, maximum: 900 },
+          end: { type: "integer", minimum: 1, maximum: 900 },
+          grounding: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              kind: stringEnumSchema(AI_CLAIM_GROUNDING_KINDS),
+              catalogReference: nullableObjectSchema(CATALOG_REFERENCE_JSON_SCHEMA),
+              messageEvidence: nullableObjectSchema(AI_TEXT_EVIDENCE_JSON_SCHEMA),
+              systemPolicyId: { type: ["string", "null"], maxLength: 120 }
+            },
+            required: [
+              "kind",
+              "catalogReference",
+              "messageEvidence",
+              "systemPolicyId"
+            ]
+          }
+        },
+        required: ["text", "start", "end", "grounding"]
+      }
+    },
+    riskFlags: {
+      type: "array",
+      maxItems: AI_RISK_FLAGS.length,
+      items: stringEnumSchema(AI_RISK_FLAGS)
+    },
+    handoffReason: {
+      anyOf: [stringEnumSchema(AI_HANDOFF_REASONS), { type: "null" }]
+    },
+    confidence: { type: "number", minimum: 0, maximum: 1 }
+  },
+  required: [
+    "version",
+    "action",
+    "intent",
+    "replyText",
+    "extractedSlots",
+    "requestedSlots",
+    "claims",
+    "riskFlags",
+    "handoffReason",
     "confidence"
   ]
 } as const;

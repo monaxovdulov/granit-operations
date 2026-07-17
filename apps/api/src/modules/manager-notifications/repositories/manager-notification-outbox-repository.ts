@@ -92,6 +92,7 @@ export class PostgresManagerNotificationOutboxRepository
           textPreview: metadataString(metadata, "text_preview"),
           contentType: metadataString(metadata, "content_type"),
           needsManagerReason: metadataString(metadata, "needs_manager_reason"),
+          slots: metadataRecord(metadata, "slots"),
           replyMarkup: parseTelegramReplyMarkup(metadata)
         };
       });
@@ -138,6 +139,14 @@ function metadataString(metadata: Record<string, unknown>, key: string) {
   const value = metadata[key];
 
   return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function metadataRecord(metadata: Record<string, unknown>, key: string) {
+  const value = metadata[key];
+
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
 }
 
 function parseTelegramReplyMarkup(

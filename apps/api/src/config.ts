@@ -6,8 +6,11 @@ export type ApiConfig = {
   databaseUrl: string;
   widgetAi: {
     enabled: boolean;
+    groundedMode: "off" | "shadow" | "enforce";
     openAiApiKey?: string;
     openAiModel: string;
+    verifierModel: string;
+    deadlineMs: number;
   };
   telegramBot: {
     enabled: boolean;
@@ -49,8 +52,15 @@ export function loadConfig(env: NodeJS.ProcessEnv): ApiConfig {
     databaseUrl,
     widgetAi: {
       enabled: env.AI_WIDGET_ENABLED === "true",
+      groundedMode: parseWidgetAiGroundedMode(env.AI_WIDGET_GROUNDED_MODE),
       openAiApiKey: env.OPENAI_API_KEY,
-      openAiModel: env.OPENAI_MODEL ?? "gpt-5.5"
+      openAiModel: env.OPENAI_MODEL ?? "gpt-5.5",
+      verifierModel: env.OPENAI_VERIFIER_MODEL ?? env.OPENAI_MODEL ?? "gpt-5.5",
+      deadlineMs: parseIntegerEnv(env.AI_WIDGET_DEADLINE_MS, {
+        fallback: 18000,
+        min: 5000,
+        max: 30000
+      })
     },
     telegramBot: {
       enabled: env.TELEGRAM_BOT_ENABLED === "true",
@@ -93,6 +103,12 @@ export function loadConfig(env: NodeJS.ProcessEnv): ApiConfig {
     },
     managerAuth: loadManagerAuthConfig(env)
   };
+}
+
+function parseWidgetAiGroundedMode(
+  value: string | undefined
+): "off" | "shadow" | "enforce" {
+  return value === "shadow" || value === "enforce" ? value : "off";
 }
 
 function parseIntegerEnv(

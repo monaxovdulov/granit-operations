@@ -134,9 +134,87 @@ export type ManagerLeadListItem = {
   updatedAt: string;
 };
 
+export const STRUCTURED_INTAKE_SLOT_NAMES = [
+  "monumentType",
+  "material",
+  "size",
+  "city",
+  "cemetery",
+  "engraving",
+  "installation",
+  "budgetContext",
+  "desiredTiming",
+  "customerName",
+  "phone",
+  "preferredContact",
+  "questionSummary"
+] as const;
+
+export type StructuredIntakeSlotName = (typeof STRUCTURED_INTAKE_SLOT_NAMES)[number];
+
+export type ManagerStructuredIntakeSlot = {
+  publicConversationId: string;
+  name: StructuredIntakeSlotName;
+  value: string;
+  source: "contact" | "visitor_message" | "ai_extraction" | "manager";
+  sourceMessageId?: string;
+  confidence: number;
+  evidence?: { quote: string; start: number; end: number };
+  updatedAt: string;
+};
+
+export type ManagerStructuredIntake = {
+  slots: ManagerStructuredIntakeSlot[];
+  conflicts: Array<{
+    publicConversationId: string;
+    name: StructuredIntakeSlotName;
+    candidateValue: string;
+    currentValue?: string;
+    sourceMessageId?: string;
+    evidence?: { quote: string; start: number; end: number };
+    applied: boolean;
+    createdAt: string;
+  }>;
+  missingFields: StructuredIntakeSlotName[];
+  handoff?: {
+    reason: string;
+    summary: string;
+    status: "active" | "resolved";
+    createdAt: string;
+  };
+  verification?: {
+    aiRunId: string;
+    status: "replied" | "handoff" | "degraded";
+    verdict?: string;
+    generatorModelName?: string;
+    verifierModelName?: string;
+    verifierVersion?: string;
+    catalogVersion?: string;
+    reviewLabels: Array<{
+      label: AiReviewLabel;
+      note?: string;
+      createdAt: string;
+    }>;
+    createdAt: string;
+  };
+};
+
+export const AI_REVIEW_LABELS = [
+  "correct",
+  "unsupported_fact",
+  "wrong_slot",
+  "missed_handoff",
+  "unnecessary_handoff",
+  "poor_tone",
+  "other"
+] as const;
+
+export type AiReviewLabel = (typeof AI_REVIEW_LABELS)[number];
+
 export type ManagerLeadDetail = ManagerLeadListItem & {
   timeline: ManagerTimelineEvent[];
   conversations: ManagerConversation[];
+  structuredIntake: ManagerStructuredIntake;
   internalNotePlaceholder: string;
 };
 

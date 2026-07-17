@@ -106,6 +106,12 @@ export type PersistAiReplyWithSendGateInput = {
     policyVersion?: string;
     knowledgeVersion?: string;
     modelVersion?: string;
+    generatorModelName?: string;
+    verifierModelName?: string;
+    verifierVersion?: string;
+    verifierVerdict?: string;
+    catalogVersion?: string;
+    catalogContentHash?: string;
   };
   handoff?: {
     reason: AiHandoffReason;

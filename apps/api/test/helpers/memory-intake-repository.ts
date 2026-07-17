@@ -9,7 +9,10 @@ import {
   buildStageASiteWidgetAiTurnInput,
   type AiTurnInput
 } from "../../src/modules/ai/ai-turn.js";
-import type { AiKnownSlots } from "../../src/modules/ai/ai-dialog-contract.js";
+import type {
+  AiKnownSlots,
+  AiSlotName
+} from "../../src/modules/ai/ai-dialog-contract.js";
 import {
   AgentReplyBlockedError,
   IdempotencyConflictError,
@@ -38,6 +41,7 @@ import {
   type PersistManagerTelegramReplyResult,
   type PersistAiReplyWithSendGateInput,
   type RecordManualContactInput,
+  type RecordAiReviewLabelInput,
   type RecordSiteWidgetAiDegradationInput,
   type SaveAcceptedSiteFormSubmissionInput,
   type SaveAcceptedSiteFormSubmissionResult,
@@ -728,9 +732,21 @@ export class MemoryIntakeRepository implements IntakeRepository {
       const slots = {
         ...(this.aiSlotsByConversation.get(input.conversationId) ?? {})
       };
+      const conflicts = [...updatedLead.structuredIntake.conflicts];
 
       for (const slot of input.slotUpdates) {
         if (slots[slot.name]?.source === "manager") {
+          const current = slots[slot.name];
+          conflicts.push({
+            publicConversationId: conversation.publicConversationId,
+            name: slot.name,
+            candidateValue: slot.value,
+            currentValue: current?.value,
+            sourceMessageId: slot.sourceMessageId,
+            evidence: slot.evidence,
+            applied: false,
+            createdAt
+          });
           continue;
         }
 
@@ -738,12 +754,92 @@ export class MemoryIntakeRepository implements IntakeRepository {
           value: slot.value,
           source: slot.source,
           sourceMessageId: slot.sourceMessageId,
+          evidence: slot.evidence,
           confidence: slot.confidence,
           updatedAt: createdAt
         };
       }
 
       this.aiSlotsByConversation.set(input.conversationId, slots);
+      const slotEntries = Object.entries(slots).flatMap(([name, value]) =>
+        value
+          ? [
+              {
+                publicConversationId: conversation.publicConversationId,
+                name: name as AiSlotName,
+                value: value.value,
+                source: value.source,
+                sourceMessageId: value.sourceMessageId,
+                confidence: value.confidence,
+                evidence: value.evidence
+                  ? {
+                      quote: value.evidence.quote,
+                      start: value.evidence.start,
+                      end: value.evidence.end
+                    }
+                  : undefined,
+                updatedAt: value.updatedAt
+              }
+            ]
+          : []
+      );
+      const knownNames = new Set(slotEntries.map((slot) => slot.name));
+
+      updatedLead.structuredIntake = {
+        slots: slotEntries,
+        conflicts,
+        missingFields: CORE_STRUCTURED_INTAKE_SLOTS.filter((name) => !knownNames.has(name)),
+        handoff: input.handoff
+          ? {
+              reason: input.handoff.reason,
+              summary: input.handoff.summary,
+              status: "active",
+              createdAt
+            }
+          : updatedLead.structuredIntake.handoff,
+        verification: input.aiRun
+          ? {
+              aiRunId: input.inboundPublicMessageId,
+              status: input.handoff ? "handoff" : "replied",
+              verdict: input.aiRun.verifierVerdict,
+              generatorModelName:
+                input.aiRun.generatorModelName ?? input.aiRun.modelVersion,
+              verifierModelName: input.aiRun.verifierModelName,
+              verifierVersion: input.aiRun.verifierVersion,
+              catalogVersion: input.aiRun.catalogVersion,
+              reviewLabels: [],
+              createdAt
+            }
+          : updatedLead.structuredIntake.verification
+      };
+    }
+
+    if (input.handoff || input.aiRun) {
+      updatedLead.structuredIntake = {
+        ...updatedLead.structuredIntake,
+        handoff: input.handoff
+          ? {
+              reason: input.handoff.reason,
+              summary: input.handoff.summary,
+              status: "active",
+              createdAt
+            }
+          : updatedLead.structuredIntake.handoff,
+        verification: input.aiRun
+          ? {
+              aiRunId: input.inboundPublicMessageId,
+              status: input.handoff ? "handoff" : "replied",
+              verdict: input.aiRun.verifierVerdict,
+              generatorModelName:
+                input.aiRun.generatorModelName ?? input.aiRun.modelVersion,
+              verifierModelName: input.aiRun.verifierModelName,
+              verifierVersion: input.aiRun.verifierVersion,
+              catalogVersion: input.aiRun.catalogVersion,
+              reviewLabels: [],
+              createdAt
+            }
+          : updatedLead.structuredIntake.verification
+      };
     }
 
     this.widgetAiIdempotency.set(input.idempotencyKey, {
@@ -778,7 +874,7 @@ export class MemoryIntakeRepository implements IntakeRepository {
         ...lead.timeline,
         {
           eventType: "conversation.ai_degraded",
-          summary: "AI reply unavailable; manager review required",
+          summary: "AI reply unavailable for this turn; manager review requested",
           metadata: {
             inbound_public_message_id: input.inboundPublicMessageId,
             input_fingerprint: input.inputFingerprint,
@@ -788,14 +884,38 @@ export class MemoryIntakeRepository implements IntakeRepository {
           createdAt
         }
       ],
+      structuredIntake: {
+        ...lead.structuredIntake,
+        verification: {
+          aiRunId: input.inboundPublicMessageId,
+          status: "degraded",
+          verdict:
+            typeof input.metadata.verifier_verdict === "string"
+              ? input.metadata.verifier_verdict
+              : undefined,
+          generatorModelName:
+            typeof input.metadata.model_name === "string"
+              ? input.metadata.model_name
+              : undefined,
+          verifierModelName:
+            typeof input.metadata.verifier_model_name === "string"
+              ? input.metadata.verifier_model_name
+              : undefined,
+          verifierVersion:
+            typeof input.metadata.verifier_version === "string"
+              ? input.metadata.verifier_version
+              : undefined,
+          catalogVersion:
+            typeof input.metadata.catalog_version === "string"
+              ? input.metadata.catalog_version
+              : undefined,
+          reviewLabels: [],
+          createdAt
+        }
+      },
       conversations: lead.conversations.map((conversation) =>
         conversation.channelIdentity.widgetPublicSessionId === publicSessionId
-          ? {
-              ...conversation,
-              aiState: "needs_manager",
-              agentAllowedToReply: false,
-              updatedAt: createdAt
-            }
+          ? { ...conversation, updatedAt: createdAt }
           : conversation
       )
     });
@@ -849,6 +969,52 @@ export class MemoryIntakeRepository implements IntakeRepository {
 
   async getManagerLead(leadId: string): Promise<ManagerLeadDetail | null> {
     return this.leads.get(leadId) ?? null;
+  }
+
+  async recordAiReviewLabel(
+    input: RecordAiReviewLabelInput
+  ): Promise<ManagerLeadDetail | null> {
+    const lead = this.leads.get(input.leadId);
+
+    if (!lead?.structuredIntake.verification ||
+        lead.structuredIntake.verification.aiRunId !== input.aiRunId) {
+      return null;
+    }
+
+    const createdAt = new Date().toISOString();
+    const updatedLead: ManagerLeadDetail = {
+      ...lead,
+      updatedAt: createdAt,
+      structuredIntake: {
+        ...lead.structuredIntake,
+        verification: {
+          ...lead.structuredIntake.verification,
+          reviewLabels: [
+            ...lead.structuredIntake.verification.reviewLabels,
+            { label: input.label, note: input.note, createdAt }
+          ]
+        }
+      },
+      timeline: [
+        ...lead.timeline,
+        {
+          eventType: "conversation.ai_review_labeled",
+          summary: "Manager reviewed an AI response",
+          metadata: {
+            ai_run_id: input.aiRunId,
+            label: input.label,
+            note: input.note ?? null,
+            changed_by_manager_id: input.changedByManagerId,
+            changed_by_manager_email: input.changedByManagerEmail,
+            changed_by_manager_role: input.changedByManagerRole
+          },
+          createdAt
+        }
+      ]
+    };
+
+    this.leads.set(input.leadId, updatedLead);
+    return updatedLead;
   }
 
   async changeManagerLeadStatus(
@@ -1410,6 +1576,7 @@ function toManagerLead(
       }
     ],
     conversations: [],
+    structuredIntake: emptyStructuredIntake(),
     internalNotePlaceholder: ""
   };
 }
@@ -1498,6 +1665,7 @@ function toManagerWidgetLead(
         ]
       }
     ],
+    structuredIntake: emptyStructuredIntake(),
     internalNotePlaceholder: ""
   };
 }
@@ -1682,6 +1850,7 @@ function toManagerTelegramLead(
         messages: [toManagerConversationMessage(input, contentType, createdAt)]
       }
     ],
+    structuredIntake: emptyStructuredIntake(),
     internalNotePlaceholder: ""
   };
 }
@@ -1700,6 +1869,24 @@ function toManagerConversationMessage(
     caption: input.message.caption,
     providerFileId: input.message.providerFileId,
     createdAt
+  };
+}
+
+const CORE_STRUCTURED_INTAKE_SLOTS: readonly AiSlotName[] = [
+  "monumentType",
+  "material",
+  "size",
+  "city",
+  "installation",
+  "desiredTiming",
+  "preferredContact"
+];
+
+function emptyStructuredIntake(): ManagerLeadDetail["structuredIntake"] {
+  return {
+    slots: [],
+    conflicts: [],
+    missingFields: [...CORE_STRUCTURED_INTAKE_SLOTS]
   };
 }
 

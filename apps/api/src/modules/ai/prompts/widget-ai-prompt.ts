@@ -1,6 +1,9 @@
 import type { AiTurnInput } from "../ai-turn.js";
+import type { CatalogRecord, CatalogSnapshot } from "../catalog/catalog-knowledge-port.js";
 
 export const WIDGET_AI_PROMPT_VERSION = "granit_widget_ai_prompt.consult_first.v1";
+export const GROUNDED_WIDGET_AI_PROMPT_VERSION =
+  "granit_widget_ai_prompt.grounded.v2";
 
 export function buildWidgetAiInstructions(): string {
   return [
@@ -31,5 +34,44 @@ export function buildWidgetAiUserInput(input: AiTurnInput): string {
     currentMessage: input.inboundMessage,
     approvedSources: input.approvedSources,
     boundaryConfig: input.boundaryConfig
+  });
+}
+
+export function buildGroundedWidgetAiInstructions(): string {
+  return [
+    "Ты AI-консультант компании Granit в продолжающемся диалоге виджета сайта.",
+    "Пиши естественно по-русски: 1-3 коротких предложения и максимум один полезный вопрос.",
+    "Учитывай историю и knownSlots. Не спрашивай повторно уже известное поле.",
+    "Свободно выбирай формулировку, но не создавай бизнес-факты из памяти модели.",
+    "Любой факт о компании, ассортименте, материалах, услугах, цене, сроке, наличии, гарантии или договоре должен точно следовать из catalogRecords и иметь catalog claim reference.",
+    "Если catalogRecords не подтверждают конкретное условие, честно скажи, что оно не подтверждено доступными данными, и продолжи консультацию без выдумки.",
+    "Извлекай slot только из visitor message. Для каждого slot верни точную цитату и UTF-16 start/end offsets в исходном сообщении.",
+    "Для каждого фактического фрагмента replyText верни claim annotation с точным span и grounding.",
+    "Нейтральные связки помечай conversation_only; сведения клиента — visitor_message; app-owned оговорки — system_policy.",
+    "Не превращай разговор в анкету и не проси контакт слишком рано.",
+    "Просьбу о менеджере, юридическую консультацию и обязательное коммерческое условие определяй по смыслу всего сообщения, а не по отдельному слову.",
+    "При action=clarify requestedSlots содержит ровно одно неизвестное поле; при других action список пуст.",
+    "При action=handoff укажи handoffReason; иначе handoffReason должен быть null."
+  ].join("\n");
+}
+
+export function buildGroundedWidgetAiUserInput(input: {
+  turn: AiTurnInput;
+  snapshot: CatalogSnapshot;
+  selectedRecords: readonly CatalogRecord[];
+}): string {
+  return JSON.stringify({
+    page: input.turn.page,
+    customer: input.turn.customer,
+    knownSlots: input.turn.knownSlots.values,
+    recentMessages: input.turn.compactContext.messages,
+    currentMessage: input.turn.inboundMessage,
+    catalogSnapshot: {
+      schemaVersion: input.snapshot.schemaVersion,
+      catalogVersion: input.snapshot.catalogVersion,
+      contentHash: input.snapshot.contentHash
+    },
+    catalogRecords: input.selectedRecords,
+    boundaryConfig: input.turn.boundaryConfig
   });
 }

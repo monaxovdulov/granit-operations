@@ -227,6 +227,9 @@ describe("ops-api modular monolith boundaries", () => {
     const openAiAdapterSource = readSource(
       "modules/ai/adapters/openai-widget-assistant-provider.ts"
     );
+    const openAiClientSource = readSource(
+      "modules/ai/adapters/openai-structured-response-client.ts"
+    );
     const deliveryServiceSource = readSource("modules/delivery/services/telegram-delivery-service.ts");
     const telegramAdapterSource = readSource(
       "modules/delivery/adapters/telegram-bot-api-delivery-provider.ts"
@@ -234,8 +237,9 @@ describe("ops-api modular monolith boundaries", () => {
 
     expect(widgetServiceSource).not.toMatch(/\bfetch\(/);
     expect(widgetServiceSource).not.toContain("OpenAiWidgetAssistantProvider");
-    expect(openAiAdapterSource).toMatch(/\bfetch\(/);
+    expect(openAiAdapterSource).not.toMatch(/\bfetch\(/);
     expect(openAiAdapterSource).toContain("OpenAiWidgetAssistantProvider");
+    expect(openAiClientSource).toMatch(/\bfetch\(/);
     expect(deliveryServiceSource).not.toMatch(/\bfetch\(/);
     expect(deliveryServiceSource).not.toContain("TelegramBotApiDeliveryProvider");
     expect(telegramAdapterSource).toMatch(/\bfetch\(/);

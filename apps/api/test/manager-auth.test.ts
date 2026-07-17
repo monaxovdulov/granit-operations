@@ -36,6 +36,7 @@ import {
   type PersistManagerTelegramReplyResult,
   type PersistAiReplyWithSendGateInput,
   type RecordManualContactInput,
+  type RecordAiReviewLabelInput,
   type SaveAcceptedSiteFormSubmissionInput,
   type SaveAcceptedSiteFormSubmissionResult,
   type SaveAcceptedSiteWidgetMessageInput,
@@ -324,6 +325,33 @@ describe("manager Yandex auth", () => {
     expect(beforeLogout.statusCode).toBe(200);
     expect(logout.statusCode).toBe(204);
     expect(afterLogout.statusCode).toBe(401);
+  });
+
+  it("rejects uncontrolled AI review labels before repository mutation", async () => {
+    const authRepository = new MemoryManagerAuthRepository();
+    const sessionCookie = authRepository.createSessionCookie();
+    const app = track(
+      buildApi({
+        repository: new MemoryIntakeRepository(),
+        managerAuth: {
+          repository: authRepository,
+          config: testManagerAuthConfig()
+        }
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/manager/leads/${randomUUID()}/ai-runs/${randomUUID()}/review-labels`,
+      headers: { cookie: sessionCookie },
+      payload: { label: "free-form-dangerous-label" }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: "invalid_ai_review_label",
+      allowed_labels: expect.arrayContaining(["correct", "unsupported_fact", "wrong_slot"])
+    });
   });
 });
 
@@ -714,6 +742,7 @@ class MemoryIntakeRepository implements IntakeRepository {
           ]
         }
       ],
+      structuredIntake: emptyStructuredIntake(),
       internalNotePlaceholder: ""
     });
 
@@ -750,6 +779,12 @@ class MemoryIntakeRepository implements IntakeRepository {
 
   async getManagerLead(leadId: string): Promise<ManagerLeadDetail | null> {
     return this.leads.get(leadId) ?? null;
+  }
+
+  async recordAiReviewLabel(
+    _input: RecordAiReviewLabelInput
+  ): Promise<ManagerLeadDetail | null> {
+    return null;
   }
 
   async changeManagerLeadStatus(
@@ -906,6 +941,23 @@ function toManagerLead(
       }
     ],
     conversations: [],
+    structuredIntake: emptyStructuredIntake(),
     internalNotePlaceholder: ""
+  };
+}
+
+function emptyStructuredIntake(): ManagerLeadDetail["structuredIntake"] {
+  return {
+    slots: [],
+    conflicts: [],
+    missingFields: [
+      "monumentType",
+      "material",
+      "size",
+      "city",
+      "installation",
+      "desiredTiming",
+      "preferredContact"
+    ]
   };
 }

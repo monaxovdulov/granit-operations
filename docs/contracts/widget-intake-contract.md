@@ -107,7 +107,7 @@ When AI is enabled and provider config is available:
 - the inbound visitor message is persisted first;
 - OpenAI Responses API is called only from operations backend;
 - any outbound AI answer is inserted into `conversation_messages` with `direction=outbound` and `sender_role=ai_assistant` before the public response includes it;
-- if model generation or AI-message persistence fails, public success remains an intake success but `automation.status` is `fallback` and no AI reply text is returned;
+- if model generation, semantic verification, grounding, or AI-message persistence fails, public success remains an intake success, `automation.status` is `degraded`, `conversation_state` stays `ai_active`, and no unverified AI reply text is returned;
 - public response still must not include internal lead, conversation, or trace ids.
 
 Allowed replied shape:

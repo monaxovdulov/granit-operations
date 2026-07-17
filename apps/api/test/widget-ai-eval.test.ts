@@ -5,23 +5,30 @@ import {
   promoteAiReviewToEvalCase,
   runWidgetAiEvalCase
 } from "../src/modules/ai/eval/widget-ai-regression-corpus.js";
+import { validateWidgetAiEvalCorpus } from "../src/modules/ai/eval/widget-ai-eval-runner.js";
 
 describe("widget AI review and regression loop", () => {
   it("keeps a baseline corpus for every hard dialog boundary", () => {
-    expect(WIDGET_AI_REGRESSION_CORPUS).toHaveLength(10);
-    expect(new Set(WIDGET_AI_REGRESSION_CORPUS.map((entry) => entry.caseId)).size).toBe(10);
+    expect(WIDGET_AI_REGRESSION_CORPUS.length).toBeGreaterThanOrEqual(30);
+    expect(WIDGET_AI_REGRESSION_CORPUS.length).toBeLessThanOrEqual(50);
+    expect(new Set(WIDGET_AI_REGRESSION_CORPUS.map((entry) => entry.caseId)).size).toBe(
+      WIDGET_AI_REGRESSION_CORPUS.length
+    );
+    expect(WIDGET_AI_REGRESSION_CORPUS.every((entry) => entry.sanitizedInput.messages.length)).toBe(
+      true
+    );
     expect(WIDGET_AI_REGRESSION_CORPUS.map((entry) => entry.caseId)).toEqual(
       expect.arrayContaining([
         "multi_turn_selection",
         "no_repeated_material",
-        "consult_first_price",
+        "price_orientation_collect_context",
         "final_quote_handoff",
         "explicit_manager_handoff",
         "legal_boundary",
         "provider_degradation",
-        "takeover_stale_draft",
-        "source_mismatch",
-        "lead_summary"
+        "document_word_not_handoff",
+        "connection_word_not_handoff",
+        "empty_catalog_honest_answer"
       ])
     );
   });
@@ -38,7 +45,7 @@ describe("widget AI review and regression loop", () => {
       expected: {
         action: "clarify",
         requestedSlot: "size",
-        forbiddenPatterns: ["какой материал"]
+        forbiddenPhrases: ["какой материал"]
       }
     });
 
@@ -61,5 +68,12 @@ describe("widget AI review and regression loop", () => {
       requestedSlots: ["size"]
     });
     expect(verifiedFix).toEqual({ passed: true, failures: [] });
+  });
+
+  it("validates every offline case without invoking a model", () => {
+    expect(validateWidgetAiEvalCorpus(WIDGET_AI_REGRESSION_CORPUS)).toEqual({
+      valid: true,
+      failures: []
+    });
   });
 });

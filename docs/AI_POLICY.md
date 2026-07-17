@@ -1,27 +1,40 @@
 # AI Policy
 
-Status: S05 website widget safe AI and S06 manager takeover gate implemented behind disabled default
+Status: grounded website consultant implemented behind a disabled runtime flag
 
-S05 adds website widget AI replies only after durable inbound persistence and only when `AI_WIDGET_ENABLED=true` with server-side OpenAI config. The default remains disabled.
+Website AI remains disabled unless `AI_WIDGET_ENABLED=true`. The grounded pipeline is selected with `AI_WIDGET_GROUNDED_MODE=enforce`; production enablement and the external machine-readable catalog require separate owner approval.
 
-S06 adds manager takeover for website widget conversations. A protected manager action sets `agent_allowed_to_reply=false` for the conversation/session. Any later visitor message in that session returns `manager_review` fallback without an AI reply, and outbound AI persistence checks `agent_allowed_to_reply=true` again at send time so stale drafts cannot be saved after takeover.
+## Grounded send path
 
-Deferred AI surfaces:
+1. The visitor message is durably persisted before model generation.
+2. A generator writes a natural Russian reply and typed slots/claims with evidence.
+3. App-owned structural checks validate slot quotes, offsets, catalog references, requested slots and handoff shape.
+4. An independent semantic verifier checks the full reply, including claims the generator did not annotate.
+5. One bounded repair is allowed while the shared 18-second turn deadline has enough budget.
+6. Only a verified reply reaches the atomic send-time `agent_allowed_to_reply=true` gate.
 
-- Telegram AI;
-- Mastra/OpenAI workflows;
-- broader tool schemas;
-- eval/regression gates beyond S05 tests;
-- urgent AI routing.
+Semantic decisions are not made by keyword regex in the grounded path. Requests for a manager, legal advice and binding commercial promises are judged from the full dialog context. Words such as `документ` or `связаны` do not trigger handoff by themselves.
 
-S05 website widget AI policy enforces:
+## Knowledge
 
-- approved AI disclosure before normal AI conversation;
-- `from X` starting-price orientation only from approved sources; S05 has no approved price source, so price questions hand off/fallback without amounts;
-- no final price, final deadline, warranty, contract, discount, availability, legal, payment, or similar promises;
-- refusal/handoff for inheritance, burial, legal funeral questions, and other non-monument topics;
-- deterministic policy guardrails for business truth until approved tools exist;
-- safe fallback on missing config, model error, empty model output, unsafe model output, or AI persistence failure;
-- send-time `agent_allowed_to_reply` gate before AI message persistence.
+- Business/catalog truth comes only through `CatalogKnowledgePort` snapshots and published records.
+- The current provider is intentionally empty (`empty.v1`) until the owner supplies the external JSON catalog and its adapter.
+- Missing knowledge is answered honestly and does not by itself force a handoff.
+- A fact about the visitor must be backed by an exact quote and UTF-16 offsets from a visitor message.
+- Manager-authored slot values cannot be silently overwritten; conflicting AI candidates are retained as append-only events.
 
-Do not enable AI replies in staging until S05 migration, tests, and paired staging smoke are complete. Do not enable production AI without separate production approval.
+## Handoff and degradation
+
+- Explicit manager requests, legal advice and binding/final commercial terms may require handoff.
+- A successful handoff stops AI, persists a snapshot, adds timeline/outbox events and notifies managers with the structured intake.
+- Model/verifier/grounding failure degrades only the current turn. The inbound message remains saved, the manager sees the event, and AI stays available for the next turn.
+- A manager takeover still disables AI and the send-time gate blocks stale drafts.
+
+## Rollout and evaluation
+
+- `off`: legacy compatibility path.
+- `shadow`: legacy reply is sent while grounded output is recorded in metadata for comparison.
+- `enforce`: only generator + verifier output can be sent.
+- Offline regression contains 36 realistic dialogs. Paid live evaluation additionally requires `AI_WIDGET_EVAL_LIVE=true` and owner-provided OpenAI credentials.
+
+Telegram AI remains out of scope. Do not enable production AI or deploy these changes without separate production approval.
