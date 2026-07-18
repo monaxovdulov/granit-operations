@@ -47,6 +47,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import { AuthRequiredError, managerApi } from "./api";
 import {
   LEAD_STATUS_OPTIONS,
+  aiReviewLabel,
   contactLabel,
   conversationChannelLabel,
   conversationMessageBody,
@@ -64,12 +65,16 @@ import {
   sourceChannelLabel,
   statusBadgeColor,
   statusLabel,
+  structuredIntakeSlotLabel,
+  structuredIntakeSourceLabel,
   timelineEventLabel,
   timelineIconColor,
   timelineSummaryLabel
 } from "./display";
 import {
+  AI_REVIEW_LABELS,
   isLeadStatus,
+  type AiReviewLabel,
   type LeadStatus,
   type ManagerLeadDetail,
   type ManagerLeadListItem,
@@ -839,6 +844,12 @@ function LoadedLeadDetail({
           ) : null}
         </Section>
 
+        <StructuredIntakeCard
+          leadId={lead.leadId}
+          intake={lead.structuredIntake}
+          canReview={canManageAi}
+        />
+
         {lead.conversations.length ? (
           <Section title="Диалог">
             <Stack gap="md">
@@ -929,6 +940,229 @@ function LoadedLeadDetail({
       </Stack>
     </Paper>
   );
+}
+
+function StructuredIntakeCard({
+  leadId,
+  intake,
+  canReview
+}: {
+  leadId: string;
+  intake: ManagerLeadDetail["structuredIntake"];
+  canReview: boolean;
+}) {
+  const [reviewLabels, setReviewLabels] = useState(
+    intake.verification?.reviewLabels ?? []
+  );
+  const [savingLabel, setSavingLabel] = useState<AiReviewLabel | null>(null);
+  const [reviewError, setReviewError] = useState<string | null>(null);
+  const hasData =
+    intake.slots.length > 0 ||
+    intake.requirements.length > 0 ||
+    intake.conflicts.length > 0 ||
+    Boolean(intake.handoff) ||
+    Boolean(intake.verification);
+
+  useEffect(() => {
+    setReviewLabels(intake.verification?.reviewLabels ?? []);
+    setSavingLabel(null);
+    setReviewError(null);
+  }, [intake.verification?.aiRunId]);
+
+  const saveReviewLabel = async (label: AiReviewLabel) => {
+    if (!intake.verification || savingLabel) {
+      return;
+    }
+
+    setSavingLabel(label);
+    setReviewError(null);
+
+    try {
+      const result = await managerApi.recordAiReviewLabel(
+        leadId,
+        intake.verification.aiRunId,
+        label
+      );
+      setReviewLabels(result.lead.structuredIntake.verification?.reviewLabels ?? []);
+    } catch (error) {
+      setReviewError(errorMessage(error));
+    } finally {
+      setSavingLabel(null);
+    }
+  };
+
+  if (!hasData) {
+    return null;
+  }
+
+  return (
+    <Section title="Собранная заявка">
+      {intake.slots.length ? (
+        <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="sm">
+          {intake.slots.map((slot) => (
+            <Paper key={`${slot.publicConversationId}-${slot.name}`} withBorder p="sm">
+              <Text size="xs" c="dimmed" fw={700} tt="uppercase">
+                {structuredIntakeSlotLabel(slot.name)}
+              </Text>
+              <Text fw={600}>{slot.value}</Text>
+              <Text size="xs" c="dimmed">
+                {structuredIntakeSourceLabel(slot.source)} · уверенность{" "}
+                {Math.round(slot.confidence * 100)}%
+              </Text>
+              {slot.evidence ? (
+                <details>
+                  <summary>Показать подтверждение</summary>
+                  <Text size="sm" mt={4}>
+                    «{slot.evidence.quote}»
+                  </Text>
+                </details>
+              ) : null}
+            </Paper>
+          ))}
+        </SimpleGrid>
+      ) : (
+        <Text size="sm" c="dimmed">
+          AI пока не извлек структурированные параметры.
+        </Text>
+      )}
+
+      {intake.requirements.length ? (
+        <Box>
+          <Text size="xs" c="dimmed" fw={700} tt="uppercase" mb={6}>
+            Предпочтения и требования
+          </Text>
+          <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="sm">
+            {intake.requirements.map((requirement) => (
+              <Paper
+                key={`${requirement.publicConversationId}-${requirement.category}-${requirement.mode}-${requirement.value}`}
+                withBorder
+                p="sm"
+              >
+                <Text size="xs" c="dimmed" fw={700} tt="uppercase">
+                  {requirementCategoryLabel(requirement.category)} ·{" "}
+                  {requirementModeLabel(requirement.mode)}
+                </Text>
+                <Text fw={600}>{requirement.value}</Text>
+                <Text size="xs" c="dimmed">
+                  уверенность {Math.round(requirement.confidence * 100)}%
+                </Text>
+                <details>
+                  <summary>Показать подтверждение</summary>
+                  <Text size="sm" mt={4}>
+                    «{requirement.evidence.quote}»
+                  </Text>
+                </details>
+              </Paper>
+            ))}
+          </SimpleGrid>
+        </Box>
+      ) : null}
+
+      {intake.missingFields.length ? (
+        <Box>
+          <Text size="xs" c="dimmed" fw={700} tt="uppercase" mb={6}>
+            Еще не известно
+          </Text>
+          <Group gap="xs">
+            {intake.missingFields.map((name) => (
+              <Badge key={name} variant="outline" color="gray">
+                {structuredIntakeSlotLabel(name)}
+              </Badge>
+            ))}
+          </Group>
+        </Box>
+      ) : null}
+
+      {intake.conflicts.map((conflict) => (
+        <Alert
+          key={`${conflict.publicConversationId}-${conflict.name}-${conflict.createdAt}`}
+          color="orange"
+          variant="light"
+          icon={<AlertCircle size={18} />}
+        >
+          Конфликт «{structuredIntakeSlotLabel(conflict.name)}»: AI извлек
+          {` «${conflict.candidateValue}»`}
+          {conflict.currentValue ? `, текущее значение «${conflict.currentValue}»` : ""}.
+          {conflict.evidence ? ` Подтверждение: «${conflict.evidence.quote}».` : ""}
+        </Alert>
+      ))}
+
+      {intake.handoff ? (
+        <Alert color="blue" variant="light" icon={<UserRound size={18} />}>
+          Передача менеджеру: {intake.handoff.summary} ({intake.handoff.reason})
+        </Alert>
+      ) : null}
+
+      {intake.verification ? (
+        <Stack gap="xs">
+          <Text size="xs" c="dimmed">
+            Проверка ответа: {intake.verification.verdict ?? intake.verification.status}
+            {intake.verification.verifierModelName
+              ? ` · ${intake.verification.verifierModelName}`
+              : ""}
+            {intake.verification.catalogVersion
+              ? ` · каталог ${intake.verification.catalogVersion}`
+              : ""}
+          </Text>
+          {reviewLabels.length ? (
+            <Group gap="xs">
+              {reviewLabels.map((review) => (
+                <Badge key={`${review.label}-${review.createdAt}`} color="blue" variant="light">
+                  {aiReviewLabel(review.label)}
+                </Badge>
+              ))}
+            </Group>
+          ) : null}
+          {canReview ? (
+            <Group gap="xs">
+              {AI_REVIEW_LABELS.map((label) => (
+                <Button
+                  key={label}
+                  size="compact-xs"
+                  variant="subtle"
+                  color={label === "correct" ? "green" : "orange"}
+                  loading={savingLabel === label}
+                  disabled={Boolean(savingLabel) || reviewLabels.some((item) => item.label === label)}
+                  onClick={() => void saveReviewLabel(label)}
+                >
+                  {aiReviewLabel(label)}
+                </Button>
+              ))}
+            </Group>
+          ) : null}
+          {reviewError ? (
+            <Text size="xs" c="red">
+              {reviewError}
+            </Text>
+          ) : null}
+        </Stack>
+      ) : null}
+    </Section>
+  );
+}
+
+function requirementCategoryLabel(
+  category: ManagerLeadDetail["structuredIntake"]["requirements"][number]["category"]
+): string {
+  return {
+    style: "Стиль",
+    color: "Цвет",
+    shape: "Форма",
+    accessory: "Аксессуар",
+    decoration: "Оформление",
+    site_constraint: "Особенность участка",
+    other: "Другое"
+  }[category];
+}
+
+function requirementModeLabel(
+  mode: ManagerLeadDetail["structuredIntake"]["requirements"][number]["mode"]
+): string {
+  return {
+    preference: "предпочтение",
+    requirement: "обязательно",
+    avoidance: "исключить"
+  }[mode];
 }
 
 function ConversationHistory({

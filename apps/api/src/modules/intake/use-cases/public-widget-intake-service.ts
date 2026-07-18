@@ -14,12 +14,21 @@ import type { AiReplyCandidateEvidence, AiTurnInput } from "../../ai/ai-turn.js"
 import {
   AI_SLOT_NAMES,
   AI_HANDOFF_REASONS,
+  AI_REQUIREMENT_CATEGORIES,
+  AI_REQUIREMENT_MODES,
   AI_TURN_ACTIONS,
   AI_TURN_INTENTS,
   type AiHandoffReason,
+  type AiRequirementUpdate,
   type AiSlotName,
+  type AiTextEvidence,
   type AiSlotUpdate
 } from "../../ai/ai-dialog-contract.js";
+import {
+  isRequirementValueSupportedByEvidence,
+  validateSlotEvidence,
+  validateTextEvidence
+} from "../../ai/grounding/ai-slot-evidence-service.js";
 import { APPROVED_WIDGET_KNOWLEDGE_VERSION } from "../../ai/knowledge/approved-widget-knowledge.js";
 import { WIDGET_AI_POLICY_VERSION } from "../../ai/policy/widget-ai-policy.js";
 import { WIDGET_AI_PROMPT_VERSION } from "../../ai/prompts/widget-ai-prompt.js";
@@ -234,7 +243,8 @@ export class PublicWidgetIntakeService {
           metadata: {
             prompt_version: WIDGET_AI_PROMPT_VERSION,
             policy_version: WIDGET_AI_POLICY_VERSION,
-            knowledge_version: APPROVED_WIDGET_KNOWLEDGE_VERSION
+            knowledge_version: APPROVED_WIDGET_KNOWLEDGE_VERSION,
+            ...aiReply.metadata
           }
         }).catch(() => undefined);
         return fallbackSuccess(
@@ -253,7 +263,8 @@ export class PublicWidgetIntakeService {
             public_conversation_id: saved.publicConversationId,
             body: aiReply.text,
             metadata: aiReply.metadata,
-            slot_updates: aiReply.slotUpdates
+            slot_updates: aiReply.slotUpdates,
+            requirement_updates: aiReply.requirementUpdates
           })
         );
         const persistedAiReply = await this.repository.saveSiteWidgetAiMessage({
@@ -267,6 +278,7 @@ export class PublicWidgetIntakeService {
           sourcePageUrl: aiTurnInputWithFingerprint.page.url,
           agentAllowedToReplyAfterSend: aiReply.agentAllowedToReplyAfterSend,
           slotUpdates: aiReply.slotUpdates,
+          requirementUpdates: aiReply.requirementUpdates,
           aiRun:
             aiReply.action && aiReply.intent
               ? {
@@ -275,8 +287,35 @@ export class PublicWidgetIntakeService {
                   intent: aiReply.intent,
                   promptVersion: readOptionalMetadataString(aiReply.metadata, "prompt_version"),
                   policyVersion: readOptionalMetadataString(aiReply.metadata, "policy_version"),
-                  knowledgeVersion: APPROVED_WIDGET_KNOWLEDGE_VERSION,
-                  modelVersion: readOptionalMetadataString(aiReply.metadata, "model_name")
+                  knowledgeVersion:
+                    readOptionalMetadataString(aiReply.metadata, "catalog_version") ??
+                    readOptionalMetadataString(aiReply.metadata, "knowledge_version") ??
+                    APPROVED_WIDGET_KNOWLEDGE_VERSION,
+                  modelVersion: readOptionalMetadataString(aiReply.metadata, "model_name"),
+                  generatorModelName: readOptionalMetadataString(
+                    aiReply.metadata,
+                    "model_name"
+                  ),
+                  verifierModelName: readOptionalMetadataString(
+                    aiReply.metadata,
+                    "verifier_model_name"
+                  ),
+                  verifierVersion: readOptionalMetadataString(
+                    aiReply.metadata,
+                    "verifier_version"
+                  ),
+                  verifierVerdict: readOptionalMetadataString(
+                    aiReply.metadata,
+                    "verifier_verdict"
+                  ),
+                  catalogVersion: readOptionalMetadataString(
+                    aiReply.metadata,
+                    "catalog_version"
+                  ),
+                  catalogContentHash: readOptionalMetadataString(
+                    aiReply.metadata,
+                    "catalog_content_hash"
+                  )
                 }
               : undefined,
           handoff:
@@ -286,7 +325,8 @@ export class PublicWidgetIntakeService {
                   summary: buildHandoffSummary(aiTurnInputWithFingerprint, aiReply.slotUpdates),
                   slotsSnapshot: buildSlotSnapshot(
                     aiTurnInputWithFingerprint,
-                    aiReply.slotUpdates
+                    aiReply.slotUpdates,
+                    aiReply.requirementUpdates
                   )
                 }
               : undefined,
@@ -402,6 +442,28 @@ function fallbackSuccess(
   publicMessageId: string,
   reason: PublicWidgetFallbackReason
 ): PublicWidgetIntakeServiceResult {
+  if (reason !== "agent_reply_blocked") {
+    return {
+      statusCode: 202,
+      body: {
+        ok: true,
+        schema_version: SITE_WIDGET_CONTRACT_VERSION,
+        status: replayed ? "replayed" : "accepted",
+        public_session_id: publicSessionId,
+        public_message_id: publicMessageId,
+        action: "show_widget_saved",
+        automation: {
+          status: "degraded",
+          next_step: "retry_available",
+          conversation_state: "ai_active",
+          reason
+        },
+        message_to_user:
+          "Сообщение сохранено, но AI не смог ответить на этот ход. Можно продолжить диалог или повторить вопрос."
+      }
+    };
+  }
+
   return {
     statusCode: 202,
     body: {
@@ -433,6 +495,7 @@ type ValidatedAiReplyCandidate =
       text: string;
       agentAllowedToReplyAfterSend?: boolean;
       slotUpdates?: AiSlotUpdate[];
+      requirementUpdates?: AiRequirementUpdate[];
       action?: (typeof AI_TURN_ACTIONS)[number];
       intent?: (typeof AI_TURN_INTENTS)[number];
       handoffReason?: AiHandoffReason;
@@ -441,6 +504,7 @@ type ValidatedAiReplyCandidate =
   | {
       status: "unavailable";
       reason: PublicWidgetAiUnavailableReason;
+      metadata?: Record<string, unknown>;
     };
 
 function aiReplySuccess(
@@ -530,7 +594,8 @@ function validateAiReplyCandidate(
       status: "unavailable",
       reason: isPublicWidgetAiUnavailableReason(value.reason)
         ? value.reason
-        : "unsafe_model_response"
+        : "unsafe_model_response",
+      metadata: isRecord(value.metadata) ? value.metadata : undefined
     };
   }
 
@@ -558,13 +623,14 @@ function validateAiReplyCandidate(
     );
   }
 
+  const groundingVerified = value.metadata.grounding_verified === true;
   const evidence = isRecord(value.evidence) ? readCandidateEvidence(value.evidence) : undefined;
 
-  if (hasBusinessFactWithoutAppApprovedSource(evidence)) {
+  if (!groundingVerified && hasBusinessFactWithoutAppApprovedSource(evidence)) {
     return unavailable("unsafe_model_response");
   }
 
-  const unsafeReason = unsafeCandidateReplyReason(text, evidence);
+  const unsafeReason = groundingVerified ? null : unsafeCandidateReplyReason(text, evidence);
 
   if (unsafeReason) {
     return unavailable("unsafe_model_response");
@@ -573,7 +639,12 @@ function validateAiReplyCandidate(
   const action = readEnumValue(value.action, AI_TURN_ACTIONS);
   const intent = readEnumValue(value.intent, AI_TURN_INTENTS);
   const requestedSlots = readRequestedSlots(value.requestedSlots);
-  const slotUpdates = readSlotUpdates(value.slotUpdates, input.inboundMessage.publicMessageId);
+  const slotUpdates = readSlotUpdates(value.slotUpdates, input, groundingVerified);
+  const requirementUpdates = readRequirementUpdates(
+    value.requirementUpdates,
+    input,
+    groundingVerified
+  );
   const sourceEvidenceIsValid = hasValidTypedSourceEvidence(value.sourceEvidence, input);
   const handoffReason = readEnumValue(value.handoffReason, AI_HANDOFF_REASONS);
 
@@ -583,6 +654,7 @@ function validateAiReplyCandidate(
     ("handoffReason" in value && value.handoffReason !== undefined && !handoffReason) ||
     requestedSlots === null ||
     slotUpdates === null ||
+    requirementUpdates === null ||
     !sourceEvidenceIsValid ||
     action === "block" ||
     action === "fallback"
@@ -618,6 +690,7 @@ function validateAiReplyCandidate(
         ? value.agentAllowedToReplyAfterSend
         : undefined,
     slotUpdates: slotUpdates ?? undefined,
+    requirementUpdates: requirementUpdates ?? undefined,
     action,
     intent,
     handoffReason,
@@ -656,7 +729,8 @@ async function recordDegradationIfPossible(
 
 function buildSlotSnapshot(
   input: AiTurnInput,
-  updates: AiSlotUpdate[] | undefined
+  updates: AiSlotUpdate[] | undefined,
+  requirementUpdates: AiRequirementUpdate[] | undefined
 ): Record<string, unknown> {
   const snapshot: Record<string, unknown> = {};
 
@@ -668,6 +742,19 @@ function buildSlotSnapshot(
 
   for (const slot of updates ?? []) {
     snapshot[slot.name] = slot.value;
+  }
+
+  const requirements = [
+    ...input.knownRequirements,
+    ...(requirementUpdates ?? [])
+  ].map((requirement) => ({
+    category: requirement.category,
+    mode: requirement.mode,
+    value: requirement.value
+  }));
+
+  if (requirements.length) {
+    snapshot.requirements = requirements;
   }
 
   return snapshot;
@@ -734,7 +821,8 @@ function readRequestedSlots(value: unknown): AiSlotName[] | null | undefined {
 
 function readSlotUpdates(
   value: unknown,
-  inboundPublicMessageId: string
+  input: AiTurnInput,
+  requireEvidence = false
 ): AiSlotUpdate[] | null | undefined {
   if (value === undefined) {
     return undefined;
@@ -748,15 +836,29 @@ function readSlotUpdates(
   const names = new Set<AiSlotName>();
 
   for (const candidate of value) {
+    if (!isRecord(candidate) || !isAiSlotName(candidate.name)) {
+      return null;
+    }
+
+    const evidence = readSlotEvidence(candidate.evidence);
+    const legacyCurrentMessageEvidence =
+      !requireEvidence &&
+      !evidence &&
+      candidate.sourceMessageId === input.inboundMessage.publicMessageId;
+    const groundedEvidenceIsValid =
+      evidence &&
+      evidence.messageId === candidate.sourceMessageId &&
+      typeof candidate.value === "string" &&
+      !validateSlotEvidence(candidate.name as AiSlotName, candidate.value, evidence, input);
+
     if (
-      !isRecord(candidate) ||
-      !isAiSlotName(candidate.name) ||
       names.has(candidate.name) ||
       typeof candidate.value !== "string" ||
       !candidate.value.trim() ||
       candidate.value.trim().length > 240 ||
       candidate.source !== "ai_extraction" ||
-      candidate.sourceMessageId !== inboundPublicMessageId ||
+      typeof candidate.sourceMessageId !== "string" ||
+      (!legacyCurrentMessageEvidence && !groundedEvidenceIsValid) ||
       typeof candidate.confidence !== "number" ||
       candidate.confidence < 0 ||
       candidate.confidence > 1
@@ -769,12 +871,103 @@ function readSlotUpdates(
       name: candidate.name,
       value: candidate.value.trim(),
       source: "ai_extraction",
-      sourceMessageId: inboundPublicMessageId,
+      sourceMessageId: candidate.sourceMessageId,
+      evidence,
       confidence: candidate.confidence
     });
   }
 
   return updates;
+}
+
+function readRequirementUpdates(
+  value: unknown,
+  input: AiTurnInput,
+  requireEvidence = false
+): AiRequirementUpdate[] | null | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!Array.isArray(value) || value.length > 24) {
+    return null;
+  }
+
+  const updates: AiRequirementUpdate[] = [];
+  const keys = new Set<string>();
+
+  for (const candidate of value) {
+    if (!isRecord(candidate)) {
+      return null;
+    }
+
+    const category = readEnumValue(candidate.category, AI_REQUIREMENT_CATEGORIES);
+    const mode = readEnumValue(candidate.mode, AI_REQUIREMENT_MODES);
+    const evidence = readSlotEvidence(candidate.evidence);
+    const currentMessageEvidence =
+      evidence &&
+      evidence.messageId === candidate.sourceMessageId &&
+      !validateTextEvidence(evidence, input) &&
+      typeof candidate.value === "string" &&
+      isRequirementValueSupportedByEvidence(candidate.value, evidence.quote);
+
+    if (
+      !category ||
+      !mode ||
+      typeof candidate.value !== "string" ||
+      !candidate.value.trim() ||
+      candidate.value.trim().length > 240 ||
+      candidate.source !== "ai_extraction" ||
+      typeof candidate.sourceMessageId !== "string" ||
+      (!currentMessageEvidence && requireEvidence) ||
+      (!currentMessageEvidence && candidate.evidence !== undefined) ||
+      typeof candidate.confidence !== "number" ||
+      candidate.confidence < 0 ||
+      candidate.confidence > 1
+    ) {
+      return null;
+    }
+
+    const normalizedValue = candidate.value.trim();
+    const key = `${category}:${mode}:${normalizedValue.toLocaleLowerCase("ru-RU")}`;
+
+    if (keys.has(key) || !evidence) {
+      return null;
+    }
+
+    keys.add(key);
+    updates.push({
+      category,
+      mode,
+      value: normalizedValue,
+      confidence: candidate.confidence,
+      evidence,
+      source: "ai_extraction",
+      sourceMessageId: candidate.sourceMessageId
+    });
+  }
+
+  return updates;
+}
+
+function readSlotEvidence(value: unknown): AiTextEvidence | undefined {
+  if (
+    !isRecord(value) ||
+    typeof value.messageId !== "string" ||
+    typeof value.quote !== "string" ||
+    !value.quote ||
+    typeof value.start !== "number" ||
+    typeof value.end !== "number"
+  ) {
+    return undefined;
+  }
+
+  return {
+    messageId: value.messageId,
+    quote: value.quote,
+    start: value.start,
+    end: value.end
+  };
 }
 
 function isAiSlotName(value: unknown): value is AiSlotName {
@@ -802,7 +995,10 @@ function isPublicWidgetAiUnavailableReason(
     value === "missing_openai_config" ||
     value === "model_error" ||
     value === "empty_model_response" ||
-    value === "unsafe_model_response"
+    value === "unsafe_model_response" ||
+    value === "semantic_verifier_error" ||
+    value === "grounding_validation_failed" ||
+    value === "turn_timeout"
   );
 }
 

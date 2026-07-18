@@ -1,4 +1,5 @@
 import type {
+  AiReviewLabel,
   LeadStatus,
   ManagerLeadDetail,
   ManagerLeadListItem,
@@ -59,6 +60,17 @@ export const managerApi = {
       )}/takeover`,
       {
         method: "PATCH"
+      }
+    );
+  },
+  async recordAiReviewLabel(leadId: string, aiRunId: string, label: AiReviewLabel) {
+    return requestJson<{ lead: ManagerLeadDetail }>(
+      `/manager/leads/${encodeURIComponent(leadId)}/ai-runs/${encodeURIComponent(
+        aiRunId
+      )}/review-labels`,
+      {
+        method: "POST",
+        body: JSON.stringify({ label })
       }
     );
   },

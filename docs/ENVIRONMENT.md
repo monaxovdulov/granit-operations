@@ -17,8 +17,12 @@ Future environment/config names:
 | `PUBLIC_INTAKE_ALLOWED_ORIGINS` | Allowed public site origins | server only | future |
 | `PUBLIC_INTAKE_CONTRACT_VERSION` | Published intake contract version | server/client config | documented as `site_form.v1` |
 | `AI_WIDGET_ENABLED` | Enables website widget AI replies only after S05 checks/staging smoke | server only | S05 runtime, default `false` |
+| `AI_WIDGET_GROUNDED_MODE` | Selects `off`, `shadow`, or `enforce`; missing/unknown values use `enforce`, while `off` is an explicit rollback switch | server only | Grounded consultant runtime |
 | `OPENAI_API_KEY` | OpenAI Responses API access for website widget AI | server only | S05 runtime when AI enabled |
 | `OPENAI_MODEL` | OpenAI model for website widget AI, default `gpt-5.5` | server only | S05 runtime |
+| `OPENAI_VERIFIER_MODEL` | Independent semantic verifier model; defaults to `OPENAI_MODEL` | server only | Grounded consultant runtime |
+| `AI_WIDGET_DEADLINE_MS` | Shared generator/verifier/repair turn budget, default `18000`, clamped `5000..30000` | server only | Grounded consultant runtime |
+| `AI_WIDGET_EVAL_LIVE` | Explicitly authorizes paid live model evals when exactly `true`; does not enable customer traffic | server only | Local/staging eval runtime |
 | `TELEGRAM_BOT_ENABLED` | Enables Telegram webhook adapter; default must remain `false` outside tested environments | server only | Telegram inbound + manager mini-panel runtime, default `false` |
 | `TELEGRAM_BOT_TOKEN` | Telegram adapter token; used only by the separate delivery sender, never by the webhook for direct business sends | server only | Telegram delivery sender runtime |
 | `TELEGRAM_BOT_PROVIDER_ACCOUNT_ID` | Stable app-owned provider account id for Telegram bot identity/idempotency | server only | Telegram inbound + manager binding runtime |

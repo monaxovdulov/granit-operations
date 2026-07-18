@@ -5,6 +5,7 @@ import { createOperationsDb } from "@granit/db";
 import { buildApi } from "./app.js";
 import { loadConfig } from "./config.js";
 import { OpenAiWidgetAssistantProvider } from "./modules/ai/adapters/openai-widget-assistant-provider.js";
+import { OpenAiWidgetSemanticVerifier } from "./modules/ai/adapters/openai-widget-semantic-verifier.js";
 import { PostgresManagerAuthRepository } from "./modules/auth/repositories/postgres-manager-auth-repository.js";
 import { PostgresIntakeRepository } from "./modules/conversations/repositories/postgres-intake-repository.js";
 
@@ -20,13 +21,24 @@ const widgetAiProvider = config.widgetAi.openAiApiKey
       model: config.widgetAi.openAiModel
     })
   : undefined;
+const widgetAiVerifier = config.widgetAi.openAiApiKey
+  ? new OpenAiWidgetSemanticVerifier({
+      apiKey: config.widgetAi.openAiApiKey,
+      model: config.widgetAi.verifierModel
+    })
+  : undefined;
 const app = buildApi({
   repository,
   logger: true,
   widgetAi: {
     enabled: config.widgetAi.enabled,
+    groundedMode: config.widgetAi.groundedMode,
     provider: widgetAiProvider,
-    modelName: config.widgetAi.openAiModel
+    groundedProvider: widgetAiProvider,
+    verifier: widgetAiVerifier,
+    modelName: config.widgetAi.openAiModel,
+    verifierModelName: config.widgetAi.verifierModel,
+    deadlineMs: config.widgetAi.deadlineMs
   },
   telegramBot: config.telegramBot,
   managerAuth: config.managerAuth

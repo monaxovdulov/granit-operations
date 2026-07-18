@@ -5,23 +5,30 @@ import {
   promoteAiReviewToEvalCase,
   runWidgetAiEvalCase
 } from "../src/modules/ai/eval/widget-ai-regression-corpus.js";
+import { validateWidgetAiEvalCorpus } from "../src/modules/ai/eval/widget-ai-eval-runner.js";
 
 describe("widget AI review and regression loop", () => {
   it("keeps a baseline corpus for every hard dialog boundary", () => {
-    expect(WIDGET_AI_REGRESSION_CORPUS).toHaveLength(10);
-    expect(new Set(WIDGET_AI_REGRESSION_CORPUS.map((entry) => entry.caseId)).size).toBe(10);
+    expect(WIDGET_AI_REGRESSION_CORPUS.length).toBeGreaterThanOrEqual(30);
+    expect(WIDGET_AI_REGRESSION_CORPUS.length).toBeLessThanOrEqual(50);
+    expect(new Set(WIDGET_AI_REGRESSION_CORPUS.map((entry) => entry.caseId)).size).toBe(
+      WIDGET_AI_REGRESSION_CORPUS.length
+    );
+    expect(WIDGET_AI_REGRESSION_CORPUS.every((entry) => entry.sanitizedInput.messages.length)).toBe(
+      true
+    );
     expect(WIDGET_AI_REGRESSION_CORPUS.map((entry) => entry.caseId)).toEqual(
       expect.arrayContaining([
         "multi_turn_selection",
         "no_repeated_material",
-        "consult_first_price",
+        "price_orientation_collect_context",
         "final_quote_handoff",
         "explicit_manager_handoff",
         "legal_boundary",
         "provider_degradation",
-        "takeover_stale_draft",
-        "source_mismatch",
-        "lead_summary"
+        "document_word_not_handoff",
+        "connection_word_not_handoff",
+        "empty_catalog_honest_answer"
       ])
     );
   });
@@ -38,7 +45,7 @@ describe("widget AI review and regression loop", () => {
       expected: {
         action: "clarify",
         requestedSlot: "size",
-        forbiddenPatterns: ["какой материал"]
+        forbiddenPhrases: ["какой материал"]
       }
     });
 
@@ -61,5 +68,49 @@ describe("widget AI review and regression loop", () => {
       requestedSlots: ["size"]
     });
     expect(verifiedFix).toEqual({ passed: true, failures: [] });
+  });
+
+  it("validates every offline case without invoking a model", () => {
+    expect(validateWidgetAiEvalCorpus(WIDGET_AI_REGRESSION_CORPUS)).toEqual({
+      valid: true,
+      failures: []
+    });
+  });
+
+  it("checks extracted values, message evidence, grounding coverage and latency", () => {
+    const evalCase = WIDGET_AI_REGRESSION_CORPUS.find(
+      (entry) => entry.caseId === "extract_monument_type"
+    )!;
+    const result = runWidgetAiEvalCase(evalCase, {
+      action: "clarify",
+      replyText: "Понял. Какой материал рассматриваете?",
+      requestedSlots: ["material"],
+      slotUpdates: [
+        {
+          name: "monumentType",
+          value: "одинарный",
+          evidence: {
+            messageId: "11111111-1111-4111-8111-111111111111",
+            quote: "двойной памятник",
+            start: 6,
+            end: 22
+          }
+        }
+      ],
+      groundingVerified: false,
+      claimCoverageComplete: false,
+      verifierViolations: ["unnatural_tone"],
+      latencyMs: 25_000
+    });
+
+    expect(result.failures).toEqual(
+      expect.arrayContaining([
+        "wrong_extracted_value:monumentType",
+        "grounding_not_verified",
+        "claim_coverage_incomplete",
+        "latency_exceeded:20000",
+        "semantic_quality_violation"
+      ])
+    );
   });
 });

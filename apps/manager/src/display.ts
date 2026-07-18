@@ -3,8 +3,10 @@ import {
   LEAD_STATUS_VALUES,
   isLeadStatus,
   type LeadStatus,
+  type AiReviewLabel,
   type ManagerLeadDetail,
   type ManagerLeadListItem,
+  type ManagerStructuredIntakeSlot,
   type ManagerUser,
   type MessageDeliveryStatus
 } from "./types";
@@ -118,6 +120,51 @@ export function formKindLabel(value?: string) {
   return value ? (labels[value] ?? "Форма сайта") : "Не указана";
 }
 
+export function structuredIntakeSlotLabel(name: ManagerStructuredIntakeSlot["name"]) {
+  const labels: Record<ManagerStructuredIntakeSlot["name"], string> = {
+    monumentType: "Тип памятника",
+    material: "Материал",
+    size: "Размер",
+    city: "Город",
+    cemetery: "Кладбище",
+    engraving: "Оформление",
+    installation: "Установка",
+    budgetContext: "Бюджет",
+    desiredTiming: "Желаемый срок",
+    customerName: "Имя",
+    phone: "Телефон",
+    preferredContact: "Способ связи",
+    questionSummary: "Суть вопроса"
+  };
+
+  return labels[name];
+}
+
+export function structuredIntakeSourceLabel(source: ManagerStructuredIntakeSlot["source"]) {
+  const labels: Record<ManagerStructuredIntakeSlot["source"], string> = {
+    contact: "контакт",
+    visitor_message: "сообщение клиента",
+    ai_extraction: "извлечено AI",
+    manager: "указано менеджером"
+  };
+
+  return labels[source];
+}
+
+export function aiReviewLabel(value: AiReviewLabel) {
+  const labels: Record<AiReviewLabel, string> = {
+    correct: "Ответ корректен",
+    unsupported_fact: "Неподтвержденный факт",
+    wrong_slot: "Ошибка в параметре",
+    missed_handoff: "Пропущена передача",
+    unnecessary_handoff: "Лишняя передача",
+    poor_tone: "Неудачный тон",
+    other: "Другая проблема"
+  };
+
+  return labels[value];
+}
+
 export function timelineEventLabel(eventType: string) {
   const labels: Record<string, string> = {
     "lead.created_from_site_form": "Заявка создана",
@@ -125,6 +172,9 @@ export function timelineEventLabel(eventType: string) {
     "lead.created_from_telegram": "Заявка из Telegram",
     "conversation.message_received": "Сообщение получено",
     "conversation.ai_message_sent": "AI-ответ сохранен",
+    "conversation.ai_handoff_created": "Передача менеджеру",
+    "conversation.ai_degraded": "AI не ответил",
+    "conversation.ai_review_labeled": "Оценка AI-ответа",
     "conversation.manager_takeover": "AI отключен менеджером",
     "conversation.manager_message_queued": "Ответ ожидает отправки",
     "conversation.delivery_sent": "Сообщение доставлено",
@@ -163,6 +213,9 @@ export function timelineSummaryLabel(event: ManagerLeadDetail["timeline"][number
     "lead.created_from_telegram": "Заявка создана из Telegram",
     "conversation.message_received": "Получено сообщение клиента",
     "conversation.ai_message_sent": "AI-ответ сохранен в диалоге",
+    "conversation.ai_handoff_created": "AI передал диалог менеджеру",
+    "conversation.ai_degraded": "AI не смог безопасно ответить на этот ход",
+    "conversation.ai_review_labeled": "Менеджер оценил AI-ответ",
     "conversation.manager_takeover": "Менеджер взял диалог, AI отключен",
     "conversation.manager_message_queued": "Ответ менеджера ждет отправки",
     "conversation.delivery_sent": "Сообщение доставлено в Telegram",
@@ -190,6 +243,14 @@ export function timelineIconColor(event: ManagerLeadDetail["timeline"][number]) 
   }
 
   if (event.eventType === "conversation.ai_message_sent") {
+    return "blue";
+  }
+
+  if (event.eventType === "conversation.ai_degraded") {
+    return "orange";
+  }
+
+  if (event.eventType === "conversation.ai_handoff_created") {
     return "blue";
   }
 

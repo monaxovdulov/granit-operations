@@ -1,5 +1,6 @@
 import type { LeadStatus } from "../../conversations/repositories/lead-conversation-types.js";
 import type { ManagerLeadRepository } from "../../conversations/repositories/manager-lead-repository.js";
+import type { AiReviewLabel } from "../../conversations/repositories/manager-lead-repository.js";
 import {
   assertManagerCanMutate,
   managerAuditFields,
@@ -18,6 +19,14 @@ export type TakeoverConversationUseCaseInput = {
   publicConversationId: string;
 };
 
+export type RecordAiReviewLabelUseCaseInput = {
+  actor: ManagerActor;
+  leadId: string;
+  aiRunId: string;
+  label: AiReviewLabel;
+  note?: string;
+};
+
 export class ManagerLeadUseCases {
   constructor(private readonly repository: ManagerLeadRepository) {}
 
@@ -27,6 +36,18 @@ export class ManagerLeadUseCases {
 
   getLead(leadId: string) {
     return this.repository.getManagerLead(leadId);
+  }
+
+  recordAiReviewLabel(input: RecordAiReviewLabelUseCaseInput) {
+    assertManagerCanMutate(input.actor);
+
+    return this.repository.recordAiReviewLabel({
+      leadId: input.leadId,
+      aiRunId: input.aiRunId,
+      label: input.label,
+      note: input.note,
+      ...managerAuditFields(input.actor)
+    });
   }
 
   changeStatus(input: ChangeManagerLeadStatusUseCaseInput) {

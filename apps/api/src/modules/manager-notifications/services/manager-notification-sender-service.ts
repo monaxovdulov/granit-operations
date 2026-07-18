@@ -23,6 +23,7 @@ export type PendingManagerNotification = {
   textPreview?: string;
   contentType?: string;
   needsManagerReason?: string;
+  slots?: Record<string, unknown>;
   replyMarkup?: TelegramReplyMarkup;
 };
 
@@ -193,13 +194,40 @@ function buildNotificationText(notification: PendingManagerNotification) {
   const lines = [
     notification.notificationType === "site_widget_ai_handoff"
       ? "AI передал диалог сайта менеджеру"
+      : notification.notificationType === "site_widget_ai_degraded"
+        ? "AI не ответил на сообщение сайта"
       : "Новое сообщение клиента в Telegram",
     notification.contentType ? `Тип: ${notification.contentType}` : undefined,
     notification.needsManagerReason ? `Причина: ${notification.needsManagerReason}` : undefined,
-    notification.textPreview ? `Сообщение: ${truncateText(notification.textPreview, 2800)}` : undefined
+    notification.textPreview ? `Сообщение: ${truncateText(notification.textPreview, 2200)}` : undefined,
+    notification.slots ? formatStructuredSlots(notification.slots) : undefined
   ];
 
   return lines.filter((line): line is string => Boolean(line)).join("\n");
+}
+
+function formatStructuredSlots(slots: Record<string, unknown>) {
+  const labels: Record<string, string> = {
+    monumentType: "тип",
+    material: "материал",
+    size: "размер",
+    city: "город",
+    cemetery: "кладбище",
+    engraving: "оформление",
+    installation: "установка",
+    budgetContext: "бюджет",
+    desiredTiming: "срок",
+    customerName: "имя",
+    phone: "телефон",
+    preferredContact: "связь",
+    questionSummary: "вопрос"
+  };
+  const values = Object.entries(slots)
+    .filter((entry): entry is [string, string] => typeof entry[1] === "string" && Boolean(entry[1].trim()))
+    .slice(0, 8)
+    .map(([name, value]) => `${labels[name] ?? name}: ${truncateText(value, 160)}`);
+
+  return values.length ? `Заявка: ${values.join("; ")}` : undefined;
 }
 
 function normalizeNotificationError(error: unknown) {

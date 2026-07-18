@@ -101,7 +101,27 @@ export const SiteWidgetAutomationSchema = z
           "model_error",
           "empty_model_response",
           "unsafe_model_response",
+          "semantic_verifier_error",
+          "grounding_validation_failed",
+          "turn_timeout",
           "agent_reply_blocked",
+          "ai_persistence_unconfirmed"
+        ])
+      })
+      .strict(),
+    z
+      .object({
+        status: z.literal("degraded"),
+        next_step: z.literal("retry_available"),
+        conversation_state: z.literal("ai_active"),
+        reason: z.enum([
+          "missing_openai_config",
+          "model_error",
+          "empty_model_response",
+          "unsafe_model_response",
+          "semantic_verifier_error",
+          "grounding_validation_failed",
+          "turn_timeout",
           "ai_persistence_unconfirmed"
         ])
       })

@@ -21,6 +21,21 @@ The canonical source of truth is the main wiki in the planning repo:
 
 Repo docs here are working implementation docs derived from that wiki. The full research archive and owner prompt pack are provenance and are not copied into this repo.
 
+## AI-консультант: что прочитать
+
+Текущий grounded AI-консультант реализован локально, но website AI по умолчанию выключен, внешний каталог знаний пока пустой, а production-включение требует отдельного решения владельца.
+
+Основные документы:
+
+- [Как устроен AI-консультант — слои, путь сообщения и ограничения](docs/AI_ASSISTANT_OWNER_ARCHITECTURE_GUIDE_RU.md)
+- [Что владельцу заполнить для знаний и памяти](docs/AI_ASSISTANT_OWNER_INPUT_GUIDE_RU.md)
+- [AI Policy — технические границы и режимы](docs/AI_POLICY.md)
+- [Актуальный архитектурный design grounded-консультанта](docs/superpowers/specs/2026-07-17-grounded-live-widget-consultant-design.md)
+- [План реализации и сделанные уточнения](docs/superpowers/plans/2026-07-17-grounded-live-widget-consultant-plan.md)
+- [Переменные окружения без секретных значений](docs/ENVIRONMENT.md)
+
+Начать владельцу бизнеса лучше с первых двух документов: первый объясняет, как всё работает, второй служит практическим шаблоном подготовки содержания.
+
 ## Current Scope
 
 The current implementation focus is the protected manager UI after accepted S02 auth evidence:

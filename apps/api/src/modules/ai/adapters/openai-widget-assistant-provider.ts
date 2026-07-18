@@ -1,15 +1,25 @@
 import {
   type WidgetAiProvider,
   type WidgetAiProviderInput,
-  type WidgetAiProviderResult,
-  type WidgetAiUsage
+  type WidgetAiProviderResult
 } from "../services/widget-ai-service.js";
+import type {
+  GroundedWidgetAiProvider,
+  GroundedWidgetAiProviderInput,
+  GroundedWidgetAiProviderResult
+} from "../services/grounded-widget-ai-service.js";
 import { WIDGET_AI_POLICY_VERSION } from "../policy/widget-ai-policy.js";
-import { WIDGET_AI_PROMPT_VERSION } from "../prompts/widget-ai-prompt.js";
+import {
+  GROUNDED_WIDGET_AI_PROMPT_VERSION,
+  WIDGET_AI_PROMPT_VERSION
+} from "../prompts/widget-ai-prompt.js";
 import {
   AI_TURN_DECISION_JSON_SCHEMA,
-  AiTurnCandidateDecisionSchema
+  AiTurnCandidateDecisionSchema,
+  GROUNDED_AI_TURN_DECISION_JSON_SCHEMA,
+  GroundedAiTurnCandidateDecisionSchema
 } from "../ai-dialog-contract.js";
+import { requestOpenAiStructuredResponse } from "./openai-structured-response-client.js";
 
 export type OpenAiWidgetAssistantProviderOptions = {
   apiKey: string;
@@ -17,120 +27,66 @@ export type OpenAiWidgetAssistantProviderOptions = {
   timeoutMs?: number;
 };
 
-export class OpenAiWidgetAssistantProvider implements WidgetAiProvider {
+export class OpenAiWidgetAssistantProvider
+  implements WidgetAiProvider, GroundedWidgetAiProvider
+{
   constructor(private readonly options: OpenAiWidgetAssistantProviderOptions) {}
 
   async generateReply(input: WidgetAiProviderInput): Promise<WidgetAiProviderResult> {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.options.timeoutMs ?? 15000);
+    const response = await requestOpenAiStructuredResponse({
+      apiKey: this.options.apiKey,
+      model: this.options.model,
+      timeoutMs: this.options.timeoutMs ?? 15000,
+      instructions: input.instructions,
+      input: input.userInput,
+      formatName: "granit_widget_ai_turn_decision",
+      schema: AI_TURN_DECISION_JSON_SCHEMA,
+      metadata: {
+        channel: "site_widget",
+        prompt_version: WIDGET_AI_PROMPT_VERSION,
+        policy_version: WIDGET_AI_POLICY_VERSION
+      },
+      maxOutputTokens: 700
+    });
 
-    try {
-      const response = await fetch("https://api.openai.com/v1/responses", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${this.options.apiKey}`
-        },
-        body: JSON.stringify({
-          model: this.options.model,
-          store: false,
-          instructions: input.instructions,
-          input: input.userInput,
-          max_output_tokens: 700,
-          reasoning: {
-            effort: "low"
-          },
-          text: {
-            verbosity: "low",
-            format: {
-              type: "json_schema",
-              name: "granit_widget_ai_turn_decision",
-              strict: true,
-              schema: AI_TURN_DECISION_JSON_SCHEMA
-            }
-          },
-          metadata: {
-            channel: "site_widget",
-            prompt_version: WIDGET_AI_PROMPT_VERSION,
-            policy_version: WIDGET_AI_POLICY_VERSION
-          }
-        }),
-        signal: controller.signal
-      });
-
-      if (!response.ok) {
-        throw new Error(`openai_responses_api_${response.status}`);
-      }
-
-      const body = (await response.json()) as OpenAiResponseBody;
-      const outputText = extractOutputText(body);
-      const decision = AiTurnCandidateDecisionSchema.parse(JSON.parse(outputText));
-
-      return {
-        decision,
-        modelProvider: "openai",
-        modelName: typeof body.model === "string" ? body.model : this.options.model,
-        responseId: typeof body.id === "string" ? body.id : undefined,
-        usage: readUsage(body.usage)
-      };
-    } finally {
-      clearTimeout(timeout);
-    }
-  }
-}
-
-type OpenAiResponseBody = {
-  id?: unknown;
-  model?: unknown;
-  output?: unknown;
-  usage?: unknown;
-};
-
-function extractOutputText(body: OpenAiResponseBody): string {
-  const output = Array.isArray(body.output) ? body.output : [];
-  const chunks: string[] = [];
-
-  for (const item of output) {
-    if (!item || typeof item !== "object") {
-      continue;
-    }
-
-    const content = (item as { content?: unknown }).content;
-
-    if (!Array.isArray(content)) {
-      continue;
-    }
-
-    for (const part of content) {
-      if (!part || typeof part !== "object") {
-        continue;
-      }
-
-      const typedPart = part as { type?: unknown; text?: unknown };
-
-      if (typedPart.type === "output_text" && typeof typedPart.text === "string") {
-        chunks.push(typedPart.text);
-      }
-    }
+    return {
+      decision: AiTurnCandidateDecisionSchema.parse(JSON.parse(response.outputText)),
+      modelProvider: "openai",
+      modelName: response.model,
+      responseId: response.id,
+      usage: response.usage
+    };
   }
 
-  return chunks.join("\n").trim();
-}
+  async generateGroundedReply(
+    input: GroundedWidgetAiProviderInput,
+    signal?: AbortSignal
+  ): Promise<GroundedWidgetAiProviderResult> {
+    const response = await requestOpenAiStructuredResponse({
+      apiKey: this.options.apiKey,
+      model: this.options.model,
+      timeoutMs: this.options.timeoutMs ?? 10000,
+      instructions: input.instructions,
+      input: input.userInput,
+      formatName: "granit_grounded_widget_ai_turn_decision",
+      schema: GROUNDED_AI_TURN_DECISION_JSON_SCHEMA,
+      metadata: {
+        channel: "site_widget",
+        prompt_version: GROUNDED_WIDGET_AI_PROMPT_VERSION,
+        attempt: input.attempt
+      },
+      maxOutputTokens: 1100,
+      signal
+    });
 
-function readUsage(usage: unknown): WidgetAiUsage | undefined {
-  if (!usage || typeof usage !== "object") {
-    return undefined;
+    return {
+      decision: GroundedAiTurnCandidateDecisionSchema.parse(
+        JSON.parse(response.outputText)
+      ),
+      modelProvider: "openai",
+      modelName: response.model,
+      responseId: response.id,
+      usage: response.usage
+    };
   }
-
-  const value = usage as {
-    input_tokens?: unknown;
-    output_tokens?: unknown;
-    total_tokens?: unknown;
-  };
-
-  return {
-    inputTokens: typeof value.input_tokens === "number" ? value.input_tokens : undefined,
-    outputTokens: typeof value.output_tokens === "number" ? value.output_tokens : undefined,
-    totalTokens: typeof value.total_tokens === "number" ? value.total_tokens : undefined
-  };
 }

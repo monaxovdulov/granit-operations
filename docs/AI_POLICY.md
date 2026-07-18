@@ -1,27 +1,50 @@
 # AI Policy
 
-Status: S05 website widget safe AI and S06 manager takeover gate implemented behind disabled default
+Status: grounded website consultant implemented; customer traffic remains behind a disabled runtime flag
 
-S05 adds website widget AI replies only after durable inbound persistence and only when `AI_WIDGET_ENABLED=true` with server-side OpenAI config. The default remains disabled.
+Website AI remains disabled unless `AI_WIDGET_ENABLED=true`. Once enabled, the grounded pipeline is the default; `AI_WIDGET_GROUNDED_MODE=off` is an explicit legacy rollback switch. Production enablement and the external machine-readable catalog still require separate owner approval.
 
-S06 adds manager takeover for website widget conversations. A protected manager action sets `agent_allowed_to_reply=false` for the conversation/session. Any later visitor message in that session returns `manager_review` fallback without an AI reply, and outbound AI persistence checks `agent_allowed_to_reply=true` again at send time so stale drafts cannot be saved after takeover.
+## Grounded send path
 
-Deferred AI surfaces:
+1. The visitor message is durably persisted before model generation.
+2. A generator writes a natural Russian reply plus typed slots and flexible requirements with exact message evidence.
+3. App-owned structural checks validate values, quotes, offsets, requested slots and handoff shape.
+4. An independent semantic verifier extracts every factual span from the finished reply, grounds it, and returns exact one-to-one verdicts for every proposed slot and requirement.
+5. `handoff` is applied immediately with an app-owned response. Exactly one bounded repair is allowed only for `repair` while the shared 18-second turn deadline has enough budget; a handoff returned after repair is also terminal.
+6. Only a verified reply reaches the atomic send-time `agent_allowed_to_reply=true` gate.
 
-- Telegram AI;
-- Mastra/OpenAI workflows;
-- broader tool schemas;
-- eval/regression gates beyond S05 tests;
-- urgent AI routing.
+Semantic decisions are not made by keyword regex in the grounded path. Requests for a manager, legal advice and binding commercial promises are judged from the full dialog context. Words such as `документ` or `связаны` do not trigger handoff by themselves.
 
-S05 website widget AI policy enforces:
+## Knowledge
 
-- approved AI disclosure before normal AI conversation;
-- `from X` starting-price orientation only from approved sources; S05 has no approved price source, so price questions hand off/fallback without amounts;
-- no final price, final deadline, warranty, contract, discount, availability, legal, payment, or similar promises;
-- refusal/handoff for inheritance, burial, legal funeral questions, and other non-monument topics;
-- deterministic policy guardrails for business truth until approved tools exist;
-- safe fallback on missing config, model error, empty model output, unsafe model output, or AI persistence failure;
-- send-time `agent_allowed_to_reply` gate before AI message persistence.
+- Business/catalog truth comes only through `CatalogKnowledgePort` snapshots and published records.
+- The current provider is intentionally empty (`empty.v1`) until the owner supplies the external JSON catalog and its adapter.
+- Missing knowledge is answered honestly and does not by itself force a handoff.
+- A fact about the visitor must be backed by an exact quote and UTF-16 offsets from a visitor message.
+- A slot or flexible requirement value must also be semantically supported by that quote; matching offsets alone are insufficient.
+- Manager-authored slot values cannot be silently overwritten; conflicting AI candidates are retained as append-only events.
 
-Do not enable AI replies in staging until S05 migration, tests, and paired staging smoke are complete. Do not enable production AI without separate production approval.
+## Conversation memory
+
+- The latest 12 messages remain verbatim in model context.
+- Older dialog is folded into an app-owned rolling summary so discussed options and objections are not silently lost.
+- The rolling summary helps continuity but is never accepted as evidence for a new visitor fact.
+- Thirteen typed slots cover core intake. Evidence-backed flexible preferences, requirements and avoidances cover style, color, shape, accessories, decoration and site constraints.
+
+## Handoff and degradation
+
+- Explicit manager requests, legal advice and binding/final commercial terms may require handoff.
+- A successful handoff stops AI, persists a snapshot, adds timeline/outbox events and notifies managers with the structured intake.
+- Model/verifier/grounding failure degrades only the current turn. The inbound message remains saved, the manager sees the event, and AI stays available for the next turn.
+- A manager takeover still disables AI and the send-time gate blocks stale drafts.
+
+## Rollout and evaluation
+
+- `off`: legacy compatibility path.
+- `shadow`: the legacy reply is returned without waiting for grounded work; the full grounded/legacy comparison, evidence, verdicts and latency are recorded asynchronously.
+- `enforce`: only generator + verifier output can be sent.
+- Offline regression contains 40 realistic dialogs and checks extracted values/evidence, flexible requirements, claim coverage, semantic quality and latency in addition to action. Stateful persistence tests cover long dialogs and flexible requirements. Paid live evaluation additionally requires `AI_WIDGET_EVAL_LIVE=true` and owner-provided OpenAI credentials.
+
+Owner preparation is documented in `docs/AI_ASSISTANT_OWNER_INPUT_GUIDE_RU.md`. A plain-Russian explanation of layers, message flow, controls and limitations is in `docs/AI_ASSISTANT_OWNER_ARCHITECTURE_GUIDE_RU.md`. These guides do not connect or publish a catalog.
+
+Telegram AI remains out of scope. Do not enable production AI or deploy these changes without separate production approval.

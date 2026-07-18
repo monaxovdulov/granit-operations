@@ -6,6 +6,10 @@ import {
   LEAD_STATUSES,
   isLeadStatus
 } from "../../conversations/repositories/lead-conversation-types.js";
+import {
+  AI_REVIEW_LABELS,
+  type AiReviewLabel
+} from "../../conversations/repositories/manager-lead-repository.js";
 import { ManagerForbiddenError } from "../use-cases/manager-actor.js";
 import type { ManagerLeadUseCases } from "../use-cases/manager-lead-use-cases.js";
 
@@ -110,6 +114,61 @@ export function registerManagerRoutes(
       return { lead };
     }
   );
+
+  app.post<{
+    Params: { leadId: string; aiRunId: string };
+    Body: { label?: unknown; note?: unknown };
+  }>(
+    "/manager/leads/:leadId/ai-runs/:aiRunId/review-labels",
+    async (request, reply) => {
+      const manager = await authenticateManager(request, reply, auth);
+
+      if (!manager) {
+        return;
+      }
+
+      if (!isAiReviewLabel(request.body?.label)) {
+        return reply.code(400).send({
+          error: "invalid_ai_review_label",
+          allowed_labels: AI_REVIEW_LABELS
+        });
+      }
+
+      const label = request.body.label;
+      const note = request.body?.note;
+
+      if (
+        note !== undefined &&
+        (typeof note !== "string" || !note.trim() || note.trim().length > 500)
+      ) {
+        return reply.code(400).send({ error: "invalid_ai_review_note" });
+      }
+
+      const lead = await mapManagerError(reply, () =>
+        useCases.recordAiReviewLabel({
+          actor: manager,
+          leadId: request.params.leadId,
+          aiRunId: request.params.aiRunId,
+          label,
+          note: typeof note === "string" ? note.trim() : undefined
+        })
+      );
+
+      if (lead === "mapped_error") {
+        return;
+      }
+
+      if (!lead) {
+        return reply.code(404).send({ error: "not_found" });
+      }
+
+      return { lead };
+    }
+  );
+}
+
+function isAiReviewLabel(value: unknown): value is AiReviewLabel {
+  return typeof value === "string" && AI_REVIEW_LABELS.includes(value as AiReviewLabel);
 }
 
 async function authenticateManager(
