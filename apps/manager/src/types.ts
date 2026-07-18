@@ -165,6 +165,23 @@ export type ManagerStructuredIntakeSlot = {
 
 export type ManagerStructuredIntake = {
   slots: ManagerStructuredIntakeSlot[];
+  requirements: Array<{
+    publicConversationId: string;
+    category:
+      | "style"
+      | "color"
+      | "shape"
+      | "accessory"
+      | "decoration"
+      | "site_constraint"
+      | "other";
+    mode: "preference" | "requirement" | "avoidance";
+    value: string;
+    sourceMessageId: string;
+    confidence: number;
+    evidence: { quote: string; start: number; end: number };
+    updatedAt: string;
+  }>;
   conflicts: Array<{
     publicConversationId: string;
     name: StructuredIntakeSlotName;

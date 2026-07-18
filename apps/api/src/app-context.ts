@@ -4,7 +4,10 @@ import {
   GroundedWidgetAiService,
   type GroundedWidgetAiProvider
 } from "./modules/ai/services/grounded-widget-ai-service.js";
-import { ShadowWidgetAiReplyGenerator } from "./modules/ai/services/shadow-widget-ai-reply-generator.js";
+import {
+  ShadowWidgetAiReplyGenerator,
+  type WidgetAiShadowObservationSink
+} from "./modules/ai/services/shadow-widget-ai-reply-generator.js";
 import { WidgetAiService, type WidgetAiProvider } from "./modules/ai/services/widget-ai-service.js";
 import type { WidgetAiSemanticVerifier } from "./modules/ai/verification/widget-ai-semantic-verifier.js";
 import type { IntakeRepository } from "./modules/conversations/repositories/intake-repository.js";
@@ -36,12 +39,16 @@ export type WidgetAiAssemblyOptions = {
   modelName?: string;
   verifierModelName?: string;
   deadlineMs?: number;
+  shadowObservationSink?: WidgetAiShadowObservationSink;
   replyGenerator?: PublicWidgetAiReplyGenerator;
 };
 
 export function buildAppContext(options: AppContextOptions) {
   const managerAuth = createManagerAuth(options.managerAuth);
-  const widgetAiReplyGenerator = buildWidgetAiReplyGenerator(options.widgetAi);
+  const widgetAiReplyGenerator = buildWidgetAiReplyGenerator(
+    options.widgetAi,
+    options.repository
+  );
   const publicIntake = {
     siteForm: new PublicIntakeService(options.repository),
     siteWidget: new PublicWidgetIntakeService(options.repository, {
@@ -75,7 +82,8 @@ export function buildAppContext(options: AppContextOptions) {
 export type AppContext = ReturnType<typeof buildAppContext>;
 
 function buildWidgetAiReplyGenerator(
-  options?: WidgetAiAssemblyOptions
+  options: WidgetAiAssemblyOptions | undefined,
+  repository: IntakeRepository
 ): PublicWidgetAiReplyGenerator | undefined {
   if (!options?.enabled) {
     return undefined;
@@ -85,7 +93,9 @@ function buildWidgetAiReplyGenerator(
     return options.replyGenerator;
   }
 
-  const mode = options.groundedMode ?? "off";
+  const mode =
+    options.groundedMode ??
+    (options.groundedProvider && options.verifier ? "enforce" : "off");
   const grounded =
     mode !== "off" && options.groundedProvider && options.verifier
       ? new GroundedWidgetAiService({
@@ -110,7 +120,15 @@ function buildWidgetAiReplyGenerator(
     : undefined;
 
   if (mode === "shadow" && grounded) {
-    return legacy ? new ShadowWidgetAiReplyGenerator(legacy, grounded) : grounded;
+    const sink =
+      options.shadowObservationSink ??
+      (repository.recordSiteWidgetAiShadowComparison
+        ? {
+            record: (observation) =>
+              repository.recordSiteWidgetAiShadowComparison!(observation)
+          }
+        : undefined);
+    return legacy ? new ShadowWidgetAiReplyGenerator(legacy, grounded, sink) : grounded;
   }
 
   return legacy;

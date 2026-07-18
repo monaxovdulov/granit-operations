@@ -14,14 +14,21 @@ import type { AiReplyCandidateEvidence, AiTurnInput } from "../../ai/ai-turn.js"
 import {
   AI_SLOT_NAMES,
   AI_HANDOFF_REASONS,
+  AI_REQUIREMENT_CATEGORIES,
+  AI_REQUIREMENT_MODES,
   AI_TURN_ACTIONS,
   AI_TURN_INTENTS,
   type AiHandoffReason,
+  type AiRequirementUpdate,
   type AiSlotName,
   type AiTextEvidence,
   type AiSlotUpdate
 } from "../../ai/ai-dialog-contract.js";
-import { validateSlotEvidence } from "../../ai/grounding/ai-slot-evidence-service.js";
+import {
+  isRequirementValueSupportedByEvidence,
+  validateSlotEvidence,
+  validateTextEvidence
+} from "../../ai/grounding/ai-slot-evidence-service.js";
 import { APPROVED_WIDGET_KNOWLEDGE_VERSION } from "../../ai/knowledge/approved-widget-knowledge.js";
 import { WIDGET_AI_POLICY_VERSION } from "../../ai/policy/widget-ai-policy.js";
 import { WIDGET_AI_PROMPT_VERSION } from "../../ai/prompts/widget-ai-prompt.js";
@@ -256,7 +263,8 @@ export class PublicWidgetIntakeService {
             public_conversation_id: saved.publicConversationId,
             body: aiReply.text,
             metadata: aiReply.metadata,
-            slot_updates: aiReply.slotUpdates
+            slot_updates: aiReply.slotUpdates,
+            requirement_updates: aiReply.requirementUpdates
           })
         );
         const persistedAiReply = await this.repository.saveSiteWidgetAiMessage({
@@ -270,6 +278,7 @@ export class PublicWidgetIntakeService {
           sourcePageUrl: aiTurnInputWithFingerprint.page.url,
           agentAllowedToReplyAfterSend: aiReply.agentAllowedToReplyAfterSend,
           slotUpdates: aiReply.slotUpdates,
+          requirementUpdates: aiReply.requirementUpdates,
           aiRun:
             aiReply.action && aiReply.intent
               ? {
@@ -316,7 +325,8 @@ export class PublicWidgetIntakeService {
                   summary: buildHandoffSummary(aiTurnInputWithFingerprint, aiReply.slotUpdates),
                   slotsSnapshot: buildSlotSnapshot(
                     aiTurnInputWithFingerprint,
-                    aiReply.slotUpdates
+                    aiReply.slotUpdates,
+                    aiReply.requirementUpdates
                   )
                 }
               : undefined,
@@ -485,6 +495,7 @@ type ValidatedAiReplyCandidate =
       text: string;
       agentAllowedToReplyAfterSend?: boolean;
       slotUpdates?: AiSlotUpdate[];
+      requirementUpdates?: AiRequirementUpdate[];
       action?: (typeof AI_TURN_ACTIONS)[number];
       intent?: (typeof AI_TURN_INTENTS)[number];
       handoffReason?: AiHandoffReason;
@@ -629,6 +640,11 @@ function validateAiReplyCandidate(
   const intent = readEnumValue(value.intent, AI_TURN_INTENTS);
   const requestedSlots = readRequestedSlots(value.requestedSlots);
   const slotUpdates = readSlotUpdates(value.slotUpdates, input, groundingVerified);
+  const requirementUpdates = readRequirementUpdates(
+    value.requirementUpdates,
+    input,
+    groundingVerified
+  );
   const sourceEvidenceIsValid = hasValidTypedSourceEvidence(value.sourceEvidence, input);
   const handoffReason = readEnumValue(value.handoffReason, AI_HANDOFF_REASONS);
 
@@ -638,6 +654,7 @@ function validateAiReplyCandidate(
     ("handoffReason" in value && value.handoffReason !== undefined && !handoffReason) ||
     requestedSlots === null ||
     slotUpdates === null ||
+    requirementUpdates === null ||
     !sourceEvidenceIsValid ||
     action === "block" ||
     action === "fallback"
@@ -673,6 +690,7 @@ function validateAiReplyCandidate(
         ? value.agentAllowedToReplyAfterSend
         : undefined,
     slotUpdates: slotUpdates ?? undefined,
+    requirementUpdates: requirementUpdates ?? undefined,
     action,
     intent,
     handoffReason,
@@ -711,7 +729,8 @@ async function recordDegradationIfPossible(
 
 function buildSlotSnapshot(
   input: AiTurnInput,
-  updates: AiSlotUpdate[] | undefined
+  updates: AiSlotUpdate[] | undefined,
+  requirementUpdates: AiRequirementUpdate[] | undefined
 ): Record<string, unknown> {
   const snapshot: Record<string, unknown> = {};
 
@@ -723,6 +742,19 @@ function buildSlotSnapshot(
 
   for (const slot of updates ?? []) {
     snapshot[slot.name] = slot.value;
+  }
+
+  const requirements = [
+    ...input.knownRequirements,
+    ...(requirementUpdates ?? [])
+  ].map((requirement) => ({
+    category: requirement.category,
+    mode: requirement.mode,
+    value: requirement.value
+  }));
+
+  if (requirements.length) {
+    snapshot.requirements = requirements;
   }
 
   return snapshot;
@@ -816,7 +848,8 @@ function readSlotUpdates(
     const groundedEvidenceIsValid =
       evidence &&
       evidence.messageId === candidate.sourceMessageId &&
-      !validateSlotEvidence(candidate.name as AiSlotName, evidence, input);
+      typeof candidate.value === "string" &&
+      !validateSlotEvidence(candidate.name as AiSlotName, candidate.value, evidence, input);
 
     if (
       names.has(candidate.name) ||
@@ -841,6 +874,76 @@ function readSlotUpdates(
       sourceMessageId: candidate.sourceMessageId,
       evidence,
       confidence: candidate.confidence
+    });
+  }
+
+  return updates;
+}
+
+function readRequirementUpdates(
+  value: unknown,
+  input: AiTurnInput,
+  requireEvidence = false
+): AiRequirementUpdate[] | null | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!Array.isArray(value) || value.length > 24) {
+    return null;
+  }
+
+  const updates: AiRequirementUpdate[] = [];
+  const keys = new Set<string>();
+
+  for (const candidate of value) {
+    if (!isRecord(candidate)) {
+      return null;
+    }
+
+    const category = readEnumValue(candidate.category, AI_REQUIREMENT_CATEGORIES);
+    const mode = readEnumValue(candidate.mode, AI_REQUIREMENT_MODES);
+    const evidence = readSlotEvidence(candidate.evidence);
+    const currentMessageEvidence =
+      evidence &&
+      evidence.messageId === candidate.sourceMessageId &&
+      !validateTextEvidence(evidence, input) &&
+      typeof candidate.value === "string" &&
+      isRequirementValueSupportedByEvidence(candidate.value, evidence.quote);
+
+    if (
+      !category ||
+      !mode ||
+      typeof candidate.value !== "string" ||
+      !candidate.value.trim() ||
+      candidate.value.trim().length > 240 ||
+      candidate.source !== "ai_extraction" ||
+      typeof candidate.sourceMessageId !== "string" ||
+      (!currentMessageEvidence && requireEvidence) ||
+      (!currentMessageEvidence && candidate.evidence !== undefined) ||
+      typeof candidate.confidence !== "number" ||
+      candidate.confidence < 0 ||
+      candidate.confidence > 1
+    ) {
+      return null;
+    }
+
+    const normalizedValue = candidate.value.trim();
+    const key = `${category}:${mode}:${normalizedValue.toLocaleLowerCase("ru-RU")}`;
+
+    if (keys.has(key) || !evidence) {
+      return null;
+    }
+
+    keys.add(key);
+    updates.push({
+      category,
+      mode,
+      value: normalizedValue,
+      confidence: candidate.confidence,
+      evidence,
+      source: "ai_extraction",
+      sourceMessageId: candidate.sourceMessageId
     });
   }
 

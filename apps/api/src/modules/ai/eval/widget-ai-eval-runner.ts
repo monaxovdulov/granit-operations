@@ -6,7 +6,11 @@ import {
   type AiReplyCandidateDecision,
   type AiTurnInput
 } from "../ai-turn.js";
-import type { AiKnownSlots, AiTurnAction } from "../ai-dialog-contract.js";
+import type {
+  AiKnownSlots,
+  AiSlotName,
+  AiTurnAction
+} from "../ai-dialog-contract.js";
 import {
   runWidgetAiEvalCase,
   type WidgetAiEvalCase,
@@ -47,17 +51,32 @@ export async function runWidgetAiEvals(
     }
 
     const decision = rawDecision;
+    const latencyMs = Date.now() - caseStartedAt;
     const output: WidgetAiEvalOutput =
       decision.decision === "reply_candidate"
         ? {
             action: decision.action ?? "answer",
             replyText: decision.text,
-            requestedSlots: decision.requestedSlots ?? []
+            requestedSlots: decision.requestedSlots ?? [],
+            slotUpdates: decision.slotUpdates,
+            requirementUpdates: decision.requirementUpdates,
+            groundingVerified: decision.metadata.grounding_verified === true,
+            claimCoverageComplete:
+              decision.metadata.claim_coverage_complete === true,
+            verifierVerdict:
+              typeof decision.metadata.verifier_verdict === "string"
+                ? decision.metadata.verifier_verdict
+                : undefined,
+            verifierViolations: readStringArray(
+              decision.metadata.verifier_violations
+            ),
+            latencyMs
           }
         : {
             action: "fallback",
             replyText: "",
-            requestedSlots: []
+            requestedSlots: [],
+            latencyMs
           };
     const evaluation = runWidgetAiEvalCase(evalCase, output);
 
@@ -67,7 +86,7 @@ export async function runWidgetAiEvals(
       failures: evaluation.failures,
       action: output.action,
       requestedSlots: output.requestedSlots,
-      latencyMs: Date.now() - caseStartedAt,
+      latencyMs,
       metadata: decision.metadata
     });
   }
@@ -105,7 +124,27 @@ export function validateWidgetAiEvalCorpus(cases: readonly WidgetAiEvalCase[]) {
       replyText: "Нейтральный проверочный ответ без коммерческих обещаний.",
       requestedSlots: evalCase.expected.requestedSlot
         ? [evalCase.expected.requestedSlot]
-        : []
+        : [],
+      slotUpdates: Object.entries(evalCase.expected.extractedSlots ?? {}).map(
+        ([name, expected]) => ({
+          name: name as AiSlotName,
+          value: expected.value,
+          evidence: evalEvidence(evalCase, expected.evidenceIncludes)
+        })
+      ),
+      requirementUpdates: (evalCase.expected.requirements ?? []).map(
+        (requirement) => ({
+          category: requirement.category,
+          mode: requirement.mode,
+          value: requirement.value,
+          evidence: evalEvidence(evalCase, requirement.evidenceIncludes)
+        })
+      ),
+      groundingVerified: true,
+      claimCoverageComplete: true,
+      verifierVerdict: "pass",
+      verifierViolations: [],
+      latencyMs: 0
     });
 
     if (!selfCheck.passed) {
@@ -116,6 +155,27 @@ export function validateWidgetAiEvalCorpus(cases: readonly WidgetAiEvalCase[]) {
   }
 
   return { valid: failures.length === 0, failures };
+}
+
+function evalEvidence(evalCase: WidgetAiEvalCase, quote: string) {
+  const message =
+    evalCase.sanitizedInput.messages.find((candidate) => candidate.includes(quote)) ??
+    evalCase.sanitizedInput.messages.at(-1) ??
+    quote;
+  const start = Math.max(0, message.indexOf(quote));
+
+  return {
+    messageId: "11111111-1111-4111-8111-111111111111",
+    quote,
+    start,
+    end: start + quote.length
+  };
+}
+
+function readStringArray(value: unknown): string[] | undefined {
+  return Array.isArray(value) && value.every((item) => typeof item === "string")
+    ? value
+    : undefined;
 }
 
 function isAiReplyCandidateDecision(value: unknown): value is AiReplyCandidateDecision {

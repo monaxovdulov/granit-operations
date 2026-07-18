@@ -32,7 +32,7 @@ export class OpenAiWidgetSemanticVerifier implements WidgetAiSemanticVerifier {
         channel: "site_widget",
         role: "semantic_verifier"
       },
-      maxOutputTokens: 700,
+      maxOutputTokens: 1600,
       signal
     });
 
@@ -45,4 +45,3 @@ export class OpenAiWidgetSemanticVerifier implements WidgetAiSemanticVerifier {
     };
   }
 }
-

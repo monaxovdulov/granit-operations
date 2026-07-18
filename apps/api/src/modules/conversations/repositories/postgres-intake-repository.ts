@@ -1,11 +1,14 @@
-import { and, desc, eq, ne, or, type SQLWrapper } from "drizzle-orm";
+import { and, asc, desc, eq, gt, lt, ne, or, type SQLWrapper } from "drizzle-orm";
 
 import {
   aiReviewLabels,
   aiRuns,
+  aiShadowComparisons,
   channelIdentities,
+  conversationAiMemory,
   conversationHandoffs,
   conversationMessages,
+  conversationRequirements,
   conversationSlotEvents,
   conversationSlots,
   conversations,
@@ -26,6 +29,8 @@ import {
   type AiTurnInput
 } from "../../ai/ai-turn.js";
 import {
+  AI_REQUIREMENT_CATEGORIES,
+  AI_REQUIREMENT_MODES,
   AI_SLOT_NAMES,
   type AiKnownSlots,
   type AiSlotName
@@ -102,6 +107,7 @@ import type {
   SaveAcceptedSiteWidgetMessageInput,
   SaveAcceptedSiteWidgetMessageResult,
   RecordSiteWidgetAiDegradationInput,
+  RecordSiteWidgetAiShadowComparisonInput,
   SiteWidgetHistoryResult
 } from "./public-intake-repository.js";
 
@@ -417,7 +423,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
           });
         }
 
-        const [recentMessageRows, slotRows] =
+        const [recentMessageRows, slotRows, requirementRows] =
           input.channel === "site_widget"
             ? await Promise.all([
                 tx
@@ -427,7 +433,8 @@ export class PostgresIntakeRepository implements IntakeRepository {
                     senderRole: conversationMessages.senderRole,
                     contentType: conversationMessages.contentType,
                     submittedAt: conversationMessages.submittedAt,
-                    body: conversationMessages.body
+                    body: conversationMessages.body,
+                    createdAt: conversationMessages.createdAt
                   })
                   .from(conversationMessages)
                   .where(eq(conversationMessages.conversationId, conversation.id))
@@ -439,13 +446,45 @@ export class PostgresIntakeRepository implements IntakeRepository {
                     value: conversationSlots.value,
                     source: conversationSlots.source,
                     sourcePublicMessageId: conversationSlots.sourcePublicMessageId,
+                    evidenceQuote: conversationSlots.evidenceQuote,
+                    evidenceStart: conversationSlots.evidenceStart,
+                    evidenceEnd: conversationSlots.evidenceEnd,
                     confidencePermille: conversationSlots.confidencePermille,
                     updatedAt: conversationSlots.updatedAt
                   })
                   .from(conversationSlots)
-                  .where(eq(conversationSlots.conversationId, conversation.id))
+                  .where(eq(conversationSlots.conversationId, conversation.id)),
+                tx
+                  .select({
+                    category: conversationRequirements.category,
+                    mode: conversationRequirements.mode,
+                    value: conversationRequirements.value,
+                    source: conversationRequirements.source,
+                    sourcePublicMessageId:
+                      conversationRequirements.sourcePublicMessageId,
+                    evidenceQuote: conversationRequirements.evidenceQuote,
+                    evidenceStart: conversationRequirements.evidenceStart,
+                    evidenceEnd: conversationRequirements.evidenceEnd,
+                    confidencePermille: conversationRequirements.confidencePermille,
+                    updatedAt: conversationRequirements.updatedAt
+                  })
+                  .from(conversationRequirements)
+                  .where(eq(conversationRequirements.conversationId, conversation.id))
+                  .orderBy(desc(conversationRequirements.updatedAt))
+                  .limit(60)
               ])
-            : [[], []];
+            : [[], [], []];
+
+        const rollingSummary =
+          input.channel === "site_widget"
+            ? await advanceAiRollingSummary(
+                tx,
+                conversation.id,
+                message.publicMessageId,
+                recentMessageRows,
+                now
+              )
+            : undefined;
 
         return {
           leadId: conversation.leadId,
@@ -464,7 +503,9 @@ export class PostgresIntakeRepository implements IntakeRepository {
             agentAllowedToReply: conversation.agentAllowedToReply,
             aiState: toAiState(conversation.aiState),
             recentMessages: toAiRecentMessages(recentMessageRows, message.publicMessageId),
-            persistedSlots: toAiKnownSlots(slotRows)
+            rollingSummary,
+            persistedSlots: toAiKnownSlots(slotRows),
+            persistedRequirements: toAiKnownRequirements(requirementRows)
           })
         };
       });
@@ -696,6 +737,45 @@ export class PostgresIntakeRepository implements IntakeRepository {
           }
         }
 
+        if (input.requirementUpdates?.length) {
+          for (const requirement of input.requirementUpdates) {
+            await tx
+              .insert(conversationRequirements)
+              .values({
+                conversationId: input.conversationId,
+                leadId: input.leadId,
+                category: requirement.category,
+                mode: requirement.mode,
+                value: requirement.value,
+                source: requirement.source,
+                sourcePublicMessageId: requirement.sourceMessageId,
+                evidenceQuote: requirement.evidence.quote,
+                evidenceStart: requirement.evidence.start,
+                evidenceEnd: requirement.evidence.end,
+                confidencePermille: Math.round(requirement.confidence * 1000),
+                createdAt: now,
+                updatedAt: now
+              })
+              .onConflictDoUpdate({
+                target: [
+                  conversationRequirements.conversationId,
+                  conversationRequirements.category,
+                  conversationRequirements.mode,
+                  conversationRequirements.value
+                ],
+                set: {
+                  source: requirement.source,
+                  sourcePublicMessageId: requirement.sourceMessageId,
+                  evidenceQuote: requirement.evidence.quote,
+                  evidenceStart: requirement.evidence.start,
+                  evidenceEnd: requirement.evidence.end,
+                  confidencePermille: Math.round(requirement.confidence * 1000),
+                  updatedAt: now
+                }
+              });
+          }
+        }
+
         if (input.aiRun) {
           await tx.insert(aiRuns).values({
             conversationId: input.conversationId,
@@ -903,6 +983,27 @@ export class PostgresIntakeRepository implements IntakeRepository {
         });
       }
     });
+  }
+
+  async recordSiteWidgetAiShadowComparison(
+    input: RecordSiteWidgetAiShadowComparisonInput
+  ): Promise<void> {
+    await this.db
+      .insert(aiShadowComparisons)
+      .values({
+        publicConversationId: input.publicConversationId,
+        inboundPublicMessageId: input.inboundPublicMessageId,
+        version: input.version,
+        inputFingerprint: input.inputFingerprint ?? null,
+        legacyResult: input.legacyResult,
+        groundedResult: input.groundedResult ?? null,
+        groundedErrorCode: input.groundedErrorCode ?? null,
+        legacyLatencyMs: input.legacyLatencyMs,
+        groundedLatencyMs: input.groundedLatencyMs,
+        startedAt: new Date(input.startedAt),
+        completedAt: new Date(input.completedAt)
+      })
+      .onConflictDoNothing({ target: aiShadowComparisons.inboundPublicMessageId });
   }
 
   async getSiteWidgetHistory(publicSessionId: string): Promise<SiteWidgetHistoryResult | null> {
@@ -1544,7 +1645,14 @@ export class PostgresIntakeRepository implements IntakeRepository {
     leadId: string,
     lead: typeof leads.$inferSelect
   ): Promise<ManagerStructuredIntake> {
-    const [slotRows, conflictRows, latestRunRows, latestHandoffRows, reviewRows] = await Promise.all([
+    const [
+      slotRows,
+      requirementRows,
+      conflictRows,
+      latestRunRows,
+      latestHandoffRows,
+      reviewRows
+    ] = await Promise.all([
       this.db
         .select({
           publicConversationId: conversations.publicConversationId,
@@ -1562,6 +1670,26 @@ export class PostgresIntakeRepository implements IntakeRepository {
         .innerJoin(conversations, eq(conversationSlots.conversationId, conversations.id))
         .where(eq(conversationSlots.leadId, leadId))
         .orderBy(desc(conversationSlots.updatedAt)),
+      this.db
+        .select({
+          publicConversationId: conversations.publicConversationId,
+          category: conversationRequirements.category,
+          mode: conversationRequirements.mode,
+          value: conversationRequirements.value,
+          sourcePublicMessageId: conversationRequirements.sourcePublicMessageId,
+          evidenceQuote: conversationRequirements.evidenceQuote,
+          evidenceStart: conversationRequirements.evidenceStart,
+          evidenceEnd: conversationRequirements.evidenceEnd,
+          confidencePermille: conversationRequirements.confidencePermille,
+          updatedAt: conversationRequirements.updatedAt
+        })
+        .from(conversationRequirements)
+        .innerJoin(
+          conversations,
+          eq(conversationRequirements.conversationId, conversations.id)
+        )
+        .where(eq(conversationRequirements.leadId, leadId))
+        .orderBy(desc(conversationRequirements.updatedAt)),
       this.db
         .select({
           publicConversationId: conversations.publicConversationId,
@@ -1651,6 +1779,36 @@ export class PostgresIntakeRepository implements IntakeRepository {
 
     return {
       slots,
+      requirements: requirementRows.flatMap((requirement) => {
+        if (
+          !AI_REQUIREMENT_CATEGORIES.includes(
+            requirement.category as (typeof AI_REQUIREMENT_CATEGORIES)[number]
+          ) ||
+          !AI_REQUIREMENT_MODES.includes(
+            requirement.mode as (typeof AI_REQUIREMENT_MODES)[number]
+          )
+        ) {
+          return [];
+        }
+
+        return [
+          {
+            publicConversationId: requirement.publicConversationId,
+            category:
+              requirement.category as (typeof AI_REQUIREMENT_CATEGORIES)[number],
+            mode: requirement.mode as (typeof AI_REQUIREMENT_MODES)[number],
+            value: requirement.value,
+            sourceMessageId: requirement.sourcePublicMessageId,
+            confidence: requirement.confidencePermille / 1000,
+            evidence: {
+              quote: requirement.evidenceQuote,
+              start: requirement.evidenceStart,
+              end: requirement.evidenceEnd
+            },
+            updatedAt: requirement.updatedAt.toISOString()
+          }
+        ];
+      }),
       conflicts: conflictRows.map((conflict) => ({
         publicConversationId: conflict.publicConversationId,
         name: toAiSlotName(conflict.name),
@@ -1776,7 +1934,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
   }
 
   private async loadAiDialogContext(conversationId: string, currentPublicMessageId: string) {
-    const [recentMessageRows, slotRows] = await Promise.all([
+    const [recentMessageRows, slotRows, requirementRows, memoryRows] = await Promise.all([
       this.db
         .select({
           publicMessageId: conversationMessages.publicMessageId,
@@ -1784,7 +1942,8 @@ export class PostgresIntakeRepository implements IntakeRepository {
           senderRole: conversationMessages.senderRole,
           contentType: conversationMessages.contentType,
           submittedAt: conversationMessages.submittedAt,
-          body: conversationMessages.body
+          body: conversationMessages.body,
+          createdAt: conversationMessages.createdAt
         })
         .from(conversationMessages)
         .where(eq(conversationMessages.conversationId, conversationId))
@@ -1796,16 +1955,48 @@ export class PostgresIntakeRepository implements IntakeRepository {
           value: conversationSlots.value,
           source: conversationSlots.source,
           sourcePublicMessageId: conversationSlots.sourcePublicMessageId,
+          evidenceQuote: conversationSlots.evidenceQuote,
+          evidenceStart: conversationSlots.evidenceStart,
+          evidenceEnd: conversationSlots.evidenceEnd,
           confidencePermille: conversationSlots.confidencePermille,
           updatedAt: conversationSlots.updatedAt
         })
         .from(conversationSlots)
-        .where(eq(conversationSlots.conversationId, conversationId))
+        .where(eq(conversationSlots.conversationId, conversationId)),
+      this.db
+        .select({
+          category: conversationRequirements.category,
+          mode: conversationRequirements.mode,
+          value: conversationRequirements.value,
+          source: conversationRequirements.source,
+          sourcePublicMessageId: conversationRequirements.sourcePublicMessageId,
+          evidenceQuote: conversationRequirements.evidenceQuote,
+          evidenceStart: conversationRequirements.evidenceStart,
+          evidenceEnd: conversationRequirements.evidenceEnd,
+          confidencePermille: conversationRequirements.confidencePermille,
+          updatedAt: conversationRequirements.updatedAt
+        })
+        .from(conversationRequirements)
+        .where(eq(conversationRequirements.conversationId, conversationId))
+        .orderBy(desc(conversationRequirements.updatedAt))
+        .limit(60),
+      this.db
+        .select({
+          summary: conversationAiMemory.summary,
+          coveredThroughPublicMessageId:
+            conversationAiMemory.coveredThroughPublicMessageId,
+          updatedAt: conversationAiMemory.updatedAt
+        })
+        .from(conversationAiMemory)
+        .where(eq(conversationAiMemory.conversationId, conversationId))
+        .limit(1)
     ]);
 
     return {
       recentMessages: toAiRecentMessages(recentMessageRows, currentPublicMessageId),
-      persistedSlots: toAiKnownSlots(slotRows)
+      rollingSummary: toAiRollingSummary(memoryRows[0]),
+      persistedSlots: toAiKnownSlots(slotRows),
+      persistedRequirements: toAiKnownRequirements(requirementRows)
     };
   }
 
@@ -1826,6 +2017,140 @@ export class PostgresIntakeRepository implements IntakeRepository {
 }
 
 type Transaction = Parameters<Parameters<OperationsDb["transaction"]>[0]>[0];
+
+async function advanceAiRollingSummary(
+  tx: Transaction,
+  conversationId: string,
+  currentPublicMessageId: string,
+  recentRows: AiContextMessageRow[],
+  now: Date
+): Promise<AiTurnInput["compactContext"]["rollingSummary"] | undefined> {
+  const [memory] = await tx
+    .select({
+      summary: conversationAiMemory.summary,
+      coveredThroughPublicMessageId:
+        conversationAiMemory.coveredThroughPublicMessageId,
+      coveredThroughCreatedAt: conversationAiMemory.coveredThroughCreatedAt,
+      updatedAt: conversationAiMemory.updatedAt
+    })
+    .from(conversationAiMemory)
+    .where(eq(conversationAiMemory.conversationId, conversationId))
+    .limit(1);
+  const recentEligible = recentRows
+    .filter(
+      (row) => row.publicMessageId !== currentPublicMessageId && isAiContextMessageRow(row)
+    )
+    .slice(0, 12);
+  const oldestRecent = recentEligible.at(-1);
+
+  if (!oldestRecent) {
+    return toAiRollingSummary(memory);
+  }
+
+  const olderRows = await tx
+    .select({
+      publicMessageId: conversationMessages.publicMessageId,
+      direction: conversationMessages.direction,
+      senderRole: conversationMessages.senderRole,
+      contentType: conversationMessages.contentType,
+      submittedAt: conversationMessages.submittedAt,
+      body: conversationMessages.body,
+      createdAt: conversationMessages.createdAt
+    })
+    .from(conversationMessages)
+    .where(
+      memory
+        ? and(
+            eq(conversationMessages.conversationId, conversationId),
+            gt(conversationMessages.createdAt, memory.coveredThroughCreatedAt),
+            lt(conversationMessages.createdAt, oldestRecent.createdAt)
+          )
+        : and(
+            eq(conversationMessages.conversationId, conversationId),
+            lt(conversationMessages.createdAt, oldestRecent.createdAt)
+          )
+    )
+    .orderBy(asc(conversationMessages.createdAt))
+    .limit(100);
+  const eligibleOlderRows = olderRows.filter(isAiContextMessageRow);
+
+  if (!eligibleOlderRows.length) {
+    return toAiRollingSummary(memory);
+  }
+
+  const newestCovered = eligibleOlderRows.at(-1)!;
+  const appended = eligibleOlderRows
+    .map((row) => {
+      const speaker = row.senderRole === "visitor" ? "Клиент" : "Ассистент";
+      return `[${row.submittedAt.toISOString()}] ${speaker}: ${row.body.trim()}`;
+    })
+    .join("\n");
+  const summary = boundRollingSummary(
+    memory?.summary ? `${memory.summary}\n${appended}` : appended
+  );
+
+  await tx
+    .insert(conversationAiMemory)
+    .values({
+      conversationId,
+      summary,
+      coveredThroughPublicMessageId: newestCovered.publicMessageId,
+      coveredThroughCreatedAt: newestCovered.createdAt,
+      updatedAt: now
+    })
+    .onConflictDoUpdate({
+      target: conversationAiMemory.conversationId,
+      set: {
+        summary,
+        coveredThroughPublicMessageId: newestCovered.publicMessageId,
+        coveredThroughCreatedAt: newestCovered.createdAt,
+        updatedAt: now
+      }
+    });
+
+  return {
+    text: summary,
+    coveredThroughPublicMessageId: newestCovered.publicMessageId,
+    updatedAt: now.toISOString()
+  };
+}
+
+function toAiRollingSummary(
+  memory:
+    | {
+        summary: string;
+        coveredThroughPublicMessageId: string;
+        updatedAt: Date;
+      }
+    | undefined
+): AiTurnInput["compactContext"]["rollingSummary"] | undefined {
+  return memory
+    ? {
+        text: memory.summary,
+        coveredThroughPublicMessageId: memory.coveredThroughPublicMessageId,
+        updatedAt: memory.updatedAt.toISOString()
+      }
+    : undefined;
+}
+
+function boundRollingSummary(value: string): string {
+  if (value.length <= 12_000) {
+    return value;
+  }
+
+  const tail = value.slice(-12_000);
+  const firstLineBreak = tail.indexOf("\n");
+  return firstLineBreak >= 0 ? tail.slice(firstLineBreak + 1) : tail;
+}
+
+function isAiContextMessageRow(row: AiContextMessageRow): boolean {
+  return (
+    row.contentType === "text" &&
+    (row.direction === "inbound" || row.direction === "outbound") &&
+    (row.senderRole === "visitor" || row.senderRole === "ai_assistant") &&
+    Boolean(row.body.trim())
+  );
+}
 
 function nextAiStateForInbound(currentAiState: string, needsManager: boolean): AiState {
   const current = toAiState(currentAiState);
@@ -1861,7 +2186,9 @@ function buildSiteWidgetAiTurnInput(
     agentAllowedToReply: boolean;
     aiState: AiState;
     recentMessages: AiTurnInput["compactContext"]["messages"];
+    rollingSummary?: AiTurnInput["compactContext"]["rollingSummary"];
     persistedSlots: AiKnownSlots;
+    persistedRequirements: AiTurnInput["knownRequirements"];
   }
 ): AiTurnInput | undefined {
   if (
@@ -1901,7 +2228,9 @@ function buildSiteWidgetAiTurnInput(
       agentAllowedToReply: accepted.agentAllowedToReply
     },
     recentMessages: accepted.recentMessages,
-    persistedSlots: accepted.persistedSlots
+    rollingSummary: accepted.rollingSummary,
+    persistedSlots: accepted.persistedSlots,
+    persistedRequirements: accepted.persistedRequirements
   });
 }
 
@@ -1929,7 +2258,9 @@ function buildPersistedSiteWidgetAiTurnInput(input: {
   requestFingerprint: string;
 }, context: {
   recentMessages: AiTurnInput["compactContext"]["messages"];
+  rollingSummary?: AiTurnInput["compactContext"]["rollingSummary"];
   persistedSlots: AiKnownSlots;
+  persistedRequirements: AiTurnInput["knownRequirements"];
 }): AiTurnInput | undefined {
   const pageUrl = input.sourcePageUrl ?? input.conversationSourcePageUrl;
   const widgetInstanceId = input.widgetInstanceId ?? input.sessionWidgetInstanceId;
@@ -1971,7 +2302,9 @@ function buildPersistedSiteWidgetAiTurnInput(input: {
       agentAllowedToReply: input.agentAllowedToReply
     },
     recentMessages: context.recentMessages,
-    persistedSlots: context.persistedSlots
+    rollingSummary: context.rollingSummary,
+    persistedSlots: context.persistedSlots,
+    persistedRequirements: context.persistedRequirements
   });
 }
 
@@ -1982,6 +2315,7 @@ type AiContextMessageRow = {
   contentType: string;
   submittedAt: Date;
   body: string;
+  createdAt: Date;
 };
 
 function toAiRecentMessages(
@@ -2034,6 +2368,9 @@ type AiSlotRow = {
   value: string;
   source: string;
   sourcePublicMessageId: string | null;
+  evidenceQuote: string | null;
+  evidenceStart: number | null;
+  evidenceEnd: number | null;
   confidencePermille: number;
   updatedAt: Date;
 };
@@ -2049,16 +2386,83 @@ function toAiKnownSlots(rows: AiSlotRow[]): AiKnownSlots {
       continue;
     }
 
+    const evidence =
+      row.sourcePublicMessageId &&
+      row.evidenceQuote &&
+      row.evidenceStart !== null &&
+      row.evidenceEnd !== null &&
+      row.evidenceStart >= 0 &&
+      row.evidenceEnd > row.evidenceStart &&
+      row.evidenceEnd - row.evidenceStart === row.evidenceQuote.length
+        ? {
+            messageId: row.sourcePublicMessageId,
+            quote: row.evidenceQuote,
+            start: row.evidenceStart,
+            end: row.evidenceEnd
+          }
+        : undefined;
+
     slots[row.name as AiSlotName] = {
       value: row.value,
       source: row.source,
       sourceMessageId: row.sourcePublicMessageId ?? undefined,
+      evidence,
       confidence: row.confidencePermille / 1000,
       updatedAt: row.updatedAt.toISOString()
     };
   }
 
   return slots;
+}
+
+type AiRequirementRow = {
+  category: string;
+  mode: string;
+  value: string;
+  source: string;
+  sourcePublicMessageId: string;
+  evidenceQuote: string;
+  evidenceStart: number;
+  evidenceEnd: number;
+  confidencePermille: number;
+  updatedAt: Date;
+};
+
+function toAiKnownRequirements(
+  rows: AiRequirementRow[]
+): AiTurnInput["knownRequirements"] {
+  return rows.flatMap((row) => {
+    if (
+      !AI_REQUIREMENT_CATEGORIES.includes(
+        row.category as (typeof AI_REQUIREMENT_CATEGORIES)[number]
+      ) ||
+      !AI_REQUIREMENT_MODES.includes(row.mode as (typeof AI_REQUIREMENT_MODES)[number]) ||
+      (row.source !== "ai_extraction" && row.source !== "manager") ||
+      row.evidenceStart < 0 ||
+      row.evidenceEnd <= row.evidenceStart ||
+      row.evidenceEnd - row.evidenceStart !== row.evidenceQuote.length
+    ) {
+      return [];
+    }
+
+    return [
+      {
+        category: row.category as (typeof AI_REQUIREMENT_CATEGORIES)[number],
+        mode: row.mode as (typeof AI_REQUIREMENT_MODES)[number],
+        value: row.value,
+        source: row.source,
+        sourceMessageId: row.sourcePublicMessageId,
+        evidence: {
+          messageId: row.sourcePublicMessageId,
+          quote: row.evidenceQuote,
+          start: row.evidenceStart,
+          end: row.evidenceEnd
+        },
+        confidence: row.confidencePermille / 1000,
+        updatedAt: row.updatedAt.toISOString()
+      }
+    ];
+  });
 }
 
 function isAiSlotSource(value: string): value is "contact" | "visitor_message" | "ai_extraction" | "manager" {

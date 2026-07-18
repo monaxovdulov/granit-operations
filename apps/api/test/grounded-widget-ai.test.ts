@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { EmptyCatalogKnowledgeProvider } from "../src/modules/ai/catalog/empty-catalog-knowledge-provider.js";
 import {
   GROUNDED_AI_TURN_DECISION_VERSION,
   type GroundedAiTurnCandidateDecision
 } from "../src/modules/ai/ai-dialog-contract.js";
 import { buildStageASiteWidgetAiTurnInput } from "../src/modules/ai/ai-turn.js";
+import { EmptyCatalogKnowledgeProvider } from "../src/modules/ai/catalog/empty-catalog-knowledge-provider.js";
 import { validateGroundedAiDecision } from "../src/modules/ai/grounding/ai-decision-validator.js";
+import { validateTextEvidence } from "../src/modules/ai/grounding/ai-slot-evidence-service.js";
 import {
   GroundedWidgetAiService,
   type GroundedWidgetAiProvider,
@@ -20,6 +21,7 @@ import {
   type WidgetAiVerifierInput,
   type WidgetAiVerifierResult
 } from "../src/modules/ai/verification/widget-ai-semantic-verifier.js";
+import { validateWidgetAiVerification } from "../src/modules/ai/verification/widget-ai-verification-validator.js";
 
 const MESSAGE_ID = "11111111-1111-4111-8111-111111111111";
 const CONVERSATION_ID = "22222222-2222-4222-8222-222222222222";
@@ -42,40 +44,92 @@ describe("grounded widget AI core", () => {
     ).resolves.toEqual([]);
   });
 
-  it("accepts a slot only with an exact visitor quote and offsets", async () => {
+  it("links a slot value to the exact visitor evidence", () => {
     const input = turn("Нужен двойной памятник");
-    const catalog = new EmptyCatalogKnowledgeProvider();
-    const snapshot = await catalog.getSnapshot();
     const decision = decisionWithSlot();
 
-    expect(validateGroundedAiDecision(decision, input, snapshot, [])).toEqual({
+    expect(validateGroundedAiDecision(decision, input)).toEqual({
       valid: true,
       decision
     });
 
-    const invalid = structuredClone(decision);
-    invalid.extractedSlots[0]!.evidence.start = 7;
-
-    expect(validateGroundedAiDecision(invalid, input, snapshot, [])).toMatchObject({
+    const invalidOffset = structuredClone(decision);
+    invalidOffset.extractedSlots[0]!.evidence.start = 7;
+    expect(validateGroundedAiDecision(invalidOffset, input)).toMatchObject({
       valid: false,
       issues: expect.arrayContaining(["invalid_slot_evidence"])
     });
+
+    const contradictoryValue = structuredClone(decision);
+    contradictoryValue.extractedSlots[0]!.value = "одинарный";
+    expect(validateGroundedAiDecision(contradictoryValue, input)).toMatchObject({
+      valid: false,
+      issues: expect.arrayContaining(["invalid_slot_evidence"])
+    });
+
+    const normalizedSynonym = structuredClone(decision);
+    normalizedSynonym.extractedSlots[0]!.value = "двухместный";
+    expect(validateGroundedAiDecision(normalizedSynonym, input)).toEqual({
+      valid: true,
+      decision: normalizedSynonym
+    });
   });
 
-  it("rejects a catalog claim when the empty provider did not return its record", async () => {
+  it("keeps persisted exact evidence valid after its source message leaves recent context", () => {
+    const input = turn("Продолжим выбирать детали");
+    const oldEvidence = {
+      messageId: "33333333-3333-4333-8333-333333333333",
+      quote: "строгий стиль",
+      start: 6,
+      end: 19
+    };
+    input.knownRequirements = [
+      {
+        category: "style",
+        mode: "preference",
+        value: "строгий стиль",
+        source: "ai_extraction",
+        sourceMessageId: oldEvidence.messageId,
+        evidence: oldEvidence,
+        confidence: 0.96,
+        updatedAt: "2026-07-17T09:00:00.000Z"
+      }
+    ];
+    input.knownSlots.values.material = {
+      value: "чёрный гранит",
+      source: "ai_extraction",
+      sourceMessageId: "44444444-4444-4444-8444-444444444444",
+      evidence: {
+        messageId: "44444444-4444-4444-8444-444444444444",
+        quote: "чёрный гранит",
+        start: 5,
+        end: 18
+      },
+      confidence: 0.99,
+      updatedAt: "2026-07-17T09:01:00.000Z"
+    };
+
+    expect(validateTextEvidence(oldEvidence, input)).toBeNull();
+    expect(validateTextEvidence(input.knownSlots.values.material.evidence!, input)).toBeNull();
+  });
+
+  it("rejects a verifier catalog claim when no selected record supports it", async () => {
     const input = turn("Что вы производите?");
-    const catalog = new EmptyCatalogKnowledgeProvider();
-    const snapshot = await catalog.getSnapshot();
-    const replyText = "У нас собственное производство.";
-    const decision: GroundedAiTurnCandidateDecision = {
-      ...baseDecision(replyText),
-      claims: [
-        {
-          text: replyText,
-          start: 0,
-          end: replyText.length,
-          grounding: {
+    const snapshot = await new EmptyCatalogKnowledgeProvider().getSnapshot();
+    const decision = answerDecision("У нас собственное производство.");
+    const result = validateWidgetAiVerification({
+      turn: input,
+      decision,
+      snapshot,
+      selectedRecords: [],
+      verification: verification("pass", "answer", {
+        claimVerdicts: [
+          {
+            text: decision.replyText,
+            start: 0,
+            end: decision.replyText.length,
             kind: "catalog",
+            supported: true,
             catalogReference: {
               recordId: "business.production",
               revision: 1,
@@ -83,16 +137,14 @@ describe("grounded widget AI core", () => {
               catalogVersion: snapshot.catalogVersion
             },
             messageEvidence: null,
-            systemPolicyId: null
+            systemPolicyId: null,
+            detail: null
           }
-        }
-      ]
-    };
-
-    expect(validateGroundedAiDecision(decision, input, snapshot, [])).toMatchObject({
-      valid: false,
-      issues: expect.arrayContaining(["invalid_catalog_reference"])
+        ]
+      })
     });
+
+    expect(result).toEqual(expect.arrayContaining(["invalid_catalog_reference"]));
   });
 
   it("rejects a reference to an expired published catalog record", async () => {
@@ -116,16 +168,20 @@ describe("grounded widget AI core", () => {
         }
       ]
     };
-    const replyText = "Цена — 100 000 рублей.";
-    const decision: GroundedAiTurnCandidateDecision = {
-      ...baseDecision(replyText),
-      claims: [
-        {
-          text: replyText,
-          start: 0,
-          end: replyText.length,
-          grounding: {
+    const decision = answerDecision("Цена — 100 000 рублей.");
+    const result = validateWidgetAiVerification({
+      turn: input,
+      decision,
+      snapshot,
+      selectedRecords: snapshot.records,
+      verification: verification("pass", "answer", {
+        claimVerdicts: [
+          {
+            text: decision.replyText,
+            start: 0,
+            end: decision.replyText.length,
             kind: "catalog",
+            supported: true,
             catalogReference: {
               recordId: "price.monument.base",
               revision: 1,
@@ -133,53 +189,166 @@ describe("grounded widget AI core", () => {
               catalogVersion: snapshot.catalogVersion
             },
             messageEvidence: null,
-            systemPolicyId: null
+            systemPolicyId: null,
+            detail: null
           }
-        }
-      ]
-    };
-
-    expect(
-      validateGroundedAiDecision(decision, input, snapshot, snapshot.records)
-    ).toMatchObject({
-      valid: false,
-      issues: expect.arrayContaining(["invalid_catalog_reference"])
+        ]
+      })
     });
+
+    expect(result).toEqual(expect.arrayContaining(["invalid_catalog_reference"]));
   });
 
-  it("keeps natural wording when semantic verifier passes the full context", async () => {
+  it("keeps natural wording when verifier proves full coverage", async () => {
     const provider = new FakeGroundedProvider([
       baseDecision("Можно связать оформление в единую композицию. Какой стиль вам ближе?")
     ]);
     const verifier = new FakeVerifier([verification("pass", "clarify")]);
-    const result = await new GroundedWidgetAiService({
-      provider,
-      verifier
-    }).generateReply(turn("Можно связать оформление памятника с документами на участок?"));
+    const result = await new GroundedWidgetAiService({ provider, verifier }).generateReply(
+      turn("Можно связать оформление памятника с документами на участок?")
+    );
 
     expect(result).toMatchObject({
       decision: "reply_candidate",
       action: "clarify",
       metadata: {
         grounding_verified: true,
+        claim_coverage_complete: true,
         verifier_verdict: "pass"
       }
     });
   });
 
-  it("does not send an unsupported draft even when the generator reports no claims", async () => {
+  it("does not send an unsupported draft even when the generator has no claim field", async () => {
     const provider = new FakeGroundedProvider([
       baseDecision("Мы всегда используем только карельский гранит.")
     ]);
     const verifier = new FakeVerifier([
-      verification("block", null, ["unsupported_claim"])
+      verification("block", null, { violations: ["unsupported_claim"] })
     ]);
+    const result = await new GroundedWidgetAiService({ provider, verifier }).generateReply(
+      turn("Какой гранит вы используете?")
+    );
+
+    expect(result).toMatchObject({
+      decision: "no_reply",
+      reason: "grounding_validation_failed"
+    });
+  });
+
+  it("fails closed when a pass verdict omits complete factual coverage", async () => {
+    const provider = new FakeGroundedProvider([
+      baseDecision("Мы всегда используем только карельский гранит.")
+    ]);
+    const incomplete = verification("pass", "clarify");
+    incomplete.claimCoverageComplete = false;
     const result = await new GroundedWidgetAiService({
       provider,
-      verifier
+      verifier: new FakeVerifier([incomplete])
     }).generateReply(turn("Какой гранит вы используете?"));
 
     expect(result).toMatchObject({
+      decision: "no_reply",
+      reason: "grounding_validation_failed"
+    });
+  });
+
+  it("requires exactly one matching slot verdict for every extracted slot", async () => {
+    const missingCoverage = await new GroundedWidgetAiService({
+      provider: new FakeGroundedProvider([decisionWithSlot()]),
+      verifier: new FakeVerifier([verification("pass", "clarify")])
+    }).generateReply(turn("Нужен двойной памятник"));
+
+    expect(missingCoverage).toMatchObject({
+      decision: "no_reply",
+      reason: "grounding_validation_failed"
+    });
+
+    const decision = decisionWithSlot();
+    const duplicateVerdict = slotVerdict(decision.extractedSlots[0]!);
+    const duplicateCoverage = await new GroundedWidgetAiService({
+      provider: new FakeGroundedProvider([decision]),
+      verifier: new FakeVerifier([
+        verification("pass", "clarify", {
+          slotVerdicts: [duplicateVerdict, duplicateVerdict]
+        })
+      ])
+    }).generateReply(turn("Нужен двойной памятник"));
+
+    expect(duplicateCoverage).toMatchObject({
+      decision: "no_reply",
+      reason: "grounding_validation_failed"
+    });
+
+    const covered = await new GroundedWidgetAiService({
+      provider: new FakeGroundedProvider([decision]),
+      verifier: new FakeVerifier([
+        verification("pass", "clarify", {
+          slotVerdicts: [slotVerdict(decision.extractedSlots[0]!)]
+        })
+      ])
+    }).generateReply(turn("Нужен двойной памятник"));
+
+    expect(covered).toMatchObject({
+      decision: "reply_candidate",
+      slotUpdates: [{ name: "monumentType", value: "двойной" }]
+    });
+  });
+
+  it("requires verifier coverage for flexible requirements", async () => {
+    const decision = baseDecision("Понял, вам ближе строгий стиль. Какой размер нужен?");
+    decision.extractedRequirements = [
+      {
+        category: "style",
+        mode: "preference",
+        value: "строгий стиль",
+        confidence: 0.95,
+        evidence: {
+          messageId: MESSAGE_ID,
+          quote: "строгий стиль",
+          start: 5,
+          end: 18
+        }
+      }
+    ];
+    const result = await new GroundedWidgetAiService({
+      provider: new FakeGroundedProvider([decision]),
+      verifier: new FakeVerifier([verification("pass", "clarify")])
+    }).generateReply(turn("Хочу строгий стиль"));
+
+    expect(result).toMatchObject({
+      decision: "no_reply",
+      reason: "grounding_validation_failed"
+    });
+
+    const covered = await new GroundedWidgetAiService({
+      provider: new FakeGroundedProvider([decision]),
+      verifier: new FakeVerifier([
+        verification("pass", "clarify", {
+          requirementVerdicts: [requirementVerdict(decision.extractedRequirements[0]!)]
+        })
+      ])
+    }).generateReply(turn("Хочу строгий стиль"));
+
+    expect(covered).toMatchObject({
+      decision: "reply_candidate",
+      requirementUpdates: [
+        { category: "style", mode: "preference", value: "строгий стиль" }
+      ]
+    });
+
+    const mismatchedVerdict = requirementVerdict(decision.extractedRequirements[0]!);
+    mismatchedVerdict.value = "классический стиль";
+    const rejectedMismatch = await new GroundedWidgetAiService({
+      provider: new FakeGroundedProvider([decision]),
+      verifier: new FakeVerifier([
+        verification("pass", "clarify", {
+          requirementVerdicts: [mismatchedVerdict]
+        })
+      ])
+    }).generateReply(turn("Хочу строгий стиль"));
+
+    expect(rejectedMismatch).toMatchObject({
       decision: "no_reply",
       reason: "grounding_validation_failed"
     });
@@ -191,7 +360,7 @@ describe("grounded widget AI core", () => {
       baseDecision("Точную стоимость подтвердит менеджер. Какой материал рассматриваете?")
     ]);
     const verifier = new FakeVerifier([
-      verification("repair", "clarify", ["commercial_promise"]),
+      verification("repair", "clarify", { violations: ["commercial_promise"] }),
       verification("pass", "clarify")
     ]);
     const result = await new GroundedWidgetAiService({
@@ -211,17 +380,18 @@ describe("grounded widget AI core", () => {
     expect(provider.attempts).toEqual(["initial", "repair"]);
   });
 
-  it("uses an app-owned handoff reply when verifier requires a manager", async () => {
+  it("hands off immediately with an app-owned reply and skips repair", async () => {
     const provider = new FakeGroundedProvider([
-      baseDecision("Продолжим консультацию. Какой материал нужен?")
+      baseDecision("Продолжим консультацию. Какой материал нужен?"),
+      baseDecision("Этот draft не должен запрашиваться.")
     ]);
     const verifier = new FakeVerifier([
-      verification("handoff", "handoff", ["missed_manager_request"])
+      verification("handoff", "handoff", { violations: ["missed_manager_request"] })
     ]);
     const result = await new GroundedWidgetAiService({
       provider,
       verifier,
-      minimumRepairBudgetMs: 999999
+      minimumRepairBudgetMs: 0
     }).generateReply(turn("Позовите, пожалуйста, менеджера"));
 
     expect(result).toMatchObject({
@@ -234,6 +404,31 @@ describe("grounded widget AI core", () => {
         grounding_verified: true
       }
     });
+    expect(provider.attempts).toEqual(["initial"]);
+  });
+
+  it("honors a new handoff verdict returned after the single repair", async () => {
+    const provider = new FakeGroundedProvider([
+      baseDecision("Я попробую назвать точный срок."),
+      baseDecision("Продолжим уточнять заказ.")
+    ]);
+    const verifier = new FakeVerifier([
+      verification("repair", "clarify", { violations: ["commercial_promise"] }),
+      verification("handoff", "handoff", { violations: ["commercial_promise"] })
+    ]);
+    const result = await new GroundedWidgetAiService({
+      provider,
+      verifier,
+      minimumRepairBudgetMs: 0
+    }).generateReply(turn("Гарантируете установку к пятнице?"));
+
+    expect(result).toMatchObject({
+      decision: "reply_candidate",
+      action: "handoff",
+      handoffReason: "binding_terms",
+      metadata: { repair_applied: true, safe_handoff_reply: true }
+    });
+    expect(provider.attempts).toEqual(["initial", "repair"]);
   });
 });
 
@@ -264,14 +459,14 @@ class FakeVerifier implements WidgetAiSemanticVerifier {
   constructor(private readonly verifications: WidgetAiVerification[]) {}
 
   async verify(_input: WidgetAiVerifierInput): Promise<WidgetAiVerifierResult> {
-    const verification = this.verifications.shift();
+    const verificationResult = this.verifications.shift();
 
-    if (!verification) {
+    if (!verificationResult) {
       throw new Error("missing fake verification");
     }
 
     return {
-      verification,
+      verification: verificationResult,
       modelProvider: "fake",
       modelName: "fake-semantic-verifier"
     };
@@ -308,75 +503,94 @@ function baseDecision(replyText: string): GroundedAiTurnCandidateDecision {
     intent: "product_selection",
     replyText,
     extractedSlots: [],
+    extractedRequirements: [],
     requestedSlots: ["material"],
-    claims: [],
     riskFlags: [],
     handoffReason: null,
     confidence: 0.9
   };
 }
 
-function decisionWithSlot(): GroundedAiTurnCandidateDecision {
-  const replyText = "Понял: двойной памятник. Какой размер рассматриваете?";
+function answerDecision(replyText: string): GroundedAiTurnCandidateDecision {
   return {
-    version: GROUNDED_AI_TURN_DECISION_VERSION,
-    action: "clarify",
-    intent: "product_selection",
-    replyText,
-    extractedSlots: [
-      {
-        name: "monumentType",
-        value: "двойной",
-        confidence: 0.99,
-        evidence: {
-          messageId: MESSAGE_ID,
-          quote: "двойной памятник",
-          start: 6,
-          end: 22
-        }
+    ...baseDecision(replyText),
+    action: "answer",
+    requestedSlots: []
+  };
+}
+
+function decisionWithSlot(): GroundedAiTurnCandidateDecision {
+  const decision = baseDecision("Понял: двойной памятник. Какой размер рассматриваете?");
+  decision.requestedSlots = ["size"];
+  decision.extractedSlots = [
+    {
+      name: "monumentType",
+      value: "двойной",
+      confidence: 0.99,
+      evidence: {
+        messageId: MESSAGE_ID,
+        quote: "двойной памятник",
+        start: 6,
+        end: 22
       }
-    ],
-    requestedSlots: ["size"],
-    claims: [
-      {
-        text: "двойной памятник",
-        start: 7,
-        end: 23,
-        grounding: {
-          kind: "visitor_message",
-          catalogReference: null,
-          messageEvidence: {
-            messageId: MESSAGE_ID,
-            quote: "двойной памятник",
-            start: 6,
-            end: 22
-          },
-          systemPolicyId: null
-        }
-      }
-    ],
-    riskFlags: [],
-    handoffReason: null,
-    confidence: 0.95
+    }
+  ];
+  return decision;
+}
+
+function slotVerdict(
+  slot: GroundedAiTurnCandidateDecision["extractedSlots"][number]
+): WidgetAiVerification["slotVerdicts"][number] {
+  return {
+    name: slot.name,
+    value: slot.value,
+    evidence: slot.evidence,
+    valueSupportedByEvidence: true,
+    valid: true,
+    detail: null
+  };
+}
+
+function requirementVerdict(
+  requirement: GroundedAiTurnCandidateDecision["extractedRequirements"][number]
+): WidgetAiVerification["requirementVerdicts"][number] {
+  return {
+    category: requirement.category,
+    mode: requirement.mode,
+    value: requirement.value,
+    evidence: requirement.evidence,
+    valueSupportedByEvidence: true,
+    valid: true,
+    detail: null
   };
 }
 
 function verification(
   verdict: WidgetAiVerification["verdict"],
   requiredAction: WidgetAiVerification["requiredAction"],
-  violations: Array<WidgetAiVerification["violations"][number]["code"]> = []
+  options: {
+    violations?: Array<WidgetAiVerification["violations"][number]["code"]>;
+    claimVerdicts?: WidgetAiVerification["claimVerdicts"];
+    slotVerdicts?: WidgetAiVerification["slotVerdicts"];
+    requirementVerdicts?: WidgetAiVerification["requirementVerdicts"];
+  } = {}
 ): WidgetAiVerification {
+  const claimVerdicts = options.claimVerdicts ?? [];
   return {
     version: WIDGET_AI_VERIFIER_VERSION,
     verdict,
     requiredAction,
-    violations: violations.map((code) => ({
+    violations: (options.violations ?? []).map((code) => ({
       code,
       detail: code,
       claimStart: null,
       claimEnd: null
     })),
-    slotVerdicts: [],
+    factualClaimsPresent: claimVerdicts.length > 0,
+    claimCoverageComplete: true,
+    claimVerdicts,
+    slotVerdicts: options.slotVerdicts ?? [],
+    requirementVerdicts: options.requirementVerdicts ?? [],
     confidence: 0.97
   };
 }

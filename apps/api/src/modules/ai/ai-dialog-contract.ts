@@ -110,7 +110,7 @@ export type AiSlotUpdate = AiExtractedSlotCandidate & {
 };
 
 export const GROUNDED_AI_TURN_DECISION_VERSION =
-  "granit_ai_turn_decision.grounded.v2" as const;
+  "granit_ai_turn_decision.grounded.v3" as const;
 
 export const GROUNDED_AI_TURN_ACTIONS = ["answer", "clarify", "handoff"] as const;
 export type GroundedAiTurnAction = (typeof GROUNDED_AI_TURN_ACTIONS)[number];
@@ -123,7 +123,21 @@ export const AI_CLAIM_GROUNDING_KINDS = [
 ] as const;
 export type AiClaimGroundingKind = (typeof AI_CLAIM_GROUNDING_KINDS)[number];
 
-const AiTextEvidenceSchema = z
+export const AI_REQUIREMENT_CATEGORIES = [
+  "style",
+  "color",
+  "shape",
+  "accessory",
+  "decoration",
+  "site_constraint",
+  "other"
+] as const;
+export type AiRequirementCategory = (typeof AI_REQUIREMENT_CATEGORIES)[number];
+
+export const AI_REQUIREMENT_MODES = ["preference", "requirement", "avoidance"] as const;
+export type AiRequirementMode = (typeof AI_REQUIREMENT_MODES)[number];
+
+export const AiTextEvidenceSchema = z
   .object({
     messageId: z.string().uuid(),
     quote: z.string().min(1).max(900),
@@ -132,7 +146,7 @@ const AiTextEvidenceSchema = z
   })
   .strict();
 
-const CatalogReferenceSchema = z
+export const CatalogReferenceSchema = z
   .object({
     recordId: z.string().trim().min(1).max(160),
     revision: z.number().int().min(1),
@@ -150,21 +164,13 @@ const AiGroundedSlotCandidateSchema = z
   })
   .strict();
 
-const AiClaimGroundingSchema = z
+const AiGroundedRequirementCandidateSchema = z
   .object({
-    kind: z.enum(AI_CLAIM_GROUNDING_KINDS),
-    catalogReference: CatalogReferenceSchema.nullable(),
-    messageEvidence: AiTextEvidenceSchema.nullable(),
-    systemPolicyId: z.string().trim().min(1).max(120).nullable()
-  })
-  .strict();
-
-const AiClaimAnnotationSchema = z
-  .object({
-    text: z.string().min(1).max(900),
-    start: z.number().int().min(0).max(900),
-    end: z.number().int().min(1).max(900),
-    grounding: AiClaimGroundingSchema
+    category: z.enum(AI_REQUIREMENT_CATEGORIES),
+    mode: z.enum(AI_REQUIREMENT_MODES),
+    value: z.string().trim().min(1).max(240),
+    confidence: z.number().min(0).max(1),
+    evidence: AiTextEvidenceSchema
   })
   .strict();
 
@@ -175,8 +181,8 @@ export const GroundedAiTurnCandidateDecisionSchema = z
     intent: z.enum(AI_TURN_INTENTS),
     replyText: z.string().trim().min(1).max(900),
     extractedSlots: z.array(AiGroundedSlotCandidateSchema).max(AI_SLOT_NAMES.length),
+    extractedRequirements: z.array(AiGroundedRequirementCandidateSchema).max(24),
     requestedSlots: z.array(z.enum(AI_SLOT_NAMES)).max(1),
-    claims: z.array(AiClaimAnnotationSchema).max(24),
     riskFlags: z.array(z.enum(AI_RISK_FLAGS)).max(AI_RISK_FLAGS.length),
     handoffReason: z.enum(AI_HANDOFF_REASONS).nullable(),
     confidence: z.number().min(0).max(1)
@@ -184,8 +190,15 @@ export const GroundedAiTurnCandidateDecisionSchema = z
   .strict();
 
 export type AiTextEvidence = z.infer<typeof AiTextEvidenceSchema>;
+export type CatalogReference = z.infer<typeof CatalogReferenceSchema>;
 export type AiGroundedSlotCandidate = z.infer<typeof AiGroundedSlotCandidateSchema>;
-export type AiClaimAnnotation = z.infer<typeof AiClaimAnnotationSchema>;
+export type AiGroundedRequirementCandidate = z.infer<
+  typeof AiGroundedRequirementCandidateSchema
+>;
+export type AiRequirementUpdate = AiGroundedRequirementCandidate & {
+  source: "ai_extraction";
+  sourceMessageId: string;
+};
 export type GroundedAiTurnCandidateDecision = z.infer<
   typeof GroundedAiTurnCandidateDecisionSchema
 >;
@@ -260,10 +273,6 @@ export const AI_TURN_DECISION_JSON_SCHEMA = {
   ]
 } as const;
 
-const nullableObjectSchema = (schema: Record<string, unknown>) => ({
-  anyOf: [schema, { type: "null" }]
-});
-
 const AI_TEXT_EVIDENCE_JSON_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -274,18 +283,6 @@ const AI_TEXT_EVIDENCE_JSON_SCHEMA = {
     end: { type: "integer", minimum: 1, maximum: 12000 }
   },
   required: ["messageId", "quote", "start", "end"]
-} as const;
-
-const CATALOG_REFERENCE_JSON_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    recordId: { type: "string", minLength: 1, maxLength: 160 },
-    revision: { type: "integer", minimum: 1 },
-    path: { type: "string", maxLength: 300 },
-    catalogVersion: { type: "string", minLength: 1, maxLength: 160 }
-  },
-  required: ["recordId", "revision", "path", "catalogVersion"]
 } as const;
 
 export const GROUNDED_AI_TURN_DECISION_JSON_SCHEMA = {
@@ -311,40 +308,26 @@ export const GROUNDED_AI_TURN_DECISION_JSON_SCHEMA = {
         required: ["name", "value", "confidence", "evidence"]
       }
     },
-    requestedSlots: {
-      type: "array",
-      maxItems: 1,
-      items: stringEnumSchema(AI_SLOT_NAMES)
-    },
-    claims: {
+    extractedRequirements: {
       type: "array",
       maxItems: 24,
       items: {
         type: "object",
         additionalProperties: false,
         properties: {
-          text: { type: "string", minLength: 1, maxLength: 900 },
-          start: { type: "integer", minimum: 0, maximum: 900 },
-          end: { type: "integer", minimum: 1, maximum: 900 },
-          grounding: {
-            type: "object",
-            additionalProperties: false,
-            properties: {
-              kind: stringEnumSchema(AI_CLAIM_GROUNDING_KINDS),
-              catalogReference: nullableObjectSchema(CATALOG_REFERENCE_JSON_SCHEMA),
-              messageEvidence: nullableObjectSchema(AI_TEXT_EVIDENCE_JSON_SCHEMA),
-              systemPolicyId: { type: ["string", "null"], maxLength: 120 }
-            },
-            required: [
-              "kind",
-              "catalogReference",
-              "messageEvidence",
-              "systemPolicyId"
-            ]
-          }
+          category: stringEnumSchema(AI_REQUIREMENT_CATEGORIES),
+          mode: stringEnumSchema(AI_REQUIREMENT_MODES),
+          value: { type: "string", minLength: 1, maxLength: 240 },
+          confidence: { type: "number", minimum: 0, maximum: 1 },
+          evidence: AI_TEXT_EVIDENCE_JSON_SCHEMA
         },
-        required: ["text", "start", "end", "grounding"]
+        required: ["category", "mode", "value", "confidence", "evidence"]
       }
+    },
+    requestedSlots: {
+      type: "array",
+      maxItems: 1,
+      items: stringEnumSchema(AI_SLOT_NAMES)
     },
     riskFlags: {
       type: "array",
@@ -362,8 +345,8 @@ export const GROUNDED_AI_TURN_DECISION_JSON_SCHEMA = {
     "intent",
     "replyText",
     "extractedSlots",
+    "extractedRequirements",
     "requestedSlots",
-    "claims",
     "riskFlags",
     "handoffReason",
     "confidence"

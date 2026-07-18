@@ -958,6 +958,7 @@ function StructuredIntakeCard({
   const [reviewError, setReviewError] = useState<string | null>(null);
   const hasData =
     intake.slots.length > 0 ||
+    intake.requirements.length > 0 ||
     intake.conflicts.length > 0 ||
     Boolean(intake.handoff) ||
     Boolean(intake.verification);
@@ -1024,6 +1025,38 @@ function StructuredIntakeCard({
           AI пока не извлек структурированные параметры.
         </Text>
       )}
+
+      {intake.requirements.length ? (
+        <Box>
+          <Text size="xs" c="dimmed" fw={700} tt="uppercase" mb={6}>
+            Предпочтения и требования
+          </Text>
+          <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="sm">
+            {intake.requirements.map((requirement) => (
+              <Paper
+                key={`${requirement.publicConversationId}-${requirement.category}-${requirement.mode}-${requirement.value}`}
+                withBorder
+                p="sm"
+              >
+                <Text size="xs" c="dimmed" fw={700} tt="uppercase">
+                  {requirementCategoryLabel(requirement.category)} ·{" "}
+                  {requirementModeLabel(requirement.mode)}
+                </Text>
+                <Text fw={600}>{requirement.value}</Text>
+                <Text size="xs" c="dimmed">
+                  уверенность {Math.round(requirement.confidence * 100)}%
+                </Text>
+                <details>
+                  <summary>Показать подтверждение</summary>
+                  <Text size="sm" mt={4}>
+                    «{requirement.evidence.quote}»
+                  </Text>
+                </details>
+              </Paper>
+            ))}
+          </SimpleGrid>
+        </Box>
+      ) : null}
 
       {intake.missingFields.length ? (
         <Box>
@@ -1106,6 +1139,30 @@ function StructuredIntakeCard({
       ) : null}
     </Section>
   );
+}
+
+function requirementCategoryLabel(
+  category: ManagerLeadDetail["structuredIntake"]["requirements"][number]["category"]
+): string {
+  return {
+    style: "Стиль",
+    color: "Цвет",
+    shape: "Форма",
+    accessory: "Аксессуар",
+    decoration: "Оформление",
+    site_constraint: "Особенность участка",
+    other: "Другое"
+  }[category];
+}
+
+function requirementModeLabel(
+  mode: ManagerLeadDetail["structuredIntake"]["requirements"][number]["mode"]
+): string {
+  return {
+    preference: "предпочтение",
+    requirement: "обязательно",
+    avoidance: "исключить"
+  }[mode];
 }
 
 function ConversationHistory({

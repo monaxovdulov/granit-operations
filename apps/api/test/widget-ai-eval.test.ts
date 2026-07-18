@@ -76,4 +76,41 @@ describe("widget AI review and regression loop", () => {
       failures: []
     });
   });
+
+  it("checks extracted values, message evidence, grounding coverage and latency", () => {
+    const evalCase = WIDGET_AI_REGRESSION_CORPUS.find(
+      (entry) => entry.caseId === "extract_monument_type"
+    )!;
+    const result = runWidgetAiEvalCase(evalCase, {
+      action: "clarify",
+      replyText: "Понял. Какой материал рассматриваете?",
+      requestedSlots: ["material"],
+      slotUpdates: [
+        {
+          name: "monumentType",
+          value: "одинарный",
+          evidence: {
+            messageId: "11111111-1111-4111-8111-111111111111",
+            quote: "двойной памятник",
+            start: 6,
+            end: 22
+          }
+        }
+      ],
+      groundingVerified: false,
+      claimCoverageComplete: false,
+      verifierViolations: ["unnatural_tone"],
+      latencyMs: 25_000
+    });
+
+    expect(result.failures).toEqual(
+      expect.arrayContaining([
+        "wrong_extracted_value:monumentType",
+        "grounding_not_verified",
+        "claim_coverage_incomplete",
+        "latency_exceeded:20000",
+        "semantic_quality_violation"
+      ])
+    );
+  });
 });

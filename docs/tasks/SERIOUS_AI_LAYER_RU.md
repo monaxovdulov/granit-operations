@@ -1,10 +1,12 @@
 # Task: SERIOUS_AI_LAYER - План серьезного AI-слоя
 
-Status: S06 local stabilization completed; future AI-core plan remains planned
+Status: historical planning record; current grounded implementation is documented in `docs/AI_POLICY.md`
 Created: 2026-05-15
 Repo: `granit-operations`
 Slice: AI-S06+
 Owner/agent: Codex
+
+Update 2026-07-18: пункты AI-S07/S09 и основная grounded orchestration уже реализованы локально. Актуальные решения, ограничения и отложенный каталог описаны в `docs/superpowers/specs/2026-07-17-grounded-live-widget-consultant-design.md`; инструкция владельцу — в `docs/AI_ASSISTANT_OWNER_INPUT_GUIDE_RU.md`. Остальной текст ниже сохранен как исторический контекст и не является текущим статусом runtime.
 
 ## Цель
 

@@ -1,6 +1,10 @@
 import type { SiteFormUtm, SiteWidgetUtm } from "@granit/contracts";
 
-import type { AiSlotName } from "../../ai/ai-dialog-contract.js";
+import type {
+  AiRequirementCategory,
+  AiRequirementMode,
+  AiSlotName
+} from "../../ai/ai-dialog-contract.js";
 
 import type {
   AiState,
@@ -117,6 +121,20 @@ export type ManagerStructuredIntakeSlot = {
 
 export type ManagerStructuredIntake = {
   slots: ManagerStructuredIntakeSlot[];
+  requirements: Array<{
+    publicConversationId: string;
+    category: AiRequirementCategory;
+    mode: AiRequirementMode;
+    value: string;
+    sourceMessageId: string;
+    confidence: number;
+    evidence: {
+      quote: string;
+      start: number;
+      end: number;
+    };
+    updatedAt: string;
+  }>;
   conflicts: Array<{
     publicConversationId: string;
     name: AiSlotName;

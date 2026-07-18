@@ -1,10 +1,22 @@
 # Дизайн: живой grounded-консультант Granit
 
-Status: approved design
+Status: approved design with implementation amendment
 
 Date: 2026-07-17
 
+Implementation amendment: 2026-07-18
+
 Repository: `granit-operations` with paired consumer changes in `granit-site-cms`
+
+Изменения, уточненные реализацией 2026-07-18, имеют приоритет над первоначальными формулировками ниже:
+
+- factual spans извлекает verifier из готового ответа; dialogue model больше не размечает claims и offsets;
+- verifier обязан вернуть полное покрытие claims и ровно один verdict для каждого slot/requirement candidate;
+- `handoff` исполняется сразу app-owned ответом и никогда не проходит repair; repair остается ровно один и только для verdict `repair`;
+- shadow не задерживает legacy-ответ и сохраняет полное сравнение асинхронно;
+- при включенном website AI новый runtime по умолчанию работает в `enforce`, а `off` является явным rollback;
+- к 13 typed slots добавлены evidence-backed preferences/requirements и app-owned rolling summary старого контекста;
+- внешний каталог и domain-knowledge слой по-прежнему не входят в поставку; используется пустой provider.
 
 ## 1. Результат
 
@@ -72,7 +84,7 @@ Regex больше не определяют intent, handoff, юридическ
 
 ### `AiDecisionValidator`
 
-Проверяет JSON schema, версии, допустимые enum, catalog references, slot evidence, количество вопросов и согласованность typed action. Он не пытается понять естественный язык regex-правилами.
+Проверяет JSON schema, версии, допустимые enum, slot/requirement evidence, количество вопросов и согласованность typed action. Catalog references и полное покрытие фактических spans проверяются по независимому результату verifier. Валидатор не пытается понять естественный язык policy-regex правилами.
 
 ### `AiSlotEvidenceService`
 
@@ -80,7 +92,7 @@ Regex больше не определяют intent, handoff, юридическ
 
 ### `AiSemanticVerifier`
 
-Независимо анализирует готовый `replyText`, не доверяя claim annotations основной модели. Возвращает typed verdict и controlled violation codes.
+Независимо анализирует готовый `replyText` и сам извлекает factual spans, не полагаясь на разметку основной модели. Возвращает typed verdict и controlled violation codes.
 
 ### `AiRepairService`
 
@@ -101,10 +113,10 @@ Regex больше не определяют intent, handoff, юридическ
 3. `CatalogKnowledgePort` возвращает snapshot и релевантные записи. Пустой snapshot допустим.
 4. Dialogue model получает историю, slots, текущий вопрос и только выбранные catalog records.
 5. Model возвращает свободный `replyText` и typed decision.
-6. App валидирует структуру, ссылки, evidence и state-independent invariants.
-7. Semantic verifier независимо классифицирует все утверждения и проверяет action.
-8. При `repair` выполняется одна исправляющая генерация и повторная проверка.
-9. При `pass` приложение повторно читает send-time gate, атомарно сохраняет slot updates/run/outbound/handoff и возвращает ответ.
+6. App валидирует структуру, evidence и state-independent invariants.
+7. Semantic verifier независимо извлекает и классифицирует все factual spans, проверяет action и каждый slot/requirement candidate.
+8. При `handoff` приложение немедленно выполняет app-owned передачу. Только при `repair` выполняется одна исправляющая генерация и повторная проверка; новый `handoff` после нее также исполняется сразу.
+9. При `pass` приложение повторно читает send-time gate, атомарно сохраняет slot/requirement updates, run и outbound, затем возвращает ответ.
 10. При `block`, verifier failure или timeout inbound не теряется; создается degradation evidence и безопасный public result.
 
 Модель не пишет напрямую в Postgres, не переключает AI state и не отправляет сообщения в канал.
@@ -117,20 +129,20 @@ Decision содержит:
 - action и intent;
 - свободный `replyText`;
 - extracted slots;
+- extracted flexible requirements/preferences/avoidances;
 - requested slot, максимум один;
-- claim annotations;
 - risk flags;
 - handoff reason;
 - confidence.
 
-Claim annotation указывает span в `replyText` и grounding reference:
+Dialogue model не размечает factual spans: совмещать естественную генерацию с надежным вычислением offsets оказалось лишней и обходной границей доверия. Verifier независимо возвращает для каждого найденного фактического span точные offsets и grounding reference:
 
 - catalog record + revision + normalized path для бизнес-факта;
 - message ID + quote + offsets для факта о клиенте;
 - system policy ID для app-owned boundary/disclosure;
-- `conversation_only` для нейтральной связки без фактического утверждения.
+- `conversation_only` только для нейтральной связки без проверяемого фактического утверждения.
 
-Annotations помогают аудиту, но не являются доказательством сами по себе: verifier повторно сегментирует весь текст и может обнаружить неразмеченный факт.
+Приложение требует согласованности `factualClaimsPresent`, полного покрытия и валидности всех references. Пустой массив verdicts не может подтвердить ответ, содержащий фактические утверждения.
 
 ## 7. Evidence-backed slots
 
@@ -158,7 +170,7 @@ Verifier возвращает один из verdict:
 - `handoff`;
 - `block`.
 
-`handoff` означает обязательное app-owned действие, а не разрешение отправить исходный draft. Если draft не соответствует required handoff, оркестратор сначала пытается получить исправленный текст в пределах budget, а затем использует безопасный app-owned handoff response. `block` никогда не отправляет исходный draft.
+`handoff` означает немедленное обязательное app-owned действие, а не разрешение отправить исходный draft. Оркестратор не тратит deadline на repair такого решения. Если повторный verifier после единственной repair-попытки вернул `handoff`, он также исполняется немедленно. `block` никогда не отправляет исходный draft.
 
 Controlled violations включают:
 
@@ -166,6 +178,8 @@ Controlled violations включают:
 - `invalid_catalog_reference`;
 - `expired_commercial_fact`;
 - `invalid_slot_evidence`;
+- `invalid_requirement_evidence`;
+- `incomplete_claim_coverage`;
 - `commercial_promise`;
 - `legal_advice`;
 - `missed_manager_request`;
@@ -223,7 +237,10 @@ Additive persistence хранит:
 
 - `ai_runs`: generator/verifier model identities, prompt/policy/schema versions, catalog snapshot identity, latency, tokens, verdict и controlled violations;
 - slot evidence и версии конфликтов;
+- flexible requirements/preferences/avoidances с message evidence;
+- app-owned rolling summary старой части диалога;
 - verifier result без chain-of-thought;
+- полные асинхронные legacy/grounded shadow comparisons;
 - `ai_review_labels`;
 - sanitized `ai_eval_cases`;
 - `ai_eval_runs`;
@@ -236,6 +253,7 @@ Raw chain-of-thought, secrets и неограниченные provider payloads 
 `ManagerLeadDetail` получает `structuredIntake`:
 
 - slots со значением, provenance, evidence и временем;
+- гибкие требования и предпочтения со значением, режимом и цитатой;
 - конфликты;
 - использованные catalog references;
 - известные и отсутствующие параметры;
@@ -266,8 +284,8 @@ UI использует server-owned state:
 Eval runner:
 
 - вызывает настоящий generator и verifier;
-- воспроизводит history и known slots по turn;
-- проверяет action, grounding, slot evidence, повторные вопросы, handoff и тон;
+- воспроизводит history, known slots, flexible requirements и rolling memory по turn;
+- проверяет action, extracted values, grounding, evidence, claim coverage, повторные вопросы, handoff, полезность, естественность и latency;
 - сохраняет latency, usage, versions и причины отказа;
 - поддерживает promotion обезличенного manager review в regression case.
 
@@ -286,16 +304,18 @@ Eval runner:
 Новый pipeline имеет режимы:
 
 - `off`: текущий путь;
-- `shadow`: новый generator/verifier выполняется, но не определяет public outbound; результаты сравниваются и сохраняются;
+- `shadow`: legacy public outbound возвращается без ожидания нового generator/verifier; полное сравнение результатов и latency сохраняется асинхронно;
 - `enforce`: клиент получает только verified result.
+
+Если `AI_WIDGET_ENABLED=true`, отсутствие или неизвестное значение режима трактуется как `enforce`; `off` задается явно как rollback. Сам флаг website AI по умолчанию остается выключенным, поэтому это не является автоматическим production enablement.
 
 Порядок: local tests -> live eval -> staging -> shadow -> owner-reviewed enforce. Реализация не включает production enablement или deploy.
 
 ## 17. Реализационные срезы
 
 1. Internal contracts, `CatalogKnowledgePort`, empty provider и refactoring seams.
-2. Typed claims, slot evidence, semantic verifier и bounded repair.
-3. Additive persistence, manager structured intake и notifications.
+2. Verifier-owned claims, slot/requirement evidence, semantic verifier и bounded repair.
+3. Additive persistence, rolling memory, manager structured intake и notifications.
 4. Widget server-owned states и degradation UX.
 5. Executable eval corpus, live runner и rollout modes.
 
@@ -306,17 +326,19 @@ Machine-readable каталог и адаптер к его будущему в�
 Работа считается завершенной, когда:
 
 1. Ни один regex не принимает semantic/policy decision.
-2. Каждый сохраненный AI-slot имеет проверяемое message evidence.
+2. Каждый сохраненный AI-slot и requirement имеет проверяемое message evidence, которое поддерживает именно сохраненное значение.
 3. Каждый business claim либо имеет актуальный catalog reference, либо блокируется.
-4. Пустой catalog provider поддерживается без выдуманных фактов и потери inbound.
-5. Unsupported claim не проходит send-time gate.
-6. Manager takeover блокирует stale draft.
-7. Manager видит structured intake, evidence, conflicts и verifier status.
-8. После handoff widget не показывает AI pending state.
-9. Live eval действительно вызывает generator и verifier на 30–50 multi-turn cases.
-10. Hard-safety cases проходят полностью; quality threshold измеряется отдельно.
-11. p95 verified-turn соответствует цели 15 секунд в staging evidence.
-12. Backend tests/typecheck, migrations, manager checks, site checks/build и live eval проходят.
+4. Verifier возвращает полное factual claim coverage и ровно один уникальный verdict для каждого извлеченного slot/requirement.
+5. Пустой catalog provider поддерживается без выдуманных фактов и потери inbound.
+6. Unsupported claim не проходит send-time gate.
+7. Manager takeover блокирует stale draft.
+8. Manager видит structured intake, evidence, requirements, conflicts и verifier status.
+9. После handoff widget не показывает AI pending state.
+10. Shadow не увеличивает latency public legacy-ответа.
+11. Live eval действительно вызывает generator и verifier на 30–50 multi-turn cases.
+12. Hard-safety cases проходят полностью; quality threshold измеряется отдельно.
+13. p95 verified-turn соответствует цели 15 секунд в staging evidence.
+14. Backend tests/typecheck, migrations, manager checks, site checks/build и live eval проходят.
 
 ## 19. Не входит в scope
 

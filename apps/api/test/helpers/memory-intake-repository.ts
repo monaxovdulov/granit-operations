@@ -43,6 +43,7 @@ import {
   type RecordManualContactInput,
   type RecordAiReviewLabelInput,
   type RecordSiteWidgetAiDegradationInput,
+  type RecordSiteWidgetAiShadowComparisonInput,
   type SaveAcceptedSiteFormSubmissionInput,
   type SaveAcceptedSiteFormSubmissionResult,
   type SaveAcceptedSiteWidgetMessageInput,
@@ -60,6 +61,7 @@ export class MemoryIntakeRepository implements IntakeRepository {
   saveCalls = 0;
   aiSaveCalls = 0;
   lastAiSaveInput?: SaveSiteWidgetAiMessageInput;
+  readonly shadowComparisons: RecordSiteWidgetAiShadowComparisonInput[] = [];
   private readonly leads = new Map<string, ManagerLeadDetail>();
   private readonly idempotency = new Map<
     string,
@@ -106,6 +108,10 @@ export class MemoryIntakeRepository implements IntakeRepository {
   private readonly publicConversationIds = new Map<string, string>();
   private readonly conversationIdentityIds = new Map<string, string>();
   private readonly aiSlotsByConversation = new Map<string, AiKnownSlots>();
+  private readonly aiRequirementsByConversation = new Map<
+    string,
+    AiTurnInput["knownRequirements"]
+  >();
   private readonly telegramIdentityLeads = new Map<string, string>();
   private readonly telegramIdentityConversations = new Map<string, string>();
   private readonly telegramProviderMessages = new Map<string, string>();
@@ -494,7 +500,13 @@ export class MemoryIntakeRepository implements IntakeRepository {
             conversation?.messages ?? [],
             existing.publicMessageId
           ),
-          persistedSlots: this.aiSlotsByConversation.get(conversationId) ?? {}
+          rollingSummary: toMemoryAiRollingSummary(
+            conversation?.messages ?? [],
+            existing.publicMessageId
+          ),
+          persistedSlots: this.aiSlotsByConversation.get(conversationId) ?? {},
+          persistedRequirements:
+            this.aiRequirementsByConversation.get(conversationId) ?? []
         })
       };
     }
@@ -609,7 +621,13 @@ export class MemoryIntakeRepository implements IntakeRepository {
           conversation?.messages ?? [],
           input.publicMessageId
         ),
-        persistedSlots: this.aiSlotsByConversation.get(conversationId) ?? {}
+        rollingSummary: toMemoryAiRollingSummary(
+          conversation?.messages ?? [],
+          input.publicMessageId
+        ),
+        persistedSlots: this.aiSlotsByConversation.get(conversationId) ?? {},
+        persistedRequirements:
+          this.aiRequirementsByConversation.get(conversationId) ?? []
       })
     };
   }
@@ -787,6 +805,7 @@ export class MemoryIntakeRepository implements IntakeRepository {
 
       updatedLead.structuredIntake = {
         slots: slotEntries,
+        requirements: updatedLead.structuredIntake.requirements,
         conflicts,
         missingFields: CORE_STRUCTURED_INTAKE_SLOTS.filter((name) => !knownNames.has(name)),
         handoff: input.handoff
@@ -811,6 +830,56 @@ export class MemoryIntakeRepository implements IntakeRepository {
               createdAt
             }
           : updatedLead.structuredIntake.verification
+      };
+    }
+
+    if (input.requirementUpdates?.length) {
+      const requirements = [
+        ...(this.aiRequirementsByConversation.get(input.conversationId) ?? [])
+      ];
+
+      for (const requirement of input.requirementUpdates) {
+        const existingIndex = requirements.findIndex(
+          (candidate) =>
+            candidate.category === requirement.category &&
+            candidate.mode === requirement.mode &&
+            candidate.value === requirement.value
+        );
+        const persisted: AiTurnInput["knownRequirements"][number] = {
+          category: requirement.category,
+          mode: requirement.mode,
+          value: requirement.value,
+          source: requirement.source,
+          sourceMessageId: requirement.sourceMessageId,
+          evidence: requirement.evidence,
+          confidence: requirement.confidence,
+          updatedAt: createdAt
+        };
+
+        if (existingIndex >= 0) {
+          requirements[existingIndex] = persisted;
+        } else {
+          requirements.push(persisted);
+        }
+      }
+
+      this.aiRequirementsByConversation.set(input.conversationId, requirements.slice(-60));
+      updatedLead.structuredIntake = {
+        ...updatedLead.structuredIntake,
+        requirements: requirements.map((requirement) => ({
+          publicConversationId: conversation.publicConversationId,
+          category: requirement.category,
+          mode: requirement.mode,
+          value: requirement.value,
+          sourceMessageId: requirement.sourceMessageId,
+          confidence: requirement.confidence,
+          evidence: {
+            quote: requirement.evidence.quote,
+            start: requirement.evidence.start,
+            end: requirement.evidence.end
+          },
+          updatedAt: requirement.updatedAt
+        }))
       };
     }
 
@@ -919,6 +988,19 @@ export class MemoryIntakeRepository implements IntakeRepository {
           : conversation
       )
     });
+  }
+
+  async recordSiteWidgetAiShadowComparison(
+    input: RecordSiteWidgetAiShadowComparisonInput
+  ): Promise<void> {
+    if (
+      !this.shadowComparisons.some(
+        (comparison) =>
+          comparison.inboundPublicMessageId === input.inboundPublicMessageId
+      )
+    ) {
+      this.shadowComparisons.push(structuredClone(input));
+    }
   }
 
   async getSiteWidgetHistory(publicSessionId: string): Promise<SiteWidgetHistoryResult | null> {
@@ -1680,7 +1762,9 @@ function buildMemorySiteWidgetAiTurnInput(
   },
   context: {
     recentMessages: AiTurnInput["compactContext"]["messages"];
+    rollingSummary?: AiTurnInput["compactContext"]["rollingSummary"];
     persistedSlots: AiKnownSlots;
+    persistedRequirements: AiTurnInput["knownRequirements"];
   }
 ): AiTurnInput {
   return buildStageASiteWidgetAiTurnInput({
@@ -1711,7 +1795,9 @@ function buildMemorySiteWidgetAiTurnInput(
       agentAllowedToReply: accepted.agentAllowedToReply
     },
     recentMessages: context.recentMessages,
-    persistedSlots: context.persistedSlots
+    rollingSummary: context.rollingSummary,
+    persistedSlots: context.persistedSlots,
+    persistedRequirements: context.persistedRequirements
   });
 }
 
@@ -1757,6 +1843,40 @@ function toMemoryAiRecentMessages(
   }
 
   return bounded;
+}
+
+function toMemoryAiRollingSummary(
+  messages: ManagerLeadDetail["conversations"][number]["messages"],
+  currentPublicMessageId: string
+): AiTurnInput["compactContext"]["rollingSummary"] | undefined {
+  const eligible = messages.filter(
+    (message) =>
+      message.publicMessageId !== currentPublicMessageId &&
+      message.contentType === "text" &&
+      (message.direction === "inbound" || message.direction === "outbound") &&
+      (message.senderRole === "visitor" || message.senderRole === "ai_assistant") &&
+      message.body.trim()
+  );
+  const older = eligible.slice(0, Math.max(0, eligible.length - 12));
+
+  if (!older.length) {
+    return undefined;
+  }
+
+  const summary = older
+    .map((message) => {
+      const speaker = message.senderRole === "visitor" ? "Клиент" : "Ассистент";
+      return `[${message.createdAt}] ${speaker}: ${message.body.trim()}`;
+    })
+    .join("\n");
+  const bounded = summary.length <= 12_000 ? summary : summary.slice(-12_000);
+  const covered = older.at(-1)!;
+
+  return {
+    text: bounded,
+    coveredThroughPublicMessageId: covered.publicMessageId,
+    updatedAt: covered.createdAt
+  };
 }
 
 function toManagerTelegramLead(
@@ -1885,6 +2005,7 @@ const CORE_STRUCTURED_INTAKE_SLOTS: readonly AiSlotName[] = [
 function emptyStructuredIntake(): ManagerLeadDetail["structuredIntake"] {
   return {
     slots: [],
+    requirements: [],
     conflicts: [],
     missingFields: [...CORE_STRUCTURED_INTAKE_SLOTS]
   };

@@ -2,7 +2,11 @@ import type {
   AiHandoffReason,
   AiKnownSlots,
   AiRiskFlag,
+  AiRequirementCategory,
+  AiRequirementMode,
+  AiRequirementUpdate,
   AiSlotName,
+  AiTextEvidence,
   AiSlotUpdate,
   AiTurnAction,
   AiTurnIntent,
@@ -13,7 +17,7 @@ import {
   type ApprovedWidgetKnowledgeFact
 } from "./knowledge/approved-widget-knowledge.js";
 
-export const AI_TURN_INPUT_VERSION = "granit_ai_turn_input.stage_b.v1";
+export const AI_TURN_INPUT_VERSION = "granit_ai_turn_input.stage_b.v2";
 
 export type AiReplyCapableChannel = "site_widget";
 
@@ -78,6 +82,11 @@ export type AiTurnInput = {
       submittedAt: string;
       text: string;
     }>;
+    rollingSummary?: {
+      text: string;
+      coveredThroughPublicMessageId: string;
+      updatedAt: string;
+    };
   };
   knownSlots: {
     customerNameProvided: boolean;
@@ -87,6 +96,16 @@ export type AiTurnInput = {
     city?: string;
     values: AiKnownSlots;
   };
+  knownRequirements: Array<{
+    category: AiRequirementCategory;
+    mode: AiRequirementMode;
+    value: string;
+    source: "ai_extraction" | "manager";
+    sourceMessageId: string;
+    evidence: AiTextEvidence;
+    confidence: number;
+    updatedAt: string;
+  }>;
   boundaryConfig: {
     replyCapableChannel: AiReplyCapableChannel;
     maxClarifyingQuestions: 1;
@@ -130,6 +149,7 @@ export type AiReplyCandidateDecision =
       action?: AiTurnAction;
       intent?: AiTurnIntent;
       slotUpdates?: AiSlotUpdate[];
+      requirementUpdates?: AiRequirementUpdate[];
       requestedSlots?: AiSlotName[];
       riskFlags?: AiRiskFlag[];
       handoffReason?: AiHandoffReason;
@@ -184,7 +204,9 @@ export type BuildStageASiteWidgetAiTurnInput = {
     agentAllowedToReply: boolean;
   };
   recentMessages?: AiTurnInput["compactContext"]["messages"];
+  rollingSummary?: AiTurnInput["compactContext"]["rollingSummary"];
   persistedSlots?: AiKnownSlots;
+  persistedRequirements?: AiTurnInput["knownRequirements"];
 };
 
 export function buildStageASiteWidgetAiTurnInput(
@@ -219,8 +241,10 @@ export function buildStageASiteWidgetAiTurnInput(
     customer: input.customer,
     visitor: input.visitor,
     compactContext: {
-      messages: input.recentMessages ?? []
+      messages: input.recentMessages ?? [],
+      rollingSummary: input.rollingSummary
     },
+    knownRequirements: input.persistedRequirements ?? [],
     knownSlots: {
       customerNameProvided: Boolean(input.customer.name),
       phoneProvided: input.customer.phoneProvided,

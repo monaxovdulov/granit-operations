@@ -1,6 +1,12 @@
-import type { AiSlotName, AiTurnAction } from "../ai-dialog-contract.js";
+import type {
+  AiRequirementCategory,
+  AiRequirementMode,
+  AiSlotName,
+  AiTextEvidence,
+  AiTurnAction
+} from "../ai-dialog-contract.js";
 
-export const WIDGET_AI_EVAL_CORPUS_VERSION = "granit_widget_eval.real_dialogs.v2";
+export const WIDGET_AI_EVAL_CORPUS_VERSION = "granit_widget_eval.real_dialogs.v4";
 
 export const AI_EVAL_LABELS = [
   "wrong_intent",
@@ -35,6 +41,20 @@ export type WidgetAiEvalCase = {
     action: AiTurnAction;
     requestedSlot?: AiSlotName;
     forbiddenPhrases: string[];
+    extractedSlots?: Partial<
+      Record<AiSlotName, { value: string; evidenceIncludes: string }>
+    >;
+    requirements?: Array<{
+      category: AiRequirementCategory;
+      mode: AiRequirementMode;
+      value: string;
+      evidenceIncludes: string;
+    }>;
+    requireGroundingVerified?: boolean;
+    requireClaimCoverage?: boolean;
+    maxLatencyMs?: number;
+    minReplyCharacters?: number;
+    requiredPhrasesAny?: string[];
   };
 };
 
@@ -42,6 +62,22 @@ export type WidgetAiEvalOutput = {
   action: AiTurnAction;
   replyText: string;
   requestedSlots: AiSlotName[];
+  slotUpdates?: Array<{
+    name: AiSlotName;
+    value: string;
+    evidence?: AiTextEvidence;
+  }>;
+  requirementUpdates?: Array<{
+    category: AiRequirementCategory;
+    mode: AiRequirementMode;
+    value: string;
+    evidence: AiTextEvidence;
+  }>;
+  groundingVerified?: boolean;
+  claimCoverageComplete?: boolean;
+  verifierVerdict?: string;
+  verifierViolations?: string[];
+  latencyMs?: number;
 };
 
 export const WIDGET_AI_REGRESSION_CORPUS: WidgetAiEvalCase[] = [
@@ -129,27 +165,104 @@ export const WIDGET_AI_REGRESSION_CORPUS: WidgetAiEvalCase[] = [
   ], "handoff", undefined, {}, []),
   scenario("extract_monument_type", "slot_extraction", "wrong_intent", [
     "Нужен двойной памятник."
-  ], "clarify", "material", {}, ["одинарный"]),
+  ], "clarify", "material", {}, ["одинарный"], {
+    extractedSlots: {
+      monumentType: { value: "двойной", evidenceIncludes: "двойной памятник" }
+    }
+  }),
   scenario("extract_material", "slot_extraction", "wrong_intent", [
     "Хочу черный гранит."
-  ], "clarify", "monumentType", {}, ["материал не указан"]),
+  ], "clarify", "monumentType", {}, ["материал не указан"], {
+    extractedSlots: {
+      material: { value: "черный гранит", evidenceIncludes: "черный гранит" }
+    }
+  }),
   scenario("extract_size", "slot_extraction", "wrong_intent", [
     "Размер где-то 120 на 60 сантиметров."
-  ], "clarify", "monumentType", {}, ["размер не указан"]),
+  ], "clarify", "monumentType", {}, ["размер не указан"], {
+    extractedSlots: {
+      size: { value: "120 на 60 сантиметров", evidenceIncludes: "120 на 60 сантиметров" }
+    }
+  }),
   scenario("extract_cemetery", "slot_extraction", "wrong_intent", [
     "Установка будет на Арском кладбище в Казани."
-  ], "clarify", "monumentType", {}, ["какое кладбище"]),
+  ], "clarify", "monumentType", {}, ["какое кладбище"], {
+    extractedSlots: {
+      cemetery: { value: "Арское кладбище", evidenceIncludes: "Арском кладбище" },
+      city: { value: "Казань", evidenceIncludes: "Казани" }
+    }
+  }),
   scenario("extract_timing", "slot_extraction", "wrong_intent", [
     "Хотелось бы установить к началу сентября."
-  ], "clarify", "monumentType", {}, ["к какому сроку"]),
+  ], "clarify", "monumentType", {}, ["к какому сроку"], {
+    extractedSlots: {
+      desiredTiming: { value: "к началу сентября", evidenceIncludes: "к началу сентября" }
+    }
+  }),
   scenario("correct_previous_material", "slot_extraction", "wrong_intent", [
     "Материал записан: черный гранит.",
     "Нет, исправьте: хочу серый гранит."
-  ], "answer", undefined, { material: "черный гранит" }, ["черный гранит записал"]),
+  ], "answer", undefined, { material: "черный гранит" }, ["черный гранит записал"], {
+    extractedSlots: {
+      material: { value: "серый гранит", evidenceIncludes: "серый гранит" }
+    }
+  }),
   scenario("correct_previous_size", "slot_extraction", "wrong_intent", [
     "Размер записан: 120 на 60.",
     "Исправьте размер на 100 на 50."
-  ], "answer", undefined, { size: "120 на 60" }, ["120 на 60 записал"]),
+  ], "answer", undefined, { size: "120 на 60" }, ["120 на 60 записал"], {
+    extractedSlots: {
+      size: { value: "100 на 50", evidenceIncludes: "100 на 50" }
+    }
+  }),
+  scenario("extract_style_preference", "slot_extraction", "wrong_intent", [
+    "Хочу современный лаконичный стиль."
+  ], "clarify", "monumentType", {}, [], {
+    requirements: [
+      {
+        category: "style",
+        mode: "preference",
+        value: "современный лаконичный стиль",
+        evidenceIncludes: "современный лаконичный стиль"
+      }
+    ]
+  }),
+  scenario("extract_color_avoidance", "slot_extraction", "wrong_intent", [
+    "Только не красный цвет."
+  ], "clarify", "monumentType", {}, [], {
+    requirements: [
+      {
+        category: "color",
+        mode: "avoidance",
+        value: "красный цвет",
+        evidenceIncludes: "не красный цвет"
+      }
+    ]
+  }),
+  scenario("extract_site_constraint", "slot_extraction", "wrong_intent", [
+    "На участке узкий проход шириной 90 сантиметров."
+  ], "clarify", "monumentType", {}, [], {
+    requirements: [
+      {
+        category: "site_constraint",
+        mode: "requirement",
+        value: "проход шириной 90 сантиметров",
+        evidenceIncludes: "проход шириной 90 сантиметров"
+      }
+    ]
+  }),
+  scenario("extract_accessory_requirement", "slot_extraction", "wrong_intent", [
+    "Обязательно нужна ваза для цветов."
+  ], "clarify", "monumentType", {}, [], {
+    requirements: [
+      {
+        category: "accessory",
+        mode: "requirement",
+        value: "ваза для цветов",
+        evidenceIncludes: "ваза для цветов"
+      }
+    ]
+  }),
   scenario("short_yes_with_context", "multi_turn", "wrong_intent", [
     "Нужна установка?",
     "Да."
@@ -229,6 +342,99 @@ export function runWidgetAiEvalCase(
     }
   }
 
+  for (const [name, expectedSlot] of Object.entries(
+    evalCase.expected.extractedSlots ?? {}
+  ) as Array<[
+    AiSlotName,
+    NonNullable<WidgetAiEvalCase["expected"]["extractedSlots"]>[AiSlotName]
+  ]>) {
+    const actual = output.slotUpdates?.find((slot) => slot.name === name);
+
+    if (!actual) {
+      failures.push(`missing_extracted_slot:${name}`);
+      continue;
+    }
+
+    if (normalizeForEval(actual.value) !== normalizeForEval(expectedSlot!.value)) {
+      failures.push(`wrong_extracted_value:${name}`);
+    }
+
+    if (
+      !actual.evidence ||
+      !normalizeForEval(actual.evidence.quote).includes(
+        normalizeForEval(expectedSlot!.evidenceIncludes)
+      ) ||
+      !hasExactEvalEvidence(evalCase, actual.evidence)
+    ) {
+      failures.push(`invalid_extracted_evidence:${name}`);
+    }
+  }
+
+  for (const expectedRequirement of evalCase.expected.requirements ?? []) {
+    const actual = output.requirementUpdates?.find(
+      (requirement) =>
+        requirement.category === expectedRequirement.category &&
+        requirement.mode === expectedRequirement.mode &&
+        normalizeForEval(requirement.value) === normalizeForEval(expectedRequirement.value)
+    );
+
+    if (!actual) {
+      failures.push(
+        `missing_requirement:${expectedRequirement.category}:${expectedRequirement.mode}`
+      );
+    } else if (
+      !normalizeForEval(actual.evidence.quote).includes(
+        normalizeForEval(expectedRequirement.evidenceIncludes)
+      ) ||
+      !hasExactEvalEvidence(evalCase, actual.evidence)
+    ) {
+      failures.push(`invalid_requirement_evidence:${expectedRequirement.category}`);
+    }
+  }
+
+  if (evalCase.expected.requireGroundingVerified && !output.groundingVerified) {
+    failures.push("grounding_not_verified");
+  }
+
+  if (evalCase.expected.requireClaimCoverage && !output.claimCoverageComplete) {
+    failures.push("claim_coverage_incomplete");
+  }
+
+  if (
+    evalCase.expected.maxLatencyMs !== undefined &&
+    (output.latencyMs === undefined || output.latencyMs > evalCase.expected.maxLatencyMs)
+  ) {
+    failures.push(`latency_exceeded:${evalCase.expected.maxLatencyMs}`);
+  }
+
+  if (
+    evalCase.expected.minReplyCharacters !== undefined &&
+    output.replyText.trim().length < evalCase.expected.minReplyCharacters
+  ) {
+    failures.push(`reply_too_short:${evalCase.expected.minReplyCharacters}`);
+  }
+
+  if (
+    evalCase.expected.requiredPhrasesAny?.length &&
+    !evalCase.expected.requiredPhrasesAny.some((phrase) =>
+      normalizedReply.includes(normalizeForEval(phrase))
+    )
+  ) {
+    failures.push("missing_required_answer_content");
+  }
+
+  if ((output.replyText.match(/\?/gu) ?? []).length > 1) {
+    failures.push("too_many_questions_in_reply");
+  }
+
+  if (
+    output.verifierViolations?.some(
+      (violation) => violation === "unhelpful_response" || violation === "unnatural_tone"
+    )
+  ) {
+    failures.push("semantic_quality_violation");
+  }
+
   return { passed: failures.length === 0, failures };
 }
 
@@ -248,7 +454,8 @@ function scenario(
   action: AiTurnAction,
   requestedSlot: AiSlotName | undefined,
   knownSlots: Partial<Record<AiSlotName, string>>,
-  forbiddenPhrases: string[]
+  forbiddenPhrases: string[],
+  additionalExpected: Partial<WidgetAiEvalCase["expected"]> = {}
 ): WidgetAiEvalCase {
   return {
     caseId,
@@ -259,6 +466,32 @@ function scenario(
       messages: messages.map(sanitizeAiEvalText),
       knownSlots
     },
-    expected: { action, requestedSlot, forbiddenPhrases }
+    expected: {
+      action,
+      requestedSlot,
+      forbiddenPhrases,
+      requireGroundingVerified: action !== "fallback",
+      requireClaimCoverage: action !== "fallback",
+      maxLatencyMs: 20_000,
+      minReplyCharacters: action === "fallback" ? undefined : 10,
+      ...additionalExpected
+    }
   };
+}
+
+function normalizeForEval(value: string): string {
+  return value.trim().toLocaleLowerCase("ru-RU").replaceAll("ё", "е");
+}
+
+function hasExactEvalEvidence(
+  evalCase: WidgetAiEvalCase,
+  evidence: AiTextEvidence
+): boolean {
+  return evalCase.sanitizedInput.messages.some(
+    (message) =>
+      evidence.start >= 0 &&
+      evidence.end > evidence.start &&
+      evidence.end <= message.length &&
+      message.slice(evidence.start, evidence.end) === evidence.quote
+  );
 }

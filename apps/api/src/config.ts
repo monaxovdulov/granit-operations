@@ -108,7 +108,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): ApiConfig {
 function parseWidgetAiGroundedMode(
   value: string | undefined
 ): "off" | "shadow" | "enforce" {
-  return value === "shadow" || value === "enforce" ? value : "off";
+  return value === "off" || value === "shadow" ? value : "enforce";
 }
 
 function parseIntegerEnv(

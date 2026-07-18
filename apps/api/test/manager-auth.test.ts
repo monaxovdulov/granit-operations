@@ -949,6 +949,7 @@ function toManagerLead(
 function emptyStructuredIntake(): ManagerLeadDetail["structuredIntake"] {
   return {
     slots: [],
+    requirements: [],
     conflicts: [],
     missingFields: [
       "monumentType",

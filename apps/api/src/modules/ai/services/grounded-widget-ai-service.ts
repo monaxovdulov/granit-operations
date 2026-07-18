@@ -32,6 +32,10 @@ import {
   type WidgetAiVerificationViolation,
   type WidgetAiVerifierResult
 } from "../verification/widget-ai-semantic-verifier.js";
+import {
+  validateWidgetAiVerification,
+  type WidgetAiVerificationContractIssue
+} from "../verification/widget-ai-verification-validator.js";
 import type { WidgetAiUsage } from "./widget-ai-service.js";
 
 export const GROUNDED_WIDGET_AI_POLICY_VERSION =
@@ -78,6 +82,7 @@ type GroundedAttempt = {
   verifierModelName: string;
   verifierResponseId?: string;
   verifierUsage?: WidgetAiUsage;
+  verificationIssues: WidgetAiVerificationContractIssue[];
 };
 
 export class GroundedWidgetAiService implements PublicWidgetAiReplyGenerator {
@@ -109,16 +114,21 @@ export class GroundedWidgetAiService implements PublicWidgetAiReplyGenerator {
         controller.signal
       );
 
-      if (initial && isPass(initial.verification, initial.decision)) {
-        return this.toReplyCandidate(input, snapshot, initial, startedAt);
+      if (initial?.verification.verdict === "handoff") {
+        return this.toSafeHandoff(input, snapshot, initial, startedAt);
       }
 
-      const requiredHandoff = initial?.verification.verdict === "handoff";
+      if (initial && isPass(initial)) {
+        return initial.decision.action === "handoff"
+          ? this.toSafeHandoff(input, snapshot, initial, startedAt)
+          : this.toReplyCandidate(input, snapshot, initial, startedAt);
+      }
+
       const remainingMs = deadlineMs - (Date.now() - startedAt);
 
       if (
         initial &&
-        (initial.verification.verdict === "repair" || requiredHandoff) &&
+        initial.verification.verdict === "repair" &&
         remainingMs >= (this.options.minimumRepairBudgetMs ?? 3500)
       ) {
         const repaired = await this.runAttempt(
@@ -133,25 +143,15 @@ export class GroundedWidgetAiService implements PublicWidgetAiReplyGenerator {
           controller.signal
         );
 
-        if (repaired && isPass(repaired.verification, repaired.decision)) {
-          return this.toReplyCandidate(input, snapshot, repaired, startedAt, true);
+        if (repaired?.verification.verdict === "handoff") {
+          return this.toSafeHandoff(input, snapshot, repaired, startedAt, true);
         }
-      }
 
-      if (requiredHandoff && initial) {
-        return safeHandoffResult(
-          input,
-          snapshot,
-          initial.verification,
-          {
-            ...this.baseMetadata(snapshot, startedAt),
-            model_provider: initial.generator.modelProvider,
-            model_name: initial.generator.modelName,
-            openai_response_id: initial.generator.responseId,
-            verifier_model_name: initial.verifierModelName,
-            verifier_response_id: initial.verifierResponseId
-          }
-        );
+        if (repaired && isPass(repaired)) {
+          return repaired.decision.action === "handoff"
+            ? this.toSafeHandoff(input, snapshot, repaired, startedAt, true)
+            : this.toReplyCandidate(input, snapshot, repaired, startedAt, true);
+        }
       }
 
       return this.unavailable(
@@ -212,12 +212,7 @@ export class GroundedWidgetAiService implements PublicWidgetAiReplyGenerator {
       },
       signal
     );
-    const validation = validateGroundedAiDecision(
-      generator.decision,
-      input,
-      snapshot,
-      selectedRecords
-    );
+    const validation = validateGroundedAiDecision(generator.decision, input);
 
     if (!validation.valid) {
       if (attempt === "initial" && !signal.aborted) {
@@ -229,14 +224,18 @@ export class GroundedWidgetAiService implements PublicWidgetAiReplyGenerator {
             code:
               issue === "invalid_slot_evidence"
                 ? "invalid_slot_evidence"
-                : issue === "invalid_catalog_reference"
-                ? "invalid_catalog_reference"
+                : issue === "invalid_requirement_evidence"
+                ? "invalid_requirement_evidence"
                 : "unsupported_claim",
             detail: issue,
             claimStart: null,
             claimEnd: null
           })),
+          factualClaimsPresent: false,
+          claimCoverageComplete: false,
+          claimVerdicts: [],
           slotVerdicts: [],
+          requirementVerdicts: [],
           confidence: 1
         };
 
@@ -244,7 +243,8 @@ export class GroundedWidgetAiService implements PublicWidgetAiReplyGenerator {
           decision: generator.decision,
           verification: syntheticVerification,
           generator,
-          verifierModelName: "app_structural_validation"
+          verifierModelName: "app_structural_validation",
+          verificationIssues: []
         };
       }
 
@@ -274,13 +274,22 @@ export class GroundedWidgetAiService implements PublicWidgetAiReplyGenerator {
       throw new SemanticVerifierCallError(error);
     }
 
+    const verificationIssues = validateWidgetAiVerification({
+      turn: input,
+      decision: validation.decision,
+      verification: verifierResult.verification,
+      snapshot,
+      selectedRecords
+    });
+
     return {
       decision: validation.decision,
       verification: verifierResult.verification,
       generator,
       verifierModelName: verifierResult.modelName,
       verifierResponseId: verifierResult.responseId,
-      verifierUsage: verifierResult.usage
+      verifierUsage: verifierResult.usage,
+      verificationIssues
     };
   }
 
@@ -306,6 +315,11 @@ export class GroundedWidgetAiService implements PublicWidgetAiReplyGenerator {
         source: "ai_extraction" as const,
         sourceMessageId: slot.evidence.messageId
       })),
+      requirementUpdates: attempt.decision.extractedRequirements.map((requirement) => ({
+        ...requirement,
+        source: "ai_extraction" as const,
+        sourceMessageId: requirement.evidence.messageId
+      })),
       requestedSlots: attempt.decision.requestedSlots,
       riskFlags: attempt.decision.riskFlags,
       handoffReason: attempt.decision.handoffReason ?? undefined,
@@ -319,6 +333,11 @@ export class GroundedWidgetAiService implements PublicWidgetAiReplyGenerator {
         verifier_response_id: attempt.verifierResponseId,
         verifier_verdict: attempt.verification.verdict,
         verifier_violations: attempt.verification.violations.map((item) => item.code),
+        verifier_contract_issues: attempt.verificationIssues,
+        claim_coverage_complete: attempt.verification.claimCoverageComplete,
+        claim_verdict_count: attempt.verification.claimVerdicts.length,
+        slot_verdict_count: attempt.verification.slotVerdicts.length,
+        requirement_verdict_count: attempt.verification.requirementVerdicts.length,
         grounding_verified: true,
         fallback_mode: "none",
         repair_applied: repaired,
@@ -326,6 +345,31 @@ export class GroundedWidgetAiService implements PublicWidgetAiReplyGenerator {
         verifier_usage: usageMetadata(attempt.verifierUsage)
       }
     };
+  }
+
+  private toSafeHandoff(
+    input: AiTurnInput,
+    snapshot: CatalogSnapshot,
+    attempt: GroundedAttempt,
+    startedAt: number,
+    repaired = false
+  ): AiReplyCandidateDecision {
+    return safeHandoffResult(
+      input,
+      snapshot,
+      attempt.verification,
+      {
+        ...this.baseMetadata(snapshot, startedAt),
+        model_provider: attempt.generator.modelProvider,
+        model_name: attempt.generator.modelName,
+        openai_response_id: attempt.generator.responseId,
+        verifier_model_name: attempt.verifierModelName,
+        verifier_response_id: attempt.verifierResponseId,
+        verifier_contract_issues: attempt.verificationIssues,
+        repair_applied: repaired
+      },
+      attempt.decision.handoffReason ?? undefined
+    );
   }
 
   private unavailable(
@@ -365,15 +409,13 @@ export class GroundedWidgetAiService implements PublicWidgetAiReplyGenerator {
   }
 }
 
-function isPass(
-  verification: WidgetAiVerification,
-  decision: GroundedAiTurnCandidateDecision
-): boolean {
+function isPass(attempt: GroundedAttempt): boolean {
+  const { verification } = attempt;
   return (
     verification.verdict === "pass" &&
     verification.violations.length === 0 &&
-    verification.slotVerdicts.every((slot) => slot.valid) &&
-    (verification.requiredAction === null || verification.requiredAction === decision.action)
+    verification.claimCoverageComplete &&
+    attempt.verificationIssues.length === 0
   );
 }
 
@@ -381,10 +423,12 @@ function safeHandoffResult(
   input: AiTurnInput,
   snapshot: CatalogSnapshot,
   verification: WidgetAiVerification,
-  metadata: Record<string, unknown>
+  metadata: Record<string, unknown>,
+  decisionHandoffReason?: GroundedAiTurnCandidateDecision["handoffReason"]
 ): AiReplyCandidateDecision {
   const violationCodes = verification.violations.map((item) => item.code);
-  const handoffReason = handoffReasonForViolations(violationCodes);
+  const handoffReason =
+    decisionHandoffReason ?? handoffReasonForViolations(violationCodes);
   const contactKnown = Boolean(
     input.customer.phoneProvided ||
       input.customer.emailProvided ||
@@ -415,6 +459,8 @@ function safeHandoffResult(
       ...metadata,
       catalog_version: snapshot.catalogVersion,
       grounding_verified: true,
+      claim_coverage_complete: true,
+      claim_verdict_count: 0,
       verifier_verdict: "handoff",
       verifier_violations: violationCodes,
       safe_handoff_reply: true
@@ -461,8 +507,16 @@ function buildCatalogQuery(input: AiTurnInput) {
   const knownValues = Object.values(input.knownSlots.values)
     .flatMap((slot) => (slot?.value ? [slot.value] : []))
     .slice(0, 13);
+  const knownRequirements = input.knownRequirements
+    .map((requirement) => requirement.value)
+    .slice(0, 24);
 
-  return [...recentVisitorText, input.inboundMessage.text, ...knownValues]
+  return [
+    ...recentVisitorText,
+    input.inboundMessage.text,
+    ...knownValues,
+    ...knownRequirements
+  ]
     .join("\n")
     .slice(-6000);
 }

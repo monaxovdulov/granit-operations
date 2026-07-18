@@ -2,6 +2,10 @@
 
 Design: `docs/superpowers/specs/2026-07-17-grounded-live-widget-consultant-design.md`
 
+Status: реализован локально; уточнения 2026-07-18 отражены в design amendment
+
+Финальная реализация отличается от первоначальной разбивки в трех местах: claims и offsets ответа извлекает только verifier; `handoff` исполняется сразу без repair; shadow не блокирует legacy-ответ. Дополнительно появились flexible requirements, rolling memory и migration `0013_live_widget_memory_shadow.sql`.
+
 ## Цель
 
 Заменить semantic policy-regex двухпроходным generator + verifier pipeline, добавить доказательства для slots, подготовить пустую границу будущего каталога, показать structured intake менеджеру и сделать исполняемый eval-loop. Внешний machine-readable каталог и адаптер к его формату не создаются.
@@ -24,7 +28,7 @@ Design: `docs/superpowers/specs/2026-07-17-grounded-live-widget-consultant-desig
 
 1. Ввести normalized `CatalogSnapshot`, `CatalogRecord`, `CatalogReference` и `CatalogKnowledgePort` без внешней JSON schema.
 2. Реализовать `EmptyCatalogKnowledgeProvider` с постоянным version/hash и пустой выдачей.
-3. Обновить typed decision: claim annotations и обязательный `AiSlotEvidence` для каждого extracted slot.
+3. Обновить typed decision: обязательный `AiSlotEvidence` для каждого extracted slot/requirement; claim spans вынести из generator decision в verifier result.
 4. Проверять message ownership, quote и UTF-16 offsets в отдельном сервисе.
 5. Перенести structural/source checks из intake service в один `AiDecisionValidator`.
 6. Добавить typed verifier request/result и controlled violations.
@@ -51,10 +55,10 @@ Design: `docs/superpowers/specs/2026-07-17-grounded-live-widget-consultant-desig
 
 Работа:
 
-1. Оставить generator свободный `replyText`, но потребовать claims и evidence.
+1. Оставить generator свободный `replyText` и потребовать evidence для извлеченной клиентской памяти; фактические spans ответа независимо извлекает verifier.
 2. Реализовать отдельный strict JSON-schema call для verifier.
 3. Ввести общий turn deadline 18 секунд и один repair только при достаточном остатке времени.
-4. Вердикт `handoff` преобразовывать в safe app-owned handoff при неуспешном repair; `block` никогда не отправляет draft.
+4. Вердикт `handoff` немедленно преобразовывать в safe app-owned handoff; repair выполнять ровно один раз только для `repair`; `block` никогда не отправляет draft.
 5. Добавить режимы `off`, `shadow`, `enforce`, verifier model/config и version metadata.
 6. Удалить semantic pre-policy interception и output regex из нового enforce path.
 7. Сохранить детерминированные gate/idempotency/schema/length checks.
