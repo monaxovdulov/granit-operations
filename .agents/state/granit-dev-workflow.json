@@ -1,44 +1,39 @@
 {
   "schema_version": 1,
   "repo": "granit-operations",
-  "updated_at": "2026-05-12T19:54:45Z",
-  "git_head": "0f14659",
+  "updated_at": "2026-07-20T15:37:47Z",
+  "git_head": "ff589b9",
   "mode": "status",
-  "state": "report_done",
+  "state": "source_of_truth_updated",
   "dirty_worktree": {
-    "status": "dirty",
-    "summary": "application repo was clean at HEAD 0f14659 before state restoration; only untracked .agents/state/granit-dev-workflow.json exists after restoration"
+    "status": "clean",
+    "summary": "main is clean and synced with origin/main after PR #9; release worktrees and sibling repos were not modified"
   },
   "context": {
-    "last_scan_at": "2026-05-12T19:54:45Z",
-    "fresh_until": "2026-05-19T19:54:45Z",
+    "last_scan_at": "2026-07-20T15:37:47Z",
+    "fresh_until": "2026-07-27T15:37:47Z",
     "source_hashes": {}
   },
   "rules": {
     "status": "current",
-    "last_refresh_at": "2026-05-12T19:54:45Z"
+    "last_refresh_at": "2026-07-20T15:37:47Z"
   },
   "task": {
-    "type": "workflow-state-restore",
-    "summary": "restore Granit workflow state after S01 public intake provider, persistence, and manager visibility commits",
-    "source": "manual state restoration"
+    "type": "source-of-truth-fix",
+    "summary": "Recorded that the active customer-facing landing/widget smoke source is monaxovdulov/landing-granit-static, while granit-site-cms is only a separate CMS/baseline path unless promoted by a later ADR/task.",
+    "source": "PR #9"
   },
   "checks": {
-    "target_test": {
-      "command": "npm run smoke:api",
+    "docs_diff_check": {
+      "command": "git diff --check && git diff --check HEAD~1..HEAD",
       "status": "passed",
-      "reason": "focused public intake Vitest suite passed"
+      "reason": "docs-only source-of-truth change had no whitespace errors"
     },
-    "full_suite": {
-      "command": "npm run build && npm run smoke:api && npm test",
-      "status": "passed",
-      "reason": "typecheck, focused API smoke, and full Vitest suite passed"
-    },
-    "lint": {
-      "command": "not configured",
+    "runtime_checks": {
+      "command": "not run",
       "status": "skipped",
-      "reason": "no dedicated lint script in root package.json"
+      "reason": "docs/state-only change; no runtime code, migrations, env, deploy or release worktrees touched"
     }
   },
-  "next_action": "Push or deploy staging for commit 0f14659 if needed; otherwise start S02 manager auth through docs/tasks/S02_MANAGER_AUTH_YANDEX_RU.md."
+  "next_action": "For customer-facing website/widget staging work, use landing-granit-static as the active landing repo and pair-smoke it against granit-operations; do not use granit-site-cms as the current rollout target without a later accepted ADR/task."
 }
