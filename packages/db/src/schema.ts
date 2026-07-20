@@ -585,6 +585,17 @@ export const managerUsers = pgTable(
   })
 );
 
+export const aiRuntimeControls = pgTable("ai_runtime_controls", {
+  scope: text("scope").primaryKey(),
+  enabled: boolean("enabled").notNull().default(true),
+  version: integer("version").notNull().default(1),
+  changedByManagerId: uuid("changed_by_manager_id").references(() => managerUsers.id, {
+    onDelete: "set null"
+  }),
+  changedByManagerEmail: text("changed_by_manager_email"),
+  changedAt: timestamp("changed_at", { withTimezone: true }).notNull().defaultNow()
+});
+
 export const aiReviewLabels = pgTable(
   "ai_review_labels",
   {

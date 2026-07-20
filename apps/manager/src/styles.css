@@ -57,6 +57,10 @@ body {
   min-width: 0;
 }
 
+.aiGlobalControl {
+  min-width: 0;
+}
+
 .telegramBindCode {
   max-width: 230px;
   overflow: hidden;

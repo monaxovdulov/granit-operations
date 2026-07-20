@@ -27,6 +27,19 @@ export type RecordAiReviewLabelUseCaseInput = {
   note?: string;
 };
 
+export type SetManagerAiControlUseCaseInput = {
+  actor: ManagerActor;
+  enabled: boolean;
+  expectedVersion: number;
+};
+
+export type SetConversationAiControlUseCaseInput = {
+  actor: ManagerActor;
+  leadId: string;
+  publicConversationId: string;
+  enabled: boolean;
+};
+
 export class ManagerLeadUseCases {
   constructor(private readonly repository: ManagerLeadRepository) {}
 
@@ -36,6 +49,43 @@ export class ManagerLeadUseCases {
 
   getLead(leadId: string) {
     return this.repository.getManagerLead(leadId);
+  }
+
+  getAiControl() {
+    if (!this.repository.getManagerAiControl) {
+      throw new Error("manager AI control repository capability is unavailable");
+    }
+
+    return this.repository.getManagerAiControl();
+  }
+
+  setAiControl(input: SetManagerAiControlUseCaseInput) {
+    assertManagerCanMutate(input.actor);
+
+    if (!this.repository.setManagerAiControl) {
+      throw new Error("manager AI control repository capability is unavailable");
+    }
+
+    return this.repository.setManagerAiControl({
+      enabled: input.enabled,
+      expectedVersion: input.expectedVersion,
+      ...managerAuditFields(input.actor)
+    });
+  }
+
+  setConversationAiControl(input: SetConversationAiControlUseCaseInput) {
+    assertManagerCanMutate(input.actor);
+
+    if (!this.repository.setConversationAiControl) {
+      throw new Error("conversation AI control repository capability is unavailable");
+    }
+
+    return this.repository.setConversationAiControl({
+      leadId: input.leadId,
+      publicConversationId: input.publicConversationId,
+      enabled: input.enabled,
+      ...managerAuditFields(input.actor)
+    });
   }
 
   recordAiReviewLabel(input: RecordAiReviewLabelUseCaseInput) {

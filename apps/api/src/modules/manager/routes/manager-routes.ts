@@ -8,6 +8,7 @@ import {
 } from "../../conversations/repositories/lead-conversation-types.js";
 import {
   AI_REVIEW_LABELS,
+  AiControlVersionConflictError,
   type AiReviewLabel
 } from "../../conversations/repositories/manager-lead-repository.js";
 import { ManagerForbiddenError } from "../use-cases/manager-actor.js";
@@ -18,6 +19,50 @@ export function registerManagerRoutes(
   useCases: ManagerLeadUseCases,
   auth: ManagerAuthRuntime
 ) {
+  app.get("/manager/ai-control", async (request, reply) => {
+    const manager = await authenticateManager(request, reply, auth);
+
+    if (!manager) {
+      return;
+    }
+
+    return { control: await useCases.getAiControl() };
+  });
+
+  app.patch<{ Body: { enabled?: unknown; version?: unknown } }>(
+    "/manager/ai-control",
+    async (request, reply) => {
+      const manager = await authenticateManager(request, reply, auth);
+
+      if (!manager) {
+        return;
+      }
+
+      if (
+        typeof request.body?.enabled !== "boolean" ||
+        typeof request.body?.version !== "number" ||
+        !Number.isInteger(request.body.version) ||
+        request.body.version < 1
+      ) {
+        return reply.code(400).send({ error: "invalid_ai_control" });
+      }
+
+      const control = await mapManagerError(reply, () =>
+        useCases.setAiControl({
+          actor: manager,
+          enabled: request.body.enabled as boolean,
+          expectedVersion: request.body.version as number
+        })
+      );
+
+      if (control === "mapped_error") {
+        return;
+      }
+
+      return { control };
+    }
+  );
+
   app.get("/manager/leads", async (request, reply) => {
     const manager = await authenticateManager(request, reply, auth);
 
@@ -115,6 +160,43 @@ export function registerManagerRoutes(
     }
   );
 
+  app.patch<{
+    Params: { leadId: string; publicConversationId: string };
+    Body: { enabled?: unknown };
+  }>(
+    "/manager/leads/:leadId/conversations/:publicConversationId/ai-control",
+    async (request, reply) => {
+      const manager = await authenticateManager(request, reply, auth);
+
+      if (!manager) {
+        return;
+      }
+
+      if (typeof request.body?.enabled !== "boolean") {
+        return reply.code(400).send({ error: "invalid_conversation_ai_control" });
+      }
+
+      const lead = await mapManagerError(reply, () =>
+        useCases.setConversationAiControl({
+          actor: manager,
+          leadId: request.params.leadId,
+          publicConversationId: request.params.publicConversationId,
+          enabled: request.body.enabled as boolean
+        })
+      );
+
+      if (lead === "mapped_error") {
+        return;
+      }
+
+      if (!lead) {
+        return reply.code(404).send({ error: "not_found" });
+      }
+
+      return { lead };
+    }
+  );
+
   app.post<{
     Params: { leadId: string; aiRunId: string };
     Body: { label?: unknown; note?: unknown };
@@ -193,6 +275,11 @@ async function mapManagerError<T>(
   try {
     return await operation();
   } catch (error) {
+    if (error instanceof AiControlVersionConflictError) {
+      await reply.code(409).send({ error: "ai_control_version_conflict" });
+      return "mapped_error";
+    }
+
     if (error instanceof ManagerForbiddenError) {
       await reply.code(403).send({ error: "manager_forbidden" });
       return "mapped_error";
