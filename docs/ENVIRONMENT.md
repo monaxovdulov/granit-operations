@@ -14,7 +14,7 @@ Future environment/config names:
 | `YANDEX_OAUTH_CLIENT_SECRET` | Yandex ID OAuth app client secret | server only | S02 runtime |
 | `YANDEX_OAUTH_REDIRECT_URI` | Yandex ID OAuth callback URL, for example `https://manager.botops.ru/auth/yandex/callback` | server only | S02 runtime |
 | `MANAGER_AUTH_ALLOWED_ORIGINS` | Allowed manager UI origins | server only | S02 planned |
-| `PUBLIC_INTAKE_ALLOWED_ORIGINS` | Allowed public site origins | server only | future |
+| `PUBLIC_INTAKE_ALLOWED_ORIGINS` | Comma-separated exact HTTP(S) origins allowed to call public intake endpoints through CORS; empty means no browser CORS allowlist | server only | Public intake CORS runtime |
 | `PUBLIC_INTAKE_CONTRACT_VERSION` | Published intake contract version | server/client config | documented as `site_form.v1` |
 | `AI_WIDGET_ENABLED` | Enables website widget AI replies only after S05 checks/staging smoke | server only | S05 runtime, default `false` |
 | `AI_WIDGET_GROUNDED_MODE` | Selects `off`, `shadow`, or `enforce`; missing/unknown values use `enforce`, while `off` is an explicit rollback switch | server only | Grounded consultant runtime |
