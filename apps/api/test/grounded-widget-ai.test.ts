@@ -34,6 +34,7 @@ describe("grounded widget AI core", () => {
     expect(instructions).toContain("Не извлекай fixed slots из вопроса клиента");
     expect(instructions).toContain("monumentType означает только тип композиции");
     expect(instructions).toContain("никогда не возвращай приблизительные offsets");
+    expect(instructions).toContain("Не копируй длинные таблицы целиком");
   });
 
   it("uses an explicit empty catalog without inventing temporary facts", async () => {

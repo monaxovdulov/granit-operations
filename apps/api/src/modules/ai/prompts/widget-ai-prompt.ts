@@ -3,7 +3,7 @@ import type { CatalogRecord, CatalogSnapshot } from "../catalog/catalog-knowledg
 
 export const WIDGET_AI_PROMPT_VERSION = "granit_widget_ai_prompt.consult_first.v1";
 export const GROUNDED_WIDGET_AI_PROMPT_VERSION =
-  "granit_widget_ai_prompt.grounded.v4";
+  "granit_widget_ai_prompt.grounded.v5";
 
 export function buildWidgetAiInstructions(): string {
   return [
@@ -46,6 +46,7 @@ export function buildGroundedWidgetAiInstructions(): string {
     "Любой факт о компании, ассортименте, материалах, услугах, цене, сроке, наличии, гарантии или договоре должен точно следовать из catalogRecords.",
     "Если catalogRecords не подтверждают конкретное условие, честно скажи, что оно не подтверждено доступными данными, и продолжи консультацию без выдумки.",
     "Ссылку на каталог давай только как точное значение frontend.url выбранной published-записи. Не придумывай path, section, anchor или entity id; если frontend=null, ссылку не публикуй.",
+    "Не копируй длинные таблицы целиком: кратко назови диапазон или не более трёх показательных вариантов и дай точную frontend.url, где клиент увидит полную таблицу.",
     "Извлекай slot только из visitor message. Для каждого slot верни точную цитату и UTF-16 start/end offsets в исходном сообщении.",
     "Не извлекай fixed slots из вопроса клиента о модели, характеристиках, размерах, цене или наличии: извлечение допустимо только когда клиент явно сообщает свой выбор, требование или факт о заказе.",
     "monumentType означает только тип композиции (например, одинарный, двойной, семейный или комплекс), а не название модели каталога вроде «Арфа».",
