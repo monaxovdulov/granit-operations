@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import type { CatalogRecord, CatalogSnapshot } from "../catalog/catalog-knowledge-port.js";
+import { toCatalogPromptRecord } from "../catalog/catalog-prompt-record.js";
 import {
   AI_REQUIREMENT_CATEGORIES,
   AI_REQUIREMENT_MODES,
@@ -381,6 +382,6 @@ export function buildWidgetAiVerifierUserInput(input: {
       catalogVersion: input.snapshot.catalogVersion,
       contentHash: input.snapshot.contentHash
     },
-    catalogRecords: input.selectedRecords
+    catalogRecords: input.selectedRecords.map(toCatalogPromptRecord)
   });
 }

@@ -1,10 +1,25 @@
 import { describe, expect, it } from "vitest";
 
 import { FileCatalogKnowledgeProvider } from "../src/modules/ai/catalog/file-catalog-knowledge-provider.js";
+import { toCatalogPromptRecord } from "../src/modules/ai/catalog/catalog-prompt-record.js";
 
 const at = "2026-07-20T12:00:00.000Z";
 
 describe("FileCatalogKnowledgeProvider", () => {
+  it("keeps retrieval search text out of the model-facing record", async () => {
+    const snapshot = await new FileCatalogKnowledgeProvider().getSnapshot();
+    const record = snapshot.records[0]!;
+    const promptRecord = toCatalogPromptRecord(record);
+
+    expect(promptRecord).not.toHaveProperty("searchText");
+    expect(promptRecord).toMatchObject({
+      id: record.id,
+      revision: record.revision,
+      frontend: record.frontend,
+      data: record.data
+    });
+  });
+
   it("loads the versioned non-empty snapshot and keeps review-required records draft", async () => {
     const provider = new FileCatalogKnowledgeProvider();
     const snapshot = await provider.getSnapshot();

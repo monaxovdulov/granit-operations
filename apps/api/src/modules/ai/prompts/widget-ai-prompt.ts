@@ -1,5 +1,6 @@
 import type { AiTurnInput } from "../ai-turn.js";
 import type { CatalogRecord, CatalogSnapshot } from "../catalog/catalog-knowledge-port.js";
+import { toCatalogPromptRecord } from "../catalog/catalog-prompt-record.js";
 
 export const WIDGET_AI_PROMPT_VERSION = "granit_widget_ai_prompt.consult_first.v1";
 export const GROUNDED_WIDGET_AI_PROMPT_VERSION =
@@ -78,7 +79,7 @@ export function buildGroundedWidgetAiUserInput(input: {
       catalogVersion: input.snapshot.catalogVersion,
       contentHash: input.snapshot.contentHash
     },
-    catalogRecords: input.selectedRecords,
+    catalogRecords: input.selectedRecords.map(toCatalogPromptRecord),
     boundaryConfig: input.turn.boundaryConfig
   });
 }
