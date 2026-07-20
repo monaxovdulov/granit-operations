@@ -16,6 +16,7 @@ import {
   type GroundedWidgetAiProviderResult
 } from "../src/modules/ai/services/grounded-widget-ai-service.js";
 import {
+  buildWidgetAiVerifierInstructions,
   WIDGET_AI_VERIFIER_VERSION,
   type WidgetAiSemanticVerifier,
   type WidgetAiVerification,
@@ -35,6 +36,15 @@ describe("grounded widget AI core", () => {
     expect(instructions).toContain("monumentType означает только тип композиции");
     expect(instructions).toContain("никогда не возвращай приблизительные offsets");
     expect(instructions).toContain("Не копируй длинные таблицы целиком");
+  });
+
+  it("gives the verifier an exact deep-link and missing-commercial-fact contract", () => {
+    const instructions = buildWidgetAiVerifierInstructions();
+
+    expect(instructions).toContain("path=/frontend/url");
+    expect(instructions).toContain("никогда не используй path=frontend.url");
+    expect(instructions).toContain("systemPolicyId=widget.missing_knowledge");
+    expect(instructions).toContain("Не помечай такую фразу unsupported_claim");
   });
 
   it("uses an explicit empty catalog without inventing temporary facts", async () => {

@@ -3,7 +3,7 @@ import type { CatalogRecord, CatalogSnapshot } from "../catalog/catalog-knowledg
 
 export const WIDGET_AI_PROMPT_VERSION = "granit_widget_ai_prompt.consult_first.v1";
 export const GROUNDED_WIDGET_AI_PROMPT_VERSION =
-  "granit_widget_ai_prompt.grounded.v5";
+  "granit_widget_ai_prompt.grounded.v6";
 
 export function buildWidgetAiInstructions(): string {
   return [
