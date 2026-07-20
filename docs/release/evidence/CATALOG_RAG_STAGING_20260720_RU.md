@@ -66,6 +66,8 @@ Contract/version: `granit-cha.catalog.2026-07-20.v1`, `CatalogKnowledgePort`
 
 Безопасная проверка OpenAI API из staging-контейнера вернула HTTP 401 `invalid_api_key`. Поэтому нельзя честно подтвердить критерий «проверенный AI-ответ → deep link» в реальном live-вызове. Для продолжения нужен действующий staging-only OpenAI credential через существующий secret/config mechanism. Production secret/config менять не требуется.
 
+Повторный credential audit не нашёл безопасного fallback: текущий `.env.runtime` снова дал 401, четыре staging backup env-файла не содержат `OPENAI_API_KEY`, локальная среда release checkout ключа не содержит, GitHub Actions environment/repository secret для этого deploy не настроен. Значения secrets не читались и в evidence не записывались.
+
 Manager UI нельзя было открыть через доступный in-app Browser (`ERR_BLOCKED_BY_CLIENT`), а запрошенный Chrome connector в текущей сессии не установлен. Persistence и manager-visible repository path подтверждены БД и тестом public intake → authenticated manager list; интерактивный manager UI smoke остаётся повторить после предоставления браузерной сессии/connector.
 
 ## Rollback
