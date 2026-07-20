@@ -8,6 +8,7 @@ import { buildStageASiteWidgetAiTurnInput } from "../src/modules/ai/ai-turn.js";
 import { EmptyCatalogKnowledgeProvider } from "../src/modules/ai/catalog/empty-catalog-knowledge-provider.js";
 import { validateGroundedAiDecision } from "../src/modules/ai/grounding/ai-decision-validator.js";
 import { validateTextEvidence } from "../src/modules/ai/grounding/ai-slot-evidence-service.js";
+import { buildGroundedWidgetAiInstructions } from "../src/modules/ai/prompts/widget-ai-prompt.js";
 import {
   GroundedWidgetAiService,
   type GroundedWidgetAiProvider,
@@ -27,6 +28,14 @@ const MESSAGE_ID = "11111111-1111-4111-8111-111111111111";
 const CONVERSATION_ID = "22222222-2222-4222-8222-222222222222";
 
 describe("grounded widget AI core", () => {
+  it("does not instruct the model to extract catalog names or questions as fixed slots", () => {
+    const instructions = buildGroundedWidgetAiInstructions();
+
+    expect(instructions).toContain("Не извлекай fixed slots из вопроса клиента");
+    expect(instructions).toContain("monumentType означает только тип композиции");
+    expect(instructions).toContain("никогда не возвращай приблизительные offsets");
+  });
+
   it("uses an explicit empty catalog without inventing temporary facts", async () => {
     const catalog = new EmptyCatalogKnowledgeProvider();
     const snapshot = await catalog.getSnapshot();

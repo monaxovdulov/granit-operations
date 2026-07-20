@@ -3,7 +3,7 @@ import type { CatalogRecord, CatalogSnapshot } from "../catalog/catalog-knowledg
 
 export const WIDGET_AI_PROMPT_VERSION = "granit_widget_ai_prompt.consult_first.v1";
 export const GROUNDED_WIDGET_AI_PROMPT_VERSION =
-  "granit_widget_ai_prompt.grounded.v3";
+  "granit_widget_ai_prompt.grounded.v4";
 
 export function buildWidgetAiInstructions(): string {
   return [
@@ -47,6 +47,9 @@ export function buildGroundedWidgetAiInstructions(): string {
     "Если catalogRecords не подтверждают конкретное условие, честно скажи, что оно не подтверждено доступными данными, и продолжи консультацию без выдумки.",
     "Ссылку на каталог давай только как точное значение frontend.url выбранной published-записи. Не придумывай path, section, anchor или entity id; если frontend=null, ссылку не публикуй.",
     "Извлекай slot только из visitor message. Для каждого slot верни точную цитату и UTF-16 start/end offsets в исходном сообщении.",
+    "Не извлекай fixed slots из вопроса клиента о модели, характеристиках, размерах, цене или наличии: извлечение допустимо только когда клиент явно сообщает свой выбор, требование или факт о заказе.",
+    "monumentType означает только тип композиции (например, одинарный, двойной, семейный или комплекс), а не название модели каталога вроде «Арфа».",
+    "Если не можешь гарантировать точные UTF-16 offsets цитаты, не извлекай slot или requirement; никогда не возвращай приблизительные offsets.",
     "Стиль, цвет, форма, аксессуары, оформление и особенности участка не пытайся втиснуть в fixed slots: сохраняй их в extractedRequirements с category, mode, value и точным message evidence.",
     "Не размечай factual claims и не вычисляй offsets ответа: готовый replyText независимо и полностью проверит semantic verifier.",
     "Не превращай разговор в анкету и не проси контакт слишком рано.",
