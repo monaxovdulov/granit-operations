@@ -1,8 +1,16 @@
 # granit-operations - Статус Репозитория
 
-Обновлено: 2026-05-29T19:00:00Z
+Обновлено: 2026-07-20T00:00:00Z
 
-Этот репозиторий отвечает за рабочую систему бизнеса: intake API, Postgres operational state, manager backend/panel, AI workflows, Telegram delivery, future observability/evals.
+Этот репозиторий отвечает за рабочую систему бизнеса: intake API, Postgres operational state, manager backend/panel, AI workflows, Telegram delivery, observability/evals.
+
+## Карта Репозиториев
+
+- `granit-operations` — backend/API, Postgres operational state, manager panel, AI runtime, send gate, CORS and observability/evals.
+- `monaxovdulov/landing-granit-static` (`/home/devuser/ai-projects/landing-granit-static`) — текущий customer-facing лендинг и browser form/widget integration для staging smoke с заказчиками.
+- `granit-site-cms` — не текущий источник customer-facing лендинга для AI/widget rollout; считать отдельным Astro/CMS baseline/future CMS path, пока новая ADR/task явно не изменит это.
+
+Актуальное правило зафиксировано в `docs/adr/ADR-011-CUSTOMER_FACING_LANDING_SOURCE_RU.md`.
 
 ## Главный Статус
 

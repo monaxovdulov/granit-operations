@@ -9,8 +9,10 @@ For `granit-operations`, evidence usually covers:
 - manager visibility;
 - validation and retry/fallback behavior;
 - idempotency;
-- paired smoke against `granit-site-cms`;
+- paired smoke against the active customer-facing landing repo `monaxovdulov/landing-granit-static`;
 - backup/restore/rollback evidence when explicitly in scope.
+
+Historical evidence records before 2026-07-20 may mention `granit-site-cms`. Treat those as historical facts for that evidence date, not as the current customer-facing landing source. Current repo ownership is recorded in `docs/adr/ADR-011-CUSTOMER_FACING_LANDING_SOURCE_RU.md`.
 
 Do not store secrets, DB URLs, tokens, customer PII, raw lead data, private notification destinations, deployment credentials, or full private logs.
 
