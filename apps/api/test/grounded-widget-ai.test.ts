@@ -160,10 +160,14 @@ describe("grounded widget AI core", () => {
           revision: 1,
           kind: "price" as const,
           status: "published" as const,
+          catalogVersion: "catalog.test.v1",
+          contentHash: "c".repeat(64),
           validUntil: "2026-07-16T23:59:59.000Z",
           aliases: [],
           searchText: "цена памятника",
           qualifiers: {},
+          provenance: { source: "test" },
+          frontend: null,
           data: { amount: 100000 }
         }
       ]

@@ -325,6 +325,7 @@ export function buildWidgetAiVerifierInstructions(): string {
     "Не включай в claimVerdicts вопросы, эмпатию и чисто разговорные связки. Если фактических фрагментов нет, верни factualClaimsPresent=false и пустой claimVerdicts.",
     "claimCoverageComplete=true означает, что ни один factual span не пропущен. verdict=pass запрещен при неполном покрытии.",
     "Факт о компании, ассортименте, материале, услуге, цене, сроке, наличии, гарантии или договоре допустим только при точном подтверждении catalogRecords.",
+    "URL каталога тоже является проверяемым фактом: он допустим только при точном совпадении с frontend.url published-записи из catalogRecords и catalog reference на /frontend/url этой записи.",
     "Факт о клиенте или его пожелании допустим только при visitor message evidence. App-owned оговорка допустима только с известным systemPolicyId.",
     "Для КАЖДОГО extractedSlot верни ровно один slotVerdict: дословно повтори name, value и evidence кандидата и отдельно проверь, что значение по смыслу следует из цитаты и контекста.",
     "Для КАЖДОГО extractedRequirement верни ровно один requirementVerdict с теми же category, mode, value и evidence и проверь смысловую связь значения с доказательством.",

@@ -6,6 +6,7 @@ import { buildApi } from "./app.js";
 import { loadConfig } from "./config.js";
 import { OpenAiWidgetAssistantProvider } from "./modules/ai/adapters/openai-widget-assistant-provider.js";
 import { OpenAiWidgetSemanticVerifier } from "./modules/ai/adapters/openai-widget-semantic-verifier.js";
+import { FileCatalogKnowledgeProvider } from "./modules/ai/catalog/file-catalog-knowledge-provider.js";
 import { PostgresManagerAuthRepository } from "./modules/auth/repositories/postgres-manager-auth-repository.js";
 import { PostgresIntakeRepository } from "./modules/conversations/repositories/postgres-intake-repository.js";
 
@@ -15,6 +16,7 @@ const config = loadConfig(process.env);
 const { db } = createOperationsDb(config.databaseUrl);
 const repository = new PostgresIntakeRepository(db);
 const managerAuthRepository = new PostgresManagerAuthRepository(db);
+const catalogKnowledge = new FileCatalogKnowledgeProvider();
 const widgetAiProvider = config.widgetAi.openAiApiKey
   ? new OpenAiWidgetAssistantProvider({
       apiKey: config.widgetAi.openAiApiKey,
@@ -36,6 +38,7 @@ const app = buildApi({
     provider: widgetAiProvider,
     groundedProvider: widgetAiProvider,
     verifier: widgetAiVerifier,
+    catalog: catalogKnowledge,
     modelName: config.widgetAi.openAiModel,
     verifierModelName: config.widgetAi.verifierModel,
     deadlineMs: config.widgetAi.deadlineMs

@@ -1,8 +1,8 @@
 # AI Policy
 
-Status: grounded website consultant implemented; customer traffic remains behind a disabled runtime flag
+Status: grounded website consultant and reviewed catalog provider implemented; customer traffic remains controlled by runtime flags
 
-Website AI remains disabled unless `AI_WIDGET_ENABLED=true`. Once enabled, the grounded pipeline is the default; `AI_WIDGET_GROUNDED_MODE=off` is an explicit legacy rollback switch. Production enablement and the external machine-readable catalog still require separate owner approval.
+Website AI remains disabled unless `AI_WIDGET_ENABLED=true`. Once enabled, the grounded pipeline is the default; `AI_WIDGET_GROUNDED_MODE=off` is an explicit legacy rollback switch. Production enablement still requires separate owner approval.
 
 ## Grounded send path
 
@@ -18,7 +18,8 @@ Semantic decisions are not made by keyword regex in the grounded path. Requests 
 ## Knowledge
 
 - Business/catalog truth comes only through `CatalogKnowledgePort` snapshots and published records.
-- The current provider is intentionally empty (`empty.v1`) until the owner supplies the external JSON catalog and its adapter.
+- Server assembly uses the deterministic `granit-cha.catalog.2026-07-20.v1` file snapshot (465 published records; 16 review-required records stay draft and are never retrieved).
+- `empty.v1` is not used in the normal assembled runtime; it remains an explicit fallback/test implementation.
 - Missing knowledge is answered honestly and does not by itself force a handoff.
 - A fact about the visitor must be backed by an exact quote and UTF-16 offsets from a visitor message.
 - A slot or flexible requirement value must also be semantically supported by that quote; matching offsets alone are insufficient.
@@ -45,6 +46,6 @@ Semantic decisions are not made by keyword regex in the grounded path. Requests 
 - `enforce`: only generator + verifier output can be sent.
 - Offline regression contains 40 realistic dialogs and checks extracted values/evidence, flexible requirements, claim coverage, semantic quality and latency in addition to action. Stateful persistence tests cover long dialogs and flexible requirements. Paid live evaluation additionally requires `AI_WIDGET_EVAL_LIVE=true` and owner-provided OpenAI credentials.
 
-Owner preparation is documented in `docs/AI_ASSISTANT_OWNER_INPUT_GUIDE_RU.md`. A plain-Russian explanation of layers, message flow, controls and limitations is in `docs/AI_ASSISTANT_OWNER_ARCHITECTURE_GUIDE_RU.md`. These guides do not connect or publish a catalog.
+Future owner updates, especially commercial terms, are documented in `docs/AI_ASSISTANT_OWNER_INPUT_GUIDE_RU.md`. A plain-Russian explanation of layers, message flow, controls and limitations is in `docs/AI_ASSISTANT_OWNER_ARCHITECTURE_GUIDE_RU.md`.
 
 Telegram AI remains out of scope. Do not enable production AI or deploy these changes without separate production approval.
