@@ -1,92 +1,243 @@
 # granit-operations
 
-Private operations repository for Granit AI.
+Статус: рабочий `main` для backend operations и staging-кандидат website widget AI. Это не production approval.
 
-This repo owns the business operations application:
+Этот README — входная точка для следующего агента. Если задача звучит как “выкатить AI на staging”, “включить AI-агента в виджете”, “подключить каталог/RAG для ответов”, сначала читать этот файл, затем идти по индексу ниже.
 
-- public intake API for `site_form` now and `site_chat` later;
-- operations-owned lead, customer, channel identity, conversation, message, status, handoff, follow-up, review, trace, and eval state;
-- manager backend and manager panel;
-- Telegram adapter in later slices;
-- Mastra/OpenAI AI workflows in later slices;
-- Postgres schema, migrations, backups, smoke, rollback, and release evidence.
+## 1. Что это за репозиторий
 
-## Source Of Truth
+`granit-operations` владеет операционной частью бизнеса:
 
-The canonical source of truth is the main wiki in the planning repo:
+- public intake API для формы и виджета сайта;
+- Postgres operational state: leads, channel identities, conversations, messages, manager takeover, AI runs, AI quality events;
+- manager backend и manager panel;
+- app-owned website widget AI runtime;
+- Telegram inbound / manager delivery path;
+- CORS, migrations, smoke/evidence, evals and release docs.
 
-```text
-/home/devuser/ai-projects/granit-plan-app/ai-agent-stack-wiki/wiki/
-```
+Этот репозиторий не владеет текущим customer-facing лендингом.
 
-Repo docs here are working implementation docs derived from that wiki. The full research archive and owner prompt pack are provenance and are not copied into this repo.
+## 2. Не перепутать репозитории
 
-## AI-консультант: что прочитать
+| Что | Источник истины сейчас |
+|---|---|
+| Operations backend, AI runtime, DB, manager, CORS | этот repo: `monaxovdulov/granit-operations` |
+| Текущий customer-facing лендинг и browser widget/form integration | `monaxovdulov/landing-granit-static`, локально `/home/devuser/ai-projects/landing-granit-static` |
+| Старый/отдельный Astro/CMS baseline | `granit-site-cms`; не использовать как текущий лендинг для AI/widget staging без новой ADR/task |
 
-Текущий grounded AI-консультант реализован локально, но website AI по умолчанию выключен, внешний каталог знаний пока пустой, а production-включение требует отдельного решения владельца.
+Решение зафиксировано в [ADR-011](docs/adr/ADR-011-CUSTOMER_FACING_LANDING_SOURCE_RU.md).
 
-Основные документы:
+Перед staging smoke агент обязан перепроверить актуальную ветку и SHA `landing-granit-static`, а не полагаться на исторические упоминания `granit-site-cms`.
 
-- [Как устроен AI-консультант — слои, путь сообщения и ограничения](docs/AI_ASSISTANT_OWNER_ARCHITECTURE_GUIDE_RU.md)
-- [Что владельцу заполнить для знаний и памяти](docs/AI_ASSISTANT_OWNER_INPUT_GUIDE_RU.md)
-- [AI Policy — технические границы и режимы](docs/AI_POLICY.md)
-- [Актуальный архитектурный design grounded-консультанта](docs/superpowers/specs/2026-07-17-grounded-live-widget-consultant-design.md)
-- [План реализации и сделанные уточнения](docs/superpowers/plans/2026-07-17-grounded-live-widget-consultant-plan.md)
-- [Переменные окружения без секретных значений](docs/ENVIRONMENT.md)
+## 3. Текущее состояние AI в `main`
 
-Начать владельцу бизнеса лучше с первых двух документов: первый объясняет, как всё работает, второй служит практическим шаблоном подготовки содержания.
-
-## Current Scope
-
-The current implementation focus is the protected manager UI after accepted S02 auth evidence:
+В `main` уже есть app-owned grounded website widget AI runtime:
 
 ```text
-React/Vite/Mantine manager panel -> same-origin protected manager API -> server-side Yandex session
+PublicWidgetIntakeService
+  -> сохраняет inbound в Postgres
+  -> проверяет app-owned send gate / manager takeover
+  -> PublicWidgetAiReplyGenerator
+  -> grounded generator + independent semantic verifier
+  -> сохраняет outbound только после pass и send-time gate
+  -> пишет ai_runs / ai_quality_events
+  -> показывает менеджеру sanitized quality summary
 ```
 
-S01 must prove no false success:
+Важно:
 
-- no public thank-you, inline success, or WhatsApp continuation until the backend accepts and persists the lead;
-- backend failure returns safe retry/fallback behavior;
-- idempotency is expected for repeated public form submissions;
-- public responses must not leak internal `lead_id`, `conversation_id`, `trace_id`, manager ids, eval labels, or handoff internals.
+- AI для website widget по умолчанию выключен: `AI_WIDGET_ENABLED=false` или env отсутствует.
+- Когда `AI_WIDGET_ENABLED=true`, режим задаёт `AI_WIDGET_GROUNDED_MODE`.
+- Допустимые режимы: `off`, `shadow`, `enforce`.
+- Неизвестный или пустой `AI_WIDGET_GROUNDED_MODE` трактуется как `enforce`, поэтому rollback должен быть явным: `AI_WIDGET_GROUNDED_MODE=off` или `AI_WIDGET_ENABLED=false`.
+- OpenAI ключ — только server-side: `OPENAI_API_KEY`; он не должен попасть в лендинг, frontend, docs или логи.
+- Primary runtime не Mastra. Mastra/Studio-like observability допустима только позже как optional sink/export layer, см. [ADR-010](docs/adr/ADR-010-AI_OBSERVABILITY_RUNTIME_BOUNDARY_RU.md).
 
-## Disabled Initially
+## 4. Текущее состояние знаний / RAG
 
-- AI replies are disabled.
-- Telegram is disabled.
-- Website widget AI is disabled.
-- Urgent production notifications are disabled until real destinations exist and delivery audit is proven.
-- Full SEO migration belongs to `granit-site-cms` and is deferred.
-- Production deploy requires explicit owner confirmation for a concrete release candidate.
+Граница под каталог уже есть, но полноценный RAG-каталог не подключён.
 
-## Initial Layout
+Смотреть код:
+
+- `apps/api/src/modules/ai/catalog/catalog-knowledge-port.ts` — app-owned `CatalogKnowledgePort`;
+- `apps/api/src/modules/ai/catalog/empty-catalog-knowledge-provider.ts` — текущий безопасный fallback `empty.v1`;
+- `apps/api/src/modules/ai/services/grounded-widget-ai-service.ts` — где runtime запрашивает snapshot/search и передаёт selected catalog records в prompt/verifier;
+- `apps/api/src/app-context.ts` — сборка AI runtime принимает `catalog?: CatalogKnowledgePort`;
+- `apps/api/src/index.ts` — текущая server assembly пока не передаёт реальный catalog provider, значит используется `empty.v1`.
+
+Следовательно, задача “подключить каталог/RAG” означает:
+
+1. подготовить owner-approved machine-readable catalog или безопасный source adapter;
+2. реализовать provider за существующим `CatalogKnowledgePort`;
+3. подключить provider в server assembly;
+4. доказать, что verifier блокирует unsupported/invalid catalog claims;
+5. прогнать eval/smoke и paired smoke с настоящим лендингом `landing-granit-static`.
+
+HTML сайта не является автоматическим источником истины. Если данные берутся из сайта, их надо превратить в reviewed catalog records с `id`, `revision`, `status`, `validFrom/validUntil` при необходимости, provenance and owner approval.
+
+## 5. Индекс: куда идти следующему агенту
+
+Для задачи “выкатить AI на staging и подключить catalog/RAG” читать в таком порядке:
+
+1. [Этот README](README.md) — текущая карта и маршрут.
+2. [source-of-truth.md](docs/source-of-truth.md) — repo boundaries и active landing map.
+3. [STAGING_WIDGET_AI_RAG_ROLLOUT_RU.md](docs/tasks/STAGING_WIDGET_AI_RAG_ROLLOUT_RU.md) — конкретный task-runbook для staging AI + RAG.
+4. [ADR-011](docs/adr/ADR-011-CUSTOMER_FACING_LANDING_SOURCE_RU.md) — настоящий лендинг: `landing-granit-static`.
+5. [ADR-008](docs/adr/ADR-008-PUBLIC_WIDGET_AI_REPLY_GENERATOR_BOUNDARY_RU.md) — public widget AI generator boundary.
+6. [ADR-010](docs/adr/ADR-010-AI_OBSERVABILITY_RUNTIME_BOUNDARY_RU.md) — Mastra/observability boundary.
+7. [ENVIRONMENT.md](docs/ENVIRONMENT.md) — env names без secret values.
+8. [AI_ASSISTANT_OWNER_ARCHITECTURE_GUIDE_RU.md](docs/AI_ASSISTANT_OWNER_ARCHITECTURE_GUIDE_RU.md) — как устроен AI-консультант.
+9. [AI_ASSISTANT_OWNER_INPUT_GUIDE_RU.md](docs/AI_ASSISTANT_OWNER_INPUT_GUIDE_RU.md) — что владелец должен дать для базы знаний.
+10. [SMOKE_TESTS.md](docs/SMOKE_TESTS.md) — smoke expectations.
+11. [BACKUP_RESTORE_ROLLBACK.md](docs/BACKUP_RESTORE_ROLLBACK.md) и [STAGING_GO_LIVE_READINESS_RU.md](docs/tasks/STAGING_GO_LIVE_READINESS_RU.md) — staging safety gates.
+12. [release evidence index](docs/release/evidence/README.md) — куда писать новую evidence после smoke.
+
+Исторический план [SERIOUS_AI_LAYER_RU.md](docs/tasks/SERIOUS_AI_LAYER_RU.md) можно читать как background, но он не является актуальным статусом runtime.
+
+## 6. Маршрут выполнения: staging AI + catalog/RAG
+
+Следующий агент должен идти небольшими проверяемыми шагами.
+
+### Шаг 0. Read-only audit
+
+Минимум:
+
+```bash
+git status -sb
+git rev-parse HEAD
+git rev-parse origin/main
+git -C /home/devuser/ai-projects/landing-granit-static status -sb
+git -C /home/devuser/ai-projects/landing-granit-static rev-parse HEAD
+```
+
+Если `main` изменился, использовать актуальное состояние.
+
+### Шаг 1. Локальная проверка `granit-operations`
+
+Перед staging-действиями:
+
+```bash
+npx vitest run --maxWorkers=1
+npm run build
+npm run eval:widget-ai:dry-run
+git diff --check
+```
+
+Если добавляются DB changes для catalog/RAG или observability, новая migration должна идти после уже существующих `0014` и `0015`, то есть начинать с `0016_*`. Старые альтернативные Mastra migrations `0010/0011` не переносить.
+
+### Шаг 2. Подключить catalog/RAG правильно
+
+Нельзя делать RAG так, чтобы модель сама считала HTML/веб/память модели источником бизнес-истины.
+
+Правильная граница:
 
 ```text
-apps/api/          Fastify intake API
-apps/manager/      React/Vite/Mantine manager panel
-packages/contracts public intake contract artifacts
-packages/db        Drizzle/Postgres schema and migrations
-packages/shared    shared operations utilities placeholder
-docs/              implementation docs derived from the main wiki
+owner-reviewed catalog source
+  -> app-owned CatalogKnowledgePort
+  -> selected records with id/revision/status/provenance
+  -> grounded prompt
+  -> semantic verifier checks every business claim
+  -> send-time gate
+  -> persisted safe answer
 ```
 
-S01 currently publishes `site_form.v1` and exposes:
+Минимальный implementation target:
 
-- `POST /public/intake/site-form`;
-- `GET /manager/leads`;
-- `GET /manager/leads/:leadId`.
+- provider реализует `CatalogKnowledgePort`;
+- `getSnapshot()` возвращает version/hash/schema;
+- `search()` возвращает только опубликованные и применимые records;
+- records имеют стабильные `id`, `revision`, `kind`, `status`, `aliases`, `searchText`, `qualifiers`, `data`;
+- verifier получает catalog references и блокирует claims без подтверждения;
+- eval corpus содержит cases по missing catalog, invalid reference, price/deadline/warranty/availability, manager handoff.
 
-S02 backend auth now protects manager visibility:
+### Шаг 3. Staging enablement
 
-- `GET /auth/yandex/start`;
-- `GET /auth/yandex/callback`;
-- `POST /auth/logout`;
-- `GET /manager` React manager app shell;
-- `GET /manager/me`;
-- protected `GET /manager/leads`;
-- protected `GET /manager/leads/:leadId`.
+Это уже внешняя runtime-операция, не docs-only изменение. Перед ней нужны явные staging credentials / server access и owner-approved scope.
 
-First manager onboarding is owner/Codex/admin-command driven with `npm run seed:manager-user -- --email user@yandex.ru --role owner`; later owner-only UI can add `Настройки -> Команда`.
+Env names смотреть в [ENVIRONMENT.md](docs/ENVIRONMENT.md). Значения секретов не записывать в repo, chat, PR, evidence или логи.
 
-This is not a production deploy.
+Ключевые env для website widget AI staging:
+
+- `DATABASE_URL`
+- `PUBLIC_INTAKE_ALLOWED_ORIGINS` — точные origin лендинга, без wildcard;
+- `AI_WIDGET_ENABLED=true`
+- `AI_WIDGET_GROUNDED_MODE=enforce` для customer-visible grounded ответов;
+- `AI_WIDGET_GROUNDED_MODE=off` или `AI_WIDGET_ENABLED=false` как rollback;
+- `OPENAI_API_KEY`
+- `OPENAI_MODEL`
+- `OPENAI_VERIFIER_MODEL`
+- `AI_WIDGET_DEADLINE_MS`
+
+Для первого preflight можно использовать `shadow`, но customer-visible grounded AI надо проверять именно в `enforce`.
+
+### Шаг 4. Paired smoke с настоящим лендингом
+
+Paired smoke делать с `landing-granit-static`, а не с `granit-site-cms`.
+
+Проверить:
+
+- browser widget отправляет запрос в staging `granit-operations`;
+- CORS разрешает exact origin лендинга;
+- inbound message сохраняется до AI;
+- public response не содержит internal ids/traces/eval labels;
+- AI disclosure показывается;
+- AI ответ сохраняется как outbound message до ответа виджету;
+- manager видит lead/conversation/message, slots/requirements/evidence, handoff/takeover state и safe quality summary;
+- manager takeover блокирует следующий AI reply;
+- fallback при provider/verifier/catalog ошибке не теряет inbound;
+- RAG answer содержит только подтверждённые catalog claims;
+- price/deadline/warranty/availability/final commercial terms уходят в safe limitation/handoff, если catalog не подтверждает точное условие.
+
+### Шаг 5. Evidence
+
+После staging smoke создать новый файл в `docs/release/evidence/` на базе [TEMPLATE_RU.md](docs/release/evidence/TEMPLATE_RU.md).
+
+Evidence должна содержать:
+
+- ветку/SHA `granit-operations`;
+- ветку/SHA `landing-granit-static`;
+- какие migrations применены на staging;
+- env names без values;
+- smoke commands/results;
+- sanitized request/response summary без PII/secrets;
+- manager-visible result;
+- rollback switch;
+- что осталось blocked.
+
+## 7. Что запрещено без отдельного явного разрешения
+
+- production deploy;
+- production migrations;
+- изменение secrets или production config;
+- broad CORS wildcard;
+- отправка `OPENAI_API_KEY` или DB credentials в frontend;
+- Telegram AI outbound;
+- Mastra как primary runtime/orchestrator;
+- удаление или переписывание release worktrees под `/srv/botops/releases/operations/`;
+- использование `granit-site-cms` как текущего landing smoke target без новой ADR/task;
+- выдавать исторические staging evidence за доказательство текущего runtime.
+
+## 8. Быстрые команды
+
+Основные проверки:
+
+```bash
+npx vitest run --maxWorkers=1
+npm run build
+npm run eval:widget-ai:dry-run
+git diff --check
+```
+
+Запуск API локально:
+
+```bash
+npm run dev:api
+```
+
+Live eval требует явного разрешения платных model calls:
+
+```bash
+AI_WIDGET_EVAL_LIVE=true npm run eval:widget-ai:live
+```
+
+Не запускать live eval без `OPENAI_API_KEY` и явного понимания, что это внешний платный вызов.
