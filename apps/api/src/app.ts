@@ -16,6 +16,9 @@ import type { TelegramBotServiceOptions } from "./modules/telegram/inbound/teleg
 export type BuildApiOptions = {
   repository: IntakeRepository;
   widgetAi?: WidgetAiAssemblyOptions;
+  publicIntakeCors?: {
+    allowedOrigins: string[];
+  };
   managerAuth?: ManagerAuthOptions;
   managerShell?: ManagerShellOptions;
   telegramBot?: TelegramBotServiceOptions;
@@ -38,7 +41,9 @@ export function buildApi(options: BuildApiOptions) {
     service: "granit-operations-api"
   }));
 
-  registerPublicIntakeRoutes(app, context.publicIntake);
+  registerPublicIntakeRoutes(app, context.publicIntake, {
+    cors: options.publicIntakeCors
+  });
   registerManagerAuthRoutes(app, context.managerAuth, context.managerTelegram);
   registerManagerShellRoutes(app, options.managerShell);
   registerManagerRoutes(app, context.managerLeads, context.managerAuth);

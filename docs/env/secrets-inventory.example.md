@@ -14,7 +14,7 @@ Use this document to track required environment variable names and ownership.
 | `YANDEX_OAUTH_CLIENT_SECRET` | Yandex ID OAuth app client secret | server only | S02 runtime |
 | `YANDEX_OAUTH_REDIRECT_URI` | Yandex ID OAuth callback URL, for example `https://manager.botops.ru/auth/yandex/callback` | server only | S02 runtime |
 | `MANAGER_AUTH_ALLOWED_ORIGINS` | Allowed manager UI origins | server only | S02 planned |
-| `PUBLIC_INTAKE_ALLOWED_ORIGINS` | Allowed public site origins | server only | future |
+| `PUBLIC_INTAKE_ALLOWED_ORIGINS` | Comma-separated exact HTTP(S) origins allowed to call public intake endpoints through CORS; empty means no browser CORS allowlist | server only | Public intake CORS runtime |
 | `PUBLIC_INTAKE_CONTRACT_VERSION` | Published intake contract version | server/client config | documented as `site_form.v1`; S04 also publishes `site_widget.v1` |
 | `AI_WIDGET_ENABLED` | Enables website widget AI replies only after checks/staging smoke | server only | S05 runtime, default `false` |
 | `OPENAI_API_KEY` | OpenAI Responses API access for website widget AI | server only | S05 runtime when AI is enabled |

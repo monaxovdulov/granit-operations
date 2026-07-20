@@ -40,6 +40,7 @@ const app = buildApi({
     verifierModelName: config.widgetAi.verifierModel,
     deadlineMs: config.widgetAi.deadlineMs
   },
+  publicIntakeCors: config.publicIntakeCors,
   telegramBot: config.telegramBot,
   managerAuth: config.managerAuth
     ? {
