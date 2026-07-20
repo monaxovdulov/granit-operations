@@ -22,13 +22,15 @@ const catalogKnowledge = new FileCatalogKnowledgeProvider();
 const widgetAiProvider = config.widgetAi.openAiApiKey
   ? new OpenAiWidgetAssistantProvider({
       apiKey: config.widgetAi.openAiApiKey,
-      model: config.widgetAi.openAiModel
+      model: config.widgetAi.openAiModel,
+      timeoutMs: config.widgetAi.generatorTimeoutMs
     })
   : undefined;
 const widgetAiVerifier = config.widgetAi.openAiApiKey
   ? new OpenAiWidgetSemanticVerifier({
       apiKey: config.widgetAi.openAiApiKey,
-      model: config.widgetAi.verifierModel
+      model: config.widgetAi.verifierModel,
+      timeoutMs: config.widgetAi.verifierTimeoutMs
     })
   : undefined;
 const app = buildApi({

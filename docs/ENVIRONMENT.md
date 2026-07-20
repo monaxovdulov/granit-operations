@@ -22,6 +22,8 @@ Future environment/config names:
 | `OPENAI_API_KEY` | OpenAI Responses API access for website widget AI | server only | S05 runtime when AI enabled |
 | `OPENAI_MODEL` | OpenAI model for website widget AI, default `gpt-5.5` | server only | S05 runtime |
 | `OPENAI_VERIFIER_MODEL` | Independent semantic verifier model; defaults to `OPENAI_MODEL` | server only | Grounded consultant runtime |
+| `AI_WIDGET_GENERATOR_TIMEOUT_MS` | Generator request timeout, default `10000`, clamped `3000..25000` | server only | Grounded consultant runtime |
+| `AI_WIDGET_VERIFIER_TIMEOUT_MS` | Semantic verifier request timeout, default `6000`, clamped `3000..20000` | server only | Grounded consultant runtime |
 | `AI_WIDGET_DEADLINE_MS` | Shared generator/verifier/repair turn budget, default `18000`, clamped `5000..30000` | server only | Grounded consultant runtime |
 | `AI_WIDGET_EVAL_LIVE` | Explicitly authorizes paid live model evals when exactly `true`; does not enable customer traffic | server only | Local/staging eval runtime |
 | `TELEGRAM_BOT_ENABLED` | Enables Telegram webhook adapter; default must remain `false` outside tested environments | server only | Telegram inbound + manager mini-panel runtime, default `false` |

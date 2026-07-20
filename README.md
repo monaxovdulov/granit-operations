@@ -162,6 +162,8 @@ Env names смотреть в [ENVIRONMENT.md](docs/ENVIRONMENT.md). Значе�
 - `OPENAI_API_KEY`
 - `OPENAI_MODEL`
 - `OPENAI_VERIFIER_MODEL`
+- `AI_WIDGET_GENERATOR_TIMEOUT_MS`
+- `AI_WIDGET_VERIFIER_TIMEOUT_MS`
 - `AI_WIDGET_DEADLINE_MS`
 
 Для первого preflight можно использовать `shadow`, но customer-visible grounded AI надо проверять именно в `enforce`.
