@@ -174,6 +174,93 @@ describe("ops-api modular monolith boundaries", () => {
     expect(aiModuleSource).not.toContain("SiteWidgetMessageRequest");
   });
 
+  it("keeps Mastra-like observability out of primary widget AI runtime assembly", () => {
+    const appContextSource = readSource("app-context.ts");
+    const publicWidgetIntakeServiceSource = readSource(
+      "modules/intake/use-cases/public-widget-intake-service.ts"
+    );
+    const widgetAiReplyGeneratorSource = readSource(
+      "modules/intake/ports/public-widget-ai-reply-generator.ts"
+    );
+    const adrSource = readFileSync(
+      path.join(process.cwd(), "docs/adr/ADR-010-AI_OBSERVABILITY_RUNTIME_BOUNDARY_RU.md"),
+      "utf8"
+    );
+    const disallowedRuntimeReferences: string[] = [];
+
+    for (const filePath of listFiles(apiSrc)) {
+      if (!filePath.endsWith(".ts")) {
+        continue;
+      }
+
+      const relativePath = path.relative(apiSrc, filePath);
+      const normalizedRelativePath = toPosixPath(relativePath).toLowerCase();
+      const source = readFileSync(filePath, "utf8");
+      const lowerSource = source.toLowerCase();
+
+      if (
+        (normalizedRelativePath.includes("mastra") ||
+          normalizedRelativePath.includes("live-v2") ||
+          normalizedRelativePath.includes("live_v2") ||
+          lowerSource.includes("mastra") ||
+          lowerSource.includes("live-v2") ||
+          lowerSource.includes("live_v2")) &&
+        !isAllowedOptionalAiIntegrationFile(relativePath)
+      ) {
+        disallowedRuntimeReferences.push(relativePath);
+      }
+    }
+
+    expect(disallowedRuntimeReferences).toEqual([]);
+    expect(appContextSource).not.toMatch(/mastra|live-v2|live_v2/i);
+    expect(publicWidgetIntakeServiceSource).not.toMatch(/mastra|live-v2|live_v2/i);
+    expect(widgetAiReplyGeneratorSource).toContain("interface PublicWidgetAiReplyGenerator");
+    expect(adrSource).toContain("Primary AI runtime source of truth remains app-owned");
+    expect(adrSource).toContain("Mastra-like observability is allowed only as an optional integration layer");
+  });
+
+  it("keeps AI observability app-owned and manager-safe", () => {
+    const observabilitySinkSource = readSource(
+      "modules/ai/observability/ai-observability-sink.ts"
+    );
+    const sanitizerSource = readSource(
+      "modules/ai/observability/ai-observability-sanitizer.ts"
+    );
+    const postgresRepositorySource = readSource(
+      "modules/conversations/repositories/postgres-intake-repository.ts"
+    );
+    const managerLeadRepositorySource = readSource(
+      "modules/conversations/repositories/manager-lead-repository.ts"
+    );
+    const managerQualitySummarySource = readSection(
+      managerLeadRepositorySource,
+      "export type ManagerAiQualitySummary",
+      "export type ManagerConversation"
+    );
+
+    expect(observabilitySinkSource).toContain("interface AiObservabilitySink");
+    expect(observabilitySinkSource).toContain("recordTrace");
+    expect(observabilitySinkSource).toContain("recordSpan");
+    expect(observabilitySinkSource).toContain("recordModelCall");
+    expect(observabilitySinkSource).not.toMatch(/from\s+["'].*mastra/i);
+    expect(observabilitySinkSource).not.toMatch(/from\s+["'].*openai/i);
+    expect(observabilitySinkSource).not.toMatch(/\b(fetch|Fastify|drizzle|postgres)\b/i);
+
+    expect(postgresRepositorySource).toContain("aiRuns");
+    expect(postgresRepositorySource).toContain("aiQualityEvents");
+    expect(postgresRepositorySource).toContain("sanitizeAiObservabilityMetadata");
+    expect(postgresRepositorySource).toContain("aiRuntimeControls");
+    expect(sanitizerSource).toContain("SENSITIVE_STRING");
+    expect(sanitizerSource).toContain("sanitizeAiObservabilityMetadata");
+
+    expect(managerQualitySummarySource).toContain("eventType");
+    expect(managerQualitySummarySource).toContain("reasonCode");
+    expect(managerQualitySummarySource).toContain("severity");
+    expect(managerQualitySummarySource).toContain("runStatus");
+    expect(managerQualitySummarySource).toContain("createdAt");
+    expect(managerQualitySummarySource).not.toMatch(/metadata|trace|span|prompt|raw/i);
+  });
+
   it("keeps Telegram inbound free of delivery provider sends", () => {
     const inboundSource = readTree("modules/telegram/inbound");
 
@@ -326,6 +413,31 @@ function resolvesToCompatibilityExport(fromFilePath: string, specifier: string):
   }
 
   return compatibilityExportDirs.has(relativePath.split(path.sep)[0] ?? "");
+}
+
+function isAllowedOptionalAiIntegrationFile(relativePath: string): boolean {
+  const normalizedPath = toPosixPath(relativePath);
+
+  return (
+    /^modules\/ai\/adapters\/mastra[-/]/.test(normalizedPath) ||
+    /^modules\/ai\/providers\/mastra[-/]/.test(normalizedPath) ||
+    /^modules\/ai\/observability\/sinks\/mastra[-/]/.test(normalizedPath)
+  );
+}
+
+function readSection(source: string, start: string, end: string): string {
+  const startIndex = source.indexOf(start);
+  const endIndex = source.indexOf(end, startIndex);
+
+  if (startIndex < 0 || endIndex < 0) {
+    throw new Error(`failed to read source section ${start} -> ${end}`);
+  }
+
+  return source.slice(startIndex, endIndex);
+}
+
+function toPosixPath(value: string): string {
+  return value.split(path.sep).join("/");
 }
 
 function collectModuleSpecifiers(sourceFile: ts.SourceFile): string[] {
