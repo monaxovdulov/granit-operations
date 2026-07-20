@@ -13,7 +13,9 @@ import { PostgresIntakeRepository } from "./modules/conversations/repositories/p
 setDefaultResultOrder("ipv4first");
 
 const config = loadConfig(process.env);
-const { db } = createOperationsDb(config.databaseUrl);
+const { db } = createOperationsDb(config.databaseUrl, {
+  searchPath: process.env.DATABASE_SEARCH_PATH
+});
 const repository = new PostgresIntakeRepository(db);
 const managerAuthRepository = new PostgresManagerAuthRepository(db);
 const catalogKnowledge = new FileCatalogKnowledgeProvider();

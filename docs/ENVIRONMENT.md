@@ -9,6 +9,7 @@ Future environment/config names:
 | Name | Purpose | Scope | Status |
 |---|---|---|---|
 | `DATABASE_URL` | Operations Postgres connection | server only | S01 API runtime |
+| `DATABASE_SEARCH_PATH` | Optional comma-separated PostgreSQL schema search path | server only | Staging compatibility; `grounded,public` isolates grounded tables from legacy experiments |
 | `SESSION_SECRET` | Manager auth/session signing | server only | S02 runtime |
 | `YANDEX_OAUTH_CLIENT_ID` | Yandex ID OAuth app client id | server only | S02 runtime |
 | `YANDEX_OAUTH_CLIENT_SECRET` | Yandex ID OAuth app client secret | server only | S02 runtime |
