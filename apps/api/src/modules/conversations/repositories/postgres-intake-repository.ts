@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, gt, lt, ne, or, sql, type SQLWrapper } from "drizzle-orm";
 
 import {
+  aiQualityEvents,
   aiReviewLabels,
   aiRuntimeControls,
   aiRuns,
@@ -36,6 +37,7 @@ import {
   type AiKnownSlots,
   type AiSlotName
 } from "../../ai/ai-dialog-contract.js";
+import { sanitizeAiObservabilityMetadata } from "../../ai/observability/ai-observability-sanitizer.js";
 import {
   aiMessageSentTimelineEvent,
   conversationMessageReceivedTimelineEvent,
@@ -77,6 +79,7 @@ import type {
   AiReviewLabel,
   ChangeManagerLeadStatusInput,
   ManagerAiControl,
+  ManagerAiQualitySummary,
   ManagerChannelIdentity,
   ManagerConversation,
   ManagerLeadDetail,
@@ -605,6 +608,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
 
       return await this.db.transaction(async (tx) => {
         const now = new Date();
+        const sanitizedMetadata = sanitizeAiObservabilityMetadata(input.metadata);
         const nextAiState =
           input.agentAllowedToReplyAfterSend === false ? "needs_manager" : "ai_collecting_info";
         const [sendGate] = await tx
@@ -671,7 +675,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
             sourcePageUrl: input.sourcePageUrl ?? null,
             contentType: "text",
             metadata: {
-              ...input.metadata,
+              ...sanitizedMetadata,
               public_conversation_id: sendGate.publicConversationId
             },
             submittedAt: now,
@@ -818,7 +822,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
             catalogVersion: input.aiRun.catalogVersion ?? null,
             catalogContentHash: input.aiRun.catalogContentHash ?? null,
             reason: input.handoff?.reason ?? null,
-            metadata: input.metadata,
+            metadata: sanitizedMetadata,
             createdAt: now
           });
         }
@@ -878,7 +882,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
             publicMessageId: message.publicMessageId,
             inboundPublicMessageId: input.inboundPublicMessageId,
             publicConversationId: sendGate.publicConversationId,
-            metadata: input.metadata,
+            metadata: sanitizedMetadata,
             createdAt: now
           })
         );
@@ -921,6 +925,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
   ): Promise<void> {
     await this.db.transaction(async (tx) => {
       const now = new Date();
+      const sanitizedMetadata = sanitizeAiObservabilityMetadata(input.metadata);
       const [conversation] = await tx
         .update(conversations)
         .set({
@@ -946,23 +951,23 @@ export class PostgresIntakeRepository implements IntakeRepository {
           inboundPublicMessageId: input.inboundPublicMessageId,
           status: "degraded",
           inputFingerprint: input.inputFingerprint,
-          promptVersion: readOptionalString(input.metadata, "prompt_version") ?? null,
-          policyVersion: readOptionalString(input.metadata, "policy_version") ?? null,
+          promptVersion: readOptionalString(sanitizedMetadata, "prompt_version") ?? null,
+          policyVersion: readOptionalString(sanitizedMetadata, "policy_version") ?? null,
           knowledgeVersion:
-            readOptionalString(input.metadata, "catalog_version") ??
-            readOptionalString(input.metadata, "knowledge_version") ??
+            readOptionalString(sanitizedMetadata, "catalog_version") ??
+            readOptionalString(sanitizedMetadata, "knowledge_version") ??
             null,
-          modelName: readOptionalString(input.metadata, "model_name") ?? null,
-          generatorModelName: readOptionalString(input.metadata, "model_name") ?? null,
+          modelName: readOptionalString(sanitizedMetadata, "model_name") ?? null,
+          generatorModelName: readOptionalString(sanitizedMetadata, "model_name") ?? null,
           verifierModelName:
-            readOptionalString(input.metadata, "verifier_model_name") ?? null,
-          verifierVersion: readOptionalString(input.metadata, "verifier_version") ?? null,
-          verifierVerdict: readOptionalString(input.metadata, "verifier_verdict") ?? null,
-          catalogVersion: readOptionalString(input.metadata, "catalog_version") ?? null,
+            readOptionalString(sanitizedMetadata, "verifier_model_name") ?? null,
+          verifierVersion: readOptionalString(sanitizedMetadata, "verifier_version") ?? null,
+          verifierVerdict: readOptionalString(sanitizedMetadata, "verifier_verdict") ?? null,
+          catalogVersion: readOptionalString(sanitizedMetadata, "catalog_version") ?? null,
           catalogContentHash:
-            readOptionalString(input.metadata, "catalog_content_hash") ?? null,
+            readOptionalString(sanitizedMetadata, "catalog_content_hash") ?? null,
           reason: input.reason,
-          metadata: input.metadata,
+          metadata: sanitizedMetadata,
           createdAt: now
         })
         .onConflictDoNothing({ target: aiRuns.inboundPublicMessageId })
@@ -977,6 +982,20 @@ export class PostgresIntakeRepository implements IntakeRepository {
         .from(conversationMessages)
         .where(eq(conversationMessages.publicMessageId, input.inboundPublicMessageId))
         .limit(1);
+      const qualityEvent = toAiQualityEvent(input.reason);
+
+      await tx.insert(aiQualityEvents).values({
+        aiRunId: run.id,
+        leadId: input.leadId,
+        conversationId: input.conversationId,
+        messageId: inboundMessage?.id ?? null,
+        eventType: qualityEvent.eventType,
+        reasonCode: qualityEvent.reasonCode,
+        severity: qualityEvent.severity,
+        managerVisible: true,
+        resolutionStatus: "open",
+        createdAt: now
+      });
 
       await tx.insert(leadTimelineEvents).values({
         leadId: input.leadId,
@@ -986,7 +1005,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
           public_conversation_id: conversation.publicConversationId,
           inbound_public_message_id: input.inboundPublicMessageId,
           reason: input.reason,
-          ...input.metadata
+          ...sanitizedMetadata
         },
         createdAt: now
       });
@@ -1735,23 +1754,59 @@ export class PostgresIntakeRepository implements IntakeRepository {
   }
 
   private async listManagerConversations(leadId: string): Promise<ManagerConversation[]> {
-    const rows = await this.db
-      .select({
-        conversation: conversations,
-        identity: channelIdentities,
-        session: widgetSessions,
-        message: conversationMessages,
-        delivery: messageDeliveries
-      })
-      .from(conversations)
-      .leftJoin(channelIdentities, eq(conversations.channelIdentityId, channelIdentities.id))
-      .leftJoin(widgetSessions, eq(channelIdentities.widgetSessionId, widgetSessions.id))
-      .leftJoin(conversationMessages, eq(conversationMessages.conversationId, conversations.id))
-      .leftJoin(messageDeliveries, eq(messageDeliveries.conversationMessageId, conversationMessages.id))
-      .where(eq(conversations.leadId, leadId))
-      .orderBy(conversations.createdAt, conversationMessages.createdAt);
+    const [rows, qualityRows] = await Promise.all([
+      this.db
+        .select({
+          conversation: conversations,
+          identity: channelIdentities,
+          session: widgetSessions,
+          message: conversationMessages,
+          delivery: messageDeliveries
+        })
+        .from(conversations)
+        .leftJoin(channelIdentities, eq(conversations.channelIdentityId, channelIdentities.id))
+        .leftJoin(widgetSessions, eq(channelIdentities.widgetSessionId, widgetSessions.id))
+        .leftJoin(conversationMessages, eq(conversationMessages.conversationId, conversations.id))
+        .leftJoin(messageDeliveries, eq(messageDeliveries.conversationMessageId, conversationMessages.id))
+        .where(eq(conversations.leadId, leadId))
+        .orderBy(conversations.createdAt, conversationMessages.createdAt),
+      this.db
+        .select({
+          conversationId: aiQualityEvents.conversationId,
+          eventType: aiQualityEvents.eventType,
+          reasonCode: aiQualityEvents.reasonCode,
+          severity: aiQualityEvents.severity,
+          runStatus: aiRuns.status,
+          createdAt: aiQualityEvents.createdAt
+        })
+        .from(aiQualityEvents)
+        .innerJoin(aiRuns, eq(aiQualityEvents.aiRunId, aiRuns.id))
+        .where(
+          and(
+            eq(aiQualityEvents.leadId, leadId),
+            eq(aiQualityEvents.managerVisible, true),
+            eq(aiQualityEvents.resolutionStatus, "open")
+          )
+        )
+        .orderBy(desc(aiQualityEvents.createdAt))
+    ]);
 
     const byConversation = new Map<string, ManagerConversation>();
+    const latestQualityByConversation = new Map<string, ManagerAiQualitySummary>();
+
+    for (const quality of qualityRows) {
+      if (latestQualityByConversation.has(quality.conversationId)) {
+        continue;
+      }
+
+      latestQualityByConversation.set(quality.conversationId, {
+        eventType: toManagerAiQualityEventType(quality.eventType),
+        reasonCode: quality.reasonCode,
+        severity: toManagerAiQualitySeverity(quality.severity),
+        runStatus: toManagerAiRunStatus(quality.runStatus),
+        createdAt: quality.createdAt.toISOString()
+      });
+    }
 
     for (const row of rows) {
       const existing = byConversation.get(row.conversation.id);
@@ -1764,6 +1819,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
           status: "open",
           aiState: toAiState(row.conversation.aiState),
           agentAllowedToReply: row.conversation.agentAllowedToReply,
+          latestUnresolvedAiQuality: latestQualityByConversation.get(row.conversation.id),
           sourcePageUrl: row.conversation.sourcePageUrl ?? undefined,
           createdAt: row.conversation.createdAt.toISOString(),
           updatedAt: row.conversation.updatedAt.toISOString(),
@@ -3384,6 +3440,74 @@ function toManagerAiRunStatus(
   }
 
   throw new Error(`invalid AI run status ${value}`);
+}
+
+function toManagerAiQualityEventType(value: string): ManagerAiQualitySummary["eventType"] {
+  if (
+    value === "handoff" ||
+    value === "degradation" ||
+    value === "blocked" ||
+    value === "policy_violation" ||
+    value === "model_failure" ||
+    value === "runtime_failure"
+  ) {
+    return value;
+  }
+
+  throw new Error(`invalid AI quality event type ${value}`);
+}
+
+function toManagerAiQualitySeverity(value: string): ManagerAiQualitySummary["severity"] {
+  if (value === "info" || value === "warning" || value === "error" || value === "critical") {
+    return value;
+  }
+
+  throw new Error(`invalid AI quality severity ${value}`);
+}
+
+function toAiQualityEvent(reason: string): Pick<
+  ManagerAiQualitySummary,
+  "eventType" | "reasonCode" | "severity"
+> {
+  if (reason === "missing_openai_config") {
+    return { eventType: "degradation", reasonCode: reason, severity: "warning" };
+  }
+
+  if (reason === "model_error" || reason === "semantic_verifier_error") {
+    return { eventType: "model_failure", reasonCode: reason, severity: "critical" };
+  }
+
+  if (reason === "turn_timeout") {
+    return { eventType: "model_failure", reasonCode: reason, severity: "error" };
+  }
+
+  if (
+    reason === "empty_model_response" ||
+    reason === "unsafe_model_response" ||
+    reason === "grounding_validation_failed"
+  ) {
+    return { eventType: "policy_violation", reasonCode: reason, severity: "error" };
+  }
+
+  if (reason === "agent_reply_blocked") {
+    return { eventType: "blocked", reasonCode: reason, severity: "info" };
+  }
+
+  if (reason === "ai_persistence_unconfirmed") {
+    return { eventType: "runtime_failure", reasonCode: reason, severity: "critical" };
+  }
+
+  return {
+    eventType: "degradation",
+    reasonCode: normalizeReasonCode(reason),
+    severity: "warning"
+  };
+}
+
+function normalizeReasonCode(value: string): string {
+  const normalized = value.trim().replace(/[^A-Za-z0-9_.:-]+/g, "_").slice(0, 120);
+
+  return normalized || "unknown";
 }
 
 function toAiReviewLabel(value: string): AiReviewLabel {

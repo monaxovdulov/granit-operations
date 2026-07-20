@@ -35,6 +35,7 @@ import {
   type FindManagerTelegramActorInput,
   type IntakeRepository,
   type ManagerAiControl,
+  type ManagerAiQualitySummary,
   type ManagerLeadDetail,
   type ManagerLeadListItem,
   type ManagerTelegramActor,
@@ -60,6 +61,7 @@ import {
   type TakeoverConversationInput,
   type TakeoverSiteWidgetConversationInput
 } from "../../src/repositories/intake-repository.js";
+import { sanitizeAiObservabilityMetadata } from "../../src/modules/ai/observability/ai-observability-sanitizer.js";
 
 export class MemoryIntakeRepository implements IntakeRepository {
   saveCalls = 0;
@@ -694,6 +696,7 @@ export class MemoryIntakeRepository implements IntakeRepository {
     }
 
     const createdAt = new Date().toISOString();
+    const sanitizedMetadata = sanitizeAiObservabilityMetadata(input.metadata);
     const updatedLead: ManagerLeadDetail = {
       ...lead,
       updatedAt: createdAt,
@@ -703,7 +706,7 @@ export class MemoryIntakeRepository implements IntakeRepository {
           eventType: "conversation.ai_message_sent",
           summary: "Website widget AI reply persisted",
           metadata: {
-            ...input.metadata,
+            ...sanitizedMetadata,
             public_message_id: input.publicMessageId,
             inbound_public_message_id: input.inboundPublicMessageId
           },
@@ -946,6 +949,8 @@ export class MemoryIntakeRepository implements IntakeRepository {
     }
 
     const createdAt = new Date().toISOString();
+    const sanitizedMetadata = sanitizeAiObservabilityMetadata(input.metadata);
+    const qualityEvent = toMemoryAiQualityEvent(input.reason);
     this.leads.set(input.leadId, {
       ...lead,
       updatedAt: createdAt,
@@ -958,7 +963,7 @@ export class MemoryIntakeRepository implements IntakeRepository {
             inbound_public_message_id: input.inboundPublicMessageId,
             input_fingerprint: input.inputFingerprint,
             reason: input.reason,
-            ...input.metadata
+            ...sanitizedMetadata
           },
           createdAt
         }
@@ -969,24 +974,24 @@ export class MemoryIntakeRepository implements IntakeRepository {
           aiRunId: input.inboundPublicMessageId,
           status: "degraded",
           verdict:
-            typeof input.metadata.verifier_verdict === "string"
-              ? input.metadata.verifier_verdict
+            typeof sanitizedMetadata.verifier_verdict === "string"
+              ? sanitizedMetadata.verifier_verdict
               : undefined,
           generatorModelName:
-            typeof input.metadata.model_name === "string"
-              ? input.metadata.model_name
+            typeof sanitizedMetadata.model_name === "string"
+              ? sanitizedMetadata.model_name
               : undefined,
           verifierModelName:
-            typeof input.metadata.verifier_model_name === "string"
-              ? input.metadata.verifier_model_name
+            typeof sanitizedMetadata.verifier_model_name === "string"
+              ? sanitizedMetadata.verifier_model_name
               : undefined,
           verifierVersion:
-            typeof input.metadata.verifier_version === "string"
-              ? input.metadata.verifier_version
+            typeof sanitizedMetadata.verifier_version === "string"
+              ? sanitizedMetadata.verifier_version
               : undefined,
           catalogVersion:
-            typeof input.metadata.catalog_version === "string"
-              ? input.metadata.catalog_version
+            typeof sanitizedMetadata.catalog_version === "string"
+              ? sanitizedMetadata.catalog_version
               : undefined,
           reviewLabels: [],
           createdAt
@@ -994,7 +999,17 @@ export class MemoryIntakeRepository implements IntakeRepository {
       },
       conversations: lead.conversations.map((conversation) =>
         conversation.channelIdentity.widgetPublicSessionId === publicSessionId
-          ? { ...conversation, updatedAt: createdAt }
+          ? {
+              ...conversation,
+              latestUnresolvedAiQuality: {
+                eventType: qualityEvent.eventType,
+                reasonCode: qualityEvent.reasonCode,
+                severity: qualityEvent.severity,
+                runStatus: "degraded",
+                createdAt
+              },
+              updatedAt: createdAt
+            }
           : conversation
       )
     });
@@ -2083,6 +2098,50 @@ function toManagerConversationMessage(
     providerFileId: input.message.providerFileId,
     createdAt
   };
+}
+
+function toMemoryAiQualityEvent(
+  reason: string
+): Pick<ManagerAiQualitySummary, "eventType" | "reasonCode" | "severity"> {
+  if (reason === "missing_openai_config") {
+    return { eventType: "degradation", reasonCode: reason, severity: "warning" };
+  }
+
+  if (reason === "model_error" || reason === "semantic_verifier_error") {
+    return { eventType: "model_failure", reasonCode: reason, severity: "critical" };
+  }
+
+  if (reason === "turn_timeout") {
+    return { eventType: "model_failure", reasonCode: reason, severity: "error" };
+  }
+
+  if (
+    reason === "empty_model_response" ||
+    reason === "unsafe_model_response" ||
+    reason === "grounding_validation_failed"
+  ) {
+    return { eventType: "policy_violation", reasonCode: reason, severity: "error" };
+  }
+
+  if (reason === "agent_reply_blocked") {
+    return { eventType: "blocked", reasonCode: reason, severity: "info" };
+  }
+
+  if (reason === "ai_persistence_unconfirmed") {
+    return { eventType: "runtime_failure", reasonCode: reason, severity: "critical" };
+  }
+
+  return {
+    eventType: "degradation",
+    reasonCode: normalizeMemoryReasonCode(reason),
+    severity: "warning"
+  };
+}
+
+function normalizeMemoryReasonCode(value: string): string {
+  const normalized = value.trim().replace(/[^A-Za-z0-9_.:-]+/g, "_").slice(0, 120);
+
+  return normalized || "unknown";
 }
 
 const CORE_STRUCTURED_INTAKE_SLOTS: readonly AiSlotName[] = [

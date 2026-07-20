@@ -619,6 +619,45 @@ export const aiReviewLabels = pgTable(
   })
 );
 
+export const aiQualityEvents = pgTable(
+  "ai_quality_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    aiRunId: uuid("ai_run_id")
+      .notNull()
+      .references(() => aiRuns.id, { onDelete: "cascade" }),
+    leadId: uuid("lead_id")
+      .notNull()
+      .references(() => leads.id, { onDelete: "cascade" }),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    messageId: uuid("message_id").references(() => conversationMessages.id, {
+      onDelete: "set null"
+    }),
+    eventType: text("event_type").notNull(),
+    reasonCode: text("reason_code").notNull(),
+    severity: text("severity").notNull(),
+    managerVisible: boolean("manager_visible").notNull().default(true),
+    resolutionStatus: text("resolution_status").notNull().default("open"),
+    resolutionCode: text("resolution_code"),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => ({
+    leadOpenCreatedIdx: index("ai_quality_events_lead_open_created_idx").on(
+      table.leadId,
+      table.managerVisible,
+      table.resolutionStatus,
+      table.createdAt
+    ),
+    conversationCreatedIdx: index("ai_quality_events_conversation_created_idx").on(
+      table.conversationId,
+      table.createdAt
+    )
+  })
+);
+
 export const managerSessions = pgTable(
   "manager_sessions",
   {

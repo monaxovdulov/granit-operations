@@ -47,6 +47,9 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import { AuthRequiredError, managerApi } from "./api";
 import {
   LEAD_STATUS_OPTIONS,
+  aiQualityEventLabel,
+  aiQualityReasonLabel,
+  aiQualitySeverityColor,
   aiReviewLabel,
   contactLabel,
   conversationChannelLabel,
@@ -1434,6 +1437,31 @@ function ConversationHistory({
       {takeoverError ? (
         <Alert color="red" variant="light" icon={<AlertCircle size={18} />}>
           {takeoverError}
+        </Alert>
+      ) : null}
+
+      {conversation.latestUnresolvedAiQuality ? (
+        <Alert
+          color={aiQualitySeverityColor(conversation.latestUnresolvedAiQuality.severity)}
+          variant="light"
+          icon={<AlertCircle size={18} />}
+        >
+          <Group gap="xs" mb={4}>
+            <Text size="sm" fw={700}>
+              {aiQualityEventLabel(conversation.latestUnresolvedAiQuality)}
+            </Text>
+            <Badge
+              size="xs"
+              variant="light"
+              color={aiQualitySeverityColor(conversation.latestUnresolvedAiQuality.severity)}
+            >
+              {conversation.latestUnresolvedAiQuality.severity}
+            </Badge>
+          </Group>
+          <Text size="xs" c="dimmed">
+            {aiQualityReasonLabel(conversation.latestUnresolvedAiQuality.reasonCode)} ·{" "}
+            {formatDate(conversation.latestUnresolvedAiQuality.createdAt)}
+          </Text>
         </Alert>
       ) : null}
 
