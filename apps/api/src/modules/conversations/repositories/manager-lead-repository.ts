@@ -78,6 +78,20 @@ export type ManagerChannelIdentity = {
   widgetInstanceId?: string;
 };
 
+export type ManagerAiQualitySummary = {
+  eventType:
+    | "handoff"
+    | "degradation"
+    | "blocked"
+    | "policy_violation"
+    | "model_failure"
+    | "runtime_failure";
+  reasonCode: string;
+  severity: "info" | "warning" | "error" | "critical";
+  runStatus: "replied" | "handoff" | "degraded";
+  createdAt: string;
+};
+
 export type ManagerConversation = {
   publicConversationId: string;
   channel: CustomerChannel;
@@ -85,6 +99,7 @@ export type ManagerConversation = {
   status: "open";
   aiState: AiState;
   agentAllowedToReply: boolean;
+  latestUnresolvedAiQuality?: ManagerAiQualitySummary;
   sourcePageUrl?: string;
   createdAt: string;
   updatedAt: string;

@@ -4,6 +4,7 @@ import {
   isLeadStatus,
   type LeadStatus,
   type AiReviewLabel,
+  type ManagerAiQualitySummary,
   type ManagerLeadDetail,
   type ManagerLeadListItem,
   type ManagerStructuredIntakeSlot,
@@ -163,6 +164,46 @@ export function aiReviewLabel(value: AiReviewLabel) {
   };
 
   return labels[value];
+}
+
+export function aiQualityEventLabel(event: ManagerAiQualitySummary) {
+  const labels: Record<ManagerAiQualitySummary["eventType"], string> = {
+    handoff: "AI передал диалог",
+    degradation: "AI не ответил",
+    blocked: "AI-ответ заблокирован",
+    policy_violation: "Ответ отклонен policy gate",
+    model_failure: "Ошибка AI runtime",
+    runtime_failure: "Ошибка сохранения AI"
+  };
+
+  return labels[event.eventType];
+}
+
+export function aiQualityReasonLabel(reasonCode: string) {
+  const labels: Record<string, string> = {
+    missing_openai_config: "AI-провайдер не настроен",
+    model_error: "Ошибка модели",
+    semantic_verifier_error: "Ошибка verifier",
+    turn_timeout: "Превышено время ответа",
+    empty_model_response: "Пустой ответ модели",
+    unsafe_model_response: "Ответ не прошел safety/grounding gate",
+    grounding_validation_failed: "Ответ не прошел grounding validation",
+    agent_reply_blocked: "Send gate заблокировал ответ",
+    ai_persistence_unconfirmed: "Сохранение AI-ответа не подтверждено"
+  };
+
+  return labels[reasonCode] ?? reasonCode;
+}
+
+export function aiQualitySeverityColor(severity: ManagerAiQualitySummary["severity"]) {
+  const colors: Record<ManagerAiQualitySummary["severity"], string> = {
+    info: "gray",
+    warning: "yellow",
+    error: "orange",
+    critical: "red"
+  };
+
+  return colors[severity];
 }
 
 export function timelineEventLabel(eventType: string) {
