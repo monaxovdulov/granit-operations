@@ -163,6 +163,28 @@ export interface WidgetAiSemanticVerifier {
   verify(input: WidgetAiVerifierInput, signal?: AbortSignal): Promise<WidgetAiVerifierResult>;
 }
 
+export function normalizeWidgetAiVerificationSpans(
+  verification: WidgetAiVerification,
+  replyText: string
+): WidgetAiVerification {
+  return {
+    ...verification,
+    claimVerdicts: verification.claimVerdicts.map((claim) => {
+      const first = replyText.indexOf(claim.text);
+
+      if (first < 0 || replyText.indexOf(claim.text, first + 1) >= 0) {
+        return claim;
+      }
+
+      return {
+        ...claim,
+        start: first,
+        end: first + claim.text.length
+      };
+    })
+  };
+}
+
 const stringEnumSchema = (values: readonly string[]) => ({
   type: "string",
   enum: [...values]

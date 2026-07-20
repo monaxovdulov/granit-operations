@@ -17,6 +17,7 @@ import {
 } from "../src/modules/ai/services/grounded-widget-ai-service.js";
 import {
   buildWidgetAiVerifierInstructions,
+  normalizeWidgetAiVerificationSpans,
   WIDGET_AI_VERIFIER_VERSION,
   type WidgetAiSemanticVerifier,
   type WidgetAiVerification,
@@ -45,6 +46,64 @@ describe("grounded widget AI core", () => {
     expect(instructions).toContain("никогда не используй path=frontend.url");
     expect(instructions).toContain("systemPolicyId=widget.missing_knowledge");
     expect(instructions).toContain("Не помечай такую фразу unsupported_claim");
+  });
+
+  it("anchors verifier claims to one exact reply occurrence", () => {
+    const result = normalizeWidgetAiVerificationSpans(
+      {
+        ...verification("pass", "answer"),
+        factualClaimsPresent: true,
+        claimVerdicts: [
+          {
+            text: "Памятник «Арфа»",
+            start: 0,
+            end: 15,
+            kind: "catalog",
+            supported: true,
+            catalogReference: {
+              recordId: "ent_1395cd250bbce644514c7e44",
+              revision: 1,
+              path: "/title",
+              catalogVersion: "catalog.v1"
+            },
+            messageEvidence: null,
+            systemPolicyId: null,
+            detail: null
+          }
+        ]
+      },
+      "Вот Памятник «Арфа» в каталоге."
+    );
+
+    expect(result.claimVerdicts[0]).toMatchObject({ start: 4, end: 19 });
+  });
+
+  it("does not guess a claim span when the same text is repeated", () => {
+    const original = {
+      ...verification("pass", "answer"),
+      factualClaimsPresent: true,
+      claimVerdicts: [
+        {
+          text: "Арфа",
+          start: 1,
+          end: 5,
+          kind: "catalog" as const,
+          supported: true,
+          catalogReference: {
+            recordId: "ent_1395cd250bbce644514c7e44",
+            revision: 1,
+            path: "/title",
+            catalogVersion: "catalog.v1"
+          },
+          messageEvidence: null,
+          systemPolicyId: null,
+          detail: null
+        }
+      ]
+    };
+
+    expect(normalizeWidgetAiVerificationSpans(original, "Арфа и Арфа"))
+      .toEqual(original);
   });
 
   it("uses an explicit empty catalog without inventing temporary facts", async () => {
