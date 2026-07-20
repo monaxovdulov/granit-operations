@@ -25,7 +25,7 @@ Contract/version:
 - Validation/failure path:
 - Idempotency:
 - Public response privacy:
-- Paired smoke with site-cms:
+- Paired smoke with active landing repo `landing-granit-static`:
 
 ## Что Не Записывать
 

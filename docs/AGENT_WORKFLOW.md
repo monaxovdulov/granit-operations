@@ -1,7 +1,7 @@
 # Agent Workflow - granit-operations
 
-Status: initial scaffold
-Repo role: intake API, manager workflow, Postgres operational state, Telegram later, AI workflows later, observability/evals
+Status: active source map updated on 2026-07-20
+Repo role: intake API, manager workflow, Postgres operational state, app-owned website widget AI runtime, Telegram manager delivery path, observability/evals
 
 ## Before Editing
 
@@ -10,6 +10,14 @@ Repo role: intake API, manager workflow, Postgres operational state, Telegram la
 3. Check `git status --short`.
 4. Read `.agents/state/granit-dev-workflow.json` if it exists.
 5. Do not overwrite unrelated dirty work.
+
+## Current External Repo Map
+
+- `granit-operations`: backend/API, Postgres operational state, manager panel, AI runtime, app-owned send gate, CORS, observability/evals.
+- `monaxovdulov/landing-granit-static`: current customer-facing static landing and browser form/widget integration. Local checkout: `/home/devuser/ai-projects/landing-granit-static`.
+- `granit-site-cms`: not the current customer-facing landing source for AI/widget staging. Do not use it as the paired-smoke target unless a later accepted ADR/task explicitly promotes it.
+
+When staging the website widget AI path, pair-smoke against the active `landing-granit-static` consumer and the `granit-operations` public API.
 
 ## Where To Write
 
@@ -62,7 +70,7 @@ For S01 provider evidence, record:
 - failure path result;
 - idempotency behavior;
 - public response does not leak internal ids/traces;
-- paired smoke link to site-cms evidence.
+- paired smoke link to active `landing-granit-static` evidence.
 
 ## State Updates
 

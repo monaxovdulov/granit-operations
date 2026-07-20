@@ -1,6 +1,6 @@
 # Smoke Tests
 
-Status: focused provider tests added; paired site-cms smoke still required
+Status: focused provider tests added; paired active landing smoke required
 
 S01 smoke expectations:
 
@@ -14,6 +14,6 @@ S01 smoke expectations:
 - public response avoids internal ids, traces, manager ids, eval labels, handoff internals, raw internal errors, database details, and private notification destinations;
 - repeated idempotency key does not create duplicate accepted leads.
 
-Paired smoke with `granit-site-cms` is required before staging traffic reaches the affected path.
+Paired smoke with the active landing repo `monaxovdulov/landing-granit-static` is required before staging traffic reaches the affected path. Do not use `granit-site-cms` as the current customer-facing landing source unless a later accepted ADR/task updates the repo map.
 
 Production smoke belongs to a later reviewed release flow and requires explicit owner confirmation for a concrete release candidate.
