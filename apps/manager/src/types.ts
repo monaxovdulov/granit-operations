@@ -17,6 +17,13 @@ export type ManagerTelegramBindingStatus = {
   boundAt?: string;
 };
 
+export type ManagerAiControl = {
+  enabled: boolean;
+  version: number;
+  changedByManagerEmail?: string;
+  changedAt: string;
+};
+
 export type ManagerLeadSource = {
   channel: "site_form" | "site_widget" | "telegram";
   pageUrl?: string;

@@ -76,6 +76,7 @@ import {
   isLeadStatus,
   type AiReviewLabel,
   type LeadStatus,
+  type ManagerAiControl,
   type ManagerLeadDetail,
   type ManagerLeadListItem,
   type ManagerTelegramBindingStatus,
@@ -111,6 +112,12 @@ type TakeoverState =
   | { status: "idle" }
   | { status: "saving"; publicConversationId: string }
   | { status: "error"; publicConversationId: string; message: string };
+
+type AiControlState =
+  | { status: "loading" }
+  | { status: "loaded"; control: ManagerAiControl }
+  | { status: "saving"; control: ManagerAiControl }
+  | { status: "error"; message: string; control?: ManagerAiControl };
 
 type TelegramBindTokenState =
   | { status: "idle" }
@@ -284,6 +291,53 @@ function TelegramBindingControl({
   );
 }
 
+function AiGlobalControl({
+  state,
+  disabled,
+  onToggle
+}: {
+  state: AiControlState;
+  disabled: boolean;
+  onToggle: () => void;
+}) {
+  const control =
+    state.status === "loaded" || state.status === "saving"
+      ? state.control
+      : state.status === "error"
+      ? state.control
+      : undefined;
+  const enabled = control?.enabled ?? true;
+  const label = enabled ? "AI включен" : "AI остановлен";
+
+  return (
+    <Box className="aiGlobalControl" visibleFrom="md">
+      <Group gap="xs" wrap="nowrap">
+        <Button
+          size="xs"
+          variant={enabled ? "light" : "filled"}
+          color={enabled ? "green" : "red"}
+          leftSection={enabled ? <Bot size={14} /> : <BotOff size={14} />}
+          loading={state.status === "loading" || state.status === "saving"}
+          disabled={disabled || !control}
+          onClick={onToggle}
+        >
+          {label}
+        </Button>
+        {control ? (
+          <Text size="xs" c="dimmed" visibleFrom="lg">
+            v{control.version}
+          </Text>
+        ) : null}
+      </Group>
+      {state.status === "error" ? (
+        <Text size="xs" c="red">
+          {state.message}
+        </Text>
+      ) : null}
+    </Box>
+  );
+}
+
 function ManagerWorkspace({
   user,
   telegramBinding,
@@ -302,6 +356,7 @@ function ManagerWorkspace({
   const [detailState, setDetailState] = useState<DetailState>({ status: "idle" });
   const [statusChangeState, setStatusChangeState] = useState<StatusChangeState>({ status: "idle" });
   const [takeoverState, setTakeoverState] = useState<TakeoverState>({ status: "idle" });
+  const [aiControlState, setAiControlState] = useState<AiControlState>({ status: "loading" });
   const [telegramBindTokenState, setTelegramBindTokenState] = useState<TelegramBindTokenState>({
     status: "idle"
   });
@@ -347,6 +402,24 @@ function ManagerWorkspace({
 
     return () => window.clearInterval(intervalId);
   }, [loadLeads]);
+
+  const loadAiControl = useCallback(async () => {
+    try {
+      const response = await managerApi.getAiControl();
+      setAiControlState({ status: "loaded", control: response.control });
+    } catch (error) {
+      if (error instanceof AuthRequiredError) {
+        onSignedOut();
+        return;
+      }
+
+      setAiControlState({ status: "error", message: errorMessage(error) });
+    }
+  }, [onSignedOut]);
+
+  useEffect(() => {
+    void loadAiControl();
+  }, [loadAiControl]);
 
   useEffect(() => {
     setStatusChangeState({ status: "idle" });
@@ -450,6 +523,75 @@ function ManagerWorkspace({
     [onSignedOut, selectedLeadId]
   );
 
+  const handleSetConversationAiControl = useCallback(
+    async (publicConversationId: string, enabled: boolean) => {
+      if (!selectedLeadId) {
+        return;
+      }
+
+      setTakeoverState({ status: "saving", publicConversationId });
+
+      try {
+        const response = await managerApi.setConversationAiControl(
+          selectedLeadId,
+          publicConversationId,
+          enabled
+        );
+
+        setDetailState({ status: "loaded", lead: response.lead });
+        setLeadsState((current) => ({
+          ...current,
+          leads: replaceLeadListItem(current.leads, response.lead)
+        }));
+        setTakeoverState({ status: "idle" });
+      } catch (error) {
+        if (error instanceof AuthRequiredError) {
+          onSignedOut();
+          return;
+        }
+
+        setTakeoverState({
+          status: "error",
+          publicConversationId,
+          message: errorMessage(error)
+        });
+      }
+    },
+    [onSignedOut, selectedLeadId]
+  );
+
+  const handleSetGlobalAiControl = useCallback(async () => {
+    const current =
+      aiControlState.status === "loaded" || aiControlState.status === "saving"
+        ? aiControlState.control
+        : aiControlState.status === "error"
+        ? aiControlState.control
+        : undefined;
+
+    if (!current) {
+      return;
+    }
+
+    setAiControlState({ status: "saving", control: current });
+
+    try {
+      const response = await managerApi.setAiControl(!current.enabled, current.version);
+      setAiControlState({ status: "loaded", control: response.control });
+    } catch (error) {
+      if (error instanceof AuthRequiredError) {
+        onSignedOut();
+        return;
+      }
+
+      setAiControlState({
+        status: "error",
+        message: errorMessage(error),
+        control: current
+      });
+      void loadAiControl();
+    }
+  }, [aiControlState, loadAiControl, onSignedOut]);
+
   const handleLogout = async () => {
     try {
       await managerApi.logout();
@@ -512,6 +654,11 @@ function ManagerWorkspace({
           </Group>
 
           <Group gap="sm" wrap="nowrap">
+            <AiGlobalControl
+              state={aiControlState}
+              disabled={user.role === "viewer"}
+              onToggle={handleSetGlobalAiControl}
+            />
             <TelegramBindingControl
               binding={telegramBinding}
               tokenState={telegramBindTokenState}
@@ -587,6 +734,7 @@ function ManagerWorkspace({
             takeoverState={takeoverState}
             canManageAi={user.role !== "viewer"}
             onTakeover={handleTakeover}
+            onSetConversationAiControl={handleSetConversationAiControl}
           />
         </Container>
       </AppShell.Main>
@@ -682,7 +830,8 @@ function LeadDetailPanel({
   onStatusChange,
   takeoverState,
   canManageAi,
-  onTakeover
+  onTakeover,
+  onSetConversationAiControl
 }: {
   selectedLead: ManagerLeadListItem | null;
   detailState: DetailState;
@@ -691,6 +840,7 @@ function LeadDetailPanel({
   takeoverState: TakeoverState;
   canManageAi: boolean;
   onTakeover: (publicConversationId: string) => void;
+  onSetConversationAiControl: (publicConversationId: string, enabled: boolean) => void;
 }) {
   if (!selectedLead) {
     return (
@@ -745,6 +895,7 @@ function LeadDetailPanel({
       takeoverState={takeoverState}
       canManageAi={canManageAi}
       onTakeover={onTakeover}
+      onSetConversationAiControl={onSetConversationAiControl}
     />
   );
 }
@@ -755,7 +906,8 @@ function LoadedLeadDetail({
   onStatusChange,
   takeoverState,
   canManageAi,
-  onTakeover
+  onTakeover,
+  onSetConversationAiControl
 }: {
   lead: ManagerLeadDetail;
   statusChangeState: StatusChangeState;
@@ -763,6 +915,7 @@ function LoadedLeadDetail({
   takeoverState: TakeoverState;
   canManageAi: boolean;
   onTakeover: (publicConversationId: string) => void;
+  onSetConversationAiControl: (publicConversationId: string, enabled: boolean) => void;
 }) {
   const [selectedStatus, setSelectedStatus] = useState<LeadStatus>(lead.status);
   const utmEntries = Object.entries(lead.source.utm ?? {}).filter(([, value]) => Boolean(value));
@@ -860,6 +1013,7 @@ function LoadedLeadDetail({
                   takeoverState={takeoverState}
                   canManageAi={canManageAi}
                   onTakeover={onTakeover}
+                  onSetConversationAiControl={onSetConversationAiControl}
                 />
               ))}
             </Stack>
@@ -1169,12 +1323,14 @@ function ConversationHistory({
   conversation,
   takeoverState,
   canManageAi,
-  onTakeover
+  onTakeover,
+  onSetConversationAiControl
 }: {
   conversation: ManagerLeadDetail["conversations"][number];
   takeoverState: TakeoverState;
   canManageAi: boolean;
   onTakeover: (publicConversationId: string) => void;
+  onSetConversationAiControl: (publicConversationId: string, enabled: boolean) => void;
 }) {
   const [expanded, setExpanded] = useState(true);
   const canCollapse = conversation.messages.length > COLLAPSED_DIALOG_MESSAGE_LIMIT;
@@ -1230,7 +1386,25 @@ function ConversationHistory({
         </Box>
 
         <Group gap="xs" justify="flex-end">
-          {canManageAi && conversation.agentAllowedToReply ? (
+          {canManageAi && conversation.channel === "site_widget" ? (
+            <Button
+              variant="light"
+              size="xs"
+              color={conversation.agentAllowedToReply ? "red" : "green"}
+              loading={isTakingOver}
+              leftSection={
+                conversation.agentAllowedToReply ? <BotOff size={14} /> : <Bot size={14} />
+              }
+              onClick={() =>
+                onSetConversationAiControl(
+                  conversation.publicConversationId,
+                  !conversation.agentAllowedToReply
+                )
+              }
+            >
+              {conversation.agentAllowedToReply ? "Остановить AI" : "Включить AI"}
+            </Button>
+          ) : canManageAi && conversation.agentAllowedToReply ? (
             <Button
               variant="light"
               size="xs"

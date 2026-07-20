@@ -195,6 +195,37 @@ export type RecordAiReviewLabelInput = {
   changedByManagerRole: string;
 };
 
+export type ManagerAiControl = {
+  enabled: boolean;
+  version: number;
+  changedByManagerEmail?: string;
+  changedAt: string;
+};
+
+export class AiControlVersionConflictError extends Error {
+  constructor() {
+    super("manager AI control version conflict");
+    this.name = "AiControlVersionConflictError";
+  }
+}
+
+export type SetManagerAiControlInput = {
+  enabled: boolean;
+  expectedVersion: number;
+  changedByManagerId: string;
+  changedByManagerEmail: string;
+  changedByManagerRole: string;
+};
+
+export type SetConversationAiControlInput = {
+  leadId: string;
+  publicConversationId: string;
+  enabled: boolean;
+  changedByManagerId: string;
+  changedByManagerEmail: string;
+  changedByManagerRole: string;
+};
+
 export type ManagerLeadDetail = ManagerLeadListItem & {
   timeline: ManagerTimelineEvent[];
   conversations: ManagerConversation[];
@@ -256,6 +287,11 @@ export type TakeoverConversationByPublicIdInput = {
 };
 
 export interface ManagerLeadRepository {
+  getManagerAiControl?(): Promise<ManagerAiControl>;
+  setManagerAiControl?(input: SetManagerAiControlInput): Promise<ManagerAiControl>;
+  setConversationAiControl?(
+    input: SetConversationAiControlInput
+  ): Promise<ManagerLeadDetail | null>;
   listManagerLeads(): Promise<ManagerLeadListItem[]>;
   getManagerLead(leadId: string): Promise<ManagerLeadDetail | null>;
   recordAiReviewLabel(input: RecordAiReviewLabelInput): Promise<ManagerLeadDetail | null>;

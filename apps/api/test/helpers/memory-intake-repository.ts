@@ -14,6 +14,7 @@ import type {
   AiSlotName
 } from "../../src/modules/ai/ai-dialog-contract.js";
 import {
+  AiControlVersionConflictError,
   AgentReplyBlockedError,
   IdempotencyConflictError,
   ManagerTelegramReplyContextMissingError,
@@ -33,6 +34,7 @@ import {
   type CreateManagerTelegramReplyContextResult,
   type FindManagerTelegramActorInput,
   type IntakeRepository,
+  type ManagerAiControl,
   type ManagerLeadDetail,
   type ManagerLeadListItem,
   type ManagerTelegramActor,
@@ -51,6 +53,8 @@ import {
   type SaveSiteWidgetAiMessageInput,
   type SaveSiteWidgetAiMessageResult,
   type SiteWidgetHistoryResult,
+  type SetConversationAiControlInput,
+  type SetManagerAiControlInput,
   type SetNextStepInput,
   type TakeoverConversationByPublicIdInput,
   type TakeoverConversationInput,
@@ -62,6 +66,11 @@ export class MemoryIntakeRepository implements IntakeRepository {
   aiSaveCalls = 0;
   lastAiSaveInput?: SaveSiteWidgetAiMessageInput;
   readonly shadowComparisons: RecordSiteWidgetAiShadowComparisonInput[] = [];
+  private managerAiControl: ManagerAiControl = {
+    enabled: true,
+    version: 1,
+    changedAt: "2026-07-16T00:00:00.000Z"
+  };
   private readonly leads = new Map<string, ManagerLeadDetail>();
   private readonly idempotency = new Map<
     string,
@@ -598,7 +607,8 @@ export class MemoryIntakeRepository implements IntakeRepository {
       ?.conversations.find(
         (candidate) => candidate.channelIdentity.widgetPublicSessionId === publicSessionId
       );
-    const agentAllowedToReply = conversation?.agentAllowedToReply ?? false;
+    const agentAllowedToReply =
+      (conversation?.agentAllowedToReply ?? false) && this.managerAiControl.enabled;
     const aiState = conversation?.aiState ?? "ai_collecting_info";
 
     return {
@@ -679,7 +689,7 @@ export class MemoryIntakeRepository implements IntakeRepository {
       (candidate) => candidate.channelIdentity.widgetPublicSessionId === publicSessionId
     );
 
-    if (!conversation?.agentAllowedToReply) {
+    if (!conversation?.agentAllowedToReply || !this.managerAiControl.enabled) {
       throw new AgentReplyBlockedError();
     }
 
@@ -1051,6 +1061,89 @@ export class MemoryIntakeRepository implements IntakeRepository {
 
   async getManagerLead(leadId: string): Promise<ManagerLeadDetail | null> {
     return this.leads.get(leadId) ?? null;
+  }
+
+  async getManagerAiControl(): Promise<ManagerAiControl> {
+    return { ...this.managerAiControl };
+  }
+
+  async setManagerAiControl(input: SetManagerAiControlInput): Promise<ManagerAiControl> {
+    if (input.expectedVersion !== this.managerAiControl.version) {
+      throw new AiControlVersionConflictError();
+    }
+
+    this.managerAiControl = {
+      enabled: input.enabled,
+      version: this.managerAiControl.version + 1,
+      changedByManagerEmail: input.changedByManagerEmail,
+      changedAt: new Date().toISOString()
+    };
+
+    return { ...this.managerAiControl };
+  }
+
+  async setConversationAiControl(
+    input: SetConversationAiControlInput
+  ): Promise<ManagerLeadDetail | null> {
+    const lead = this.leads.get(input.leadId);
+
+    if (!lead) {
+      return null;
+    }
+
+    const conversation = lead.conversations.find(
+      (candidate) => candidate.publicConversationId === input.publicConversationId
+    );
+
+    if (!conversation || conversation.channel !== "site_widget") {
+      return null;
+    }
+
+    const nextAiState = input.enabled ? "ai_collecting_info" : "manager_active";
+
+    if (
+      conversation.agentAllowedToReply === input.enabled &&
+      conversation.aiState === nextAiState
+    ) {
+      return lead;
+    }
+
+    const changedAt = new Date().toISOString();
+    const updatedLead: ManagerLeadDetail = {
+      ...lead,
+      updatedAt: changedAt,
+      timeline: [
+        ...lead.timeline,
+        {
+          eventType: "conversation.ai_control_changed",
+          summary: input.enabled ? "Manager enabled AI replies" : "Manager disabled AI replies",
+          metadata: {
+            public_conversation_id: input.publicConversationId,
+            enabled: input.enabled,
+            previous_agent_allowed_to_reply: conversation.agentAllowedToReply,
+            previous_ai_state: conversation.aiState,
+            changed_by_manager_id: input.changedByManagerId,
+            changed_by_manager_email: input.changedByManagerEmail,
+            changed_by_manager_role: input.changedByManagerRole
+          },
+          createdAt: changedAt
+        }
+      ],
+      conversations: lead.conversations.map((candidate) =>
+        candidate.publicConversationId === input.publicConversationId
+          ? {
+              ...candidate,
+              agentAllowedToReply: input.enabled,
+              aiState: nextAiState,
+              updatedAt: changedAt
+            }
+          : candidate
+      )
+    };
+
+    this.leads.set(input.leadId, updatedLead);
+
+    return updatedLead;
   }
 
   async recordAiReviewLabel(
