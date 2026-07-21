@@ -217,12 +217,26 @@ export function validateWidgetAiVerification(input: {
 
   if (
     verification.requiredAction !== null &&
-    verification.requiredAction !== decision.action
+    verification.requiredAction !== decision.action &&
+    !isBenignClarifyAsAnswerAction(input.decision, verification)
   ) {
     issues.add("required_action_mismatch");
   }
 
   return [...issues];
+}
+
+function isBenignClarifyAsAnswerAction(
+  decision: GroundedAiTurnCandidateDecision,
+  verification: WidgetAiVerification
+): boolean {
+  return (
+    verification.verdict === "pass" &&
+    verification.requiredAction === "answer" &&
+    decision.action === "clarify" &&
+    decision.requestedSlots.length === 1 &&
+    verification.violations.length === 0
+  );
 }
 
 function sameEvidence(left: AiTextEvidence, right: AiTextEvidence): boolean {

@@ -47,6 +47,7 @@ describe("grounded widget AI core", () => {
     expect(instructions).toContain("никогда не используй path=frontend.url");
     expect(instructions).toContain("systemPolicyId=widget.missing_knowledge");
     expect(instructions).toContain("Не помечай такую фразу unsupported_claim");
+    expect(instructions).toContain("requiredAction означает требуемую СМЕНУ");
   });
 
   it("anchors verifier claims to one exact reply occurrence", () => {
@@ -324,6 +325,29 @@ describe("grounded widget AI core", () => {
         reply_renderer: "app_owned",
         render_reason: "app_render_price_intake_clarify",
         grounding_verified: true
+      }
+    });
+    expect(provider.attempts).toEqual(["initial"]);
+  });
+
+  it("accepts verifier pass when it labels a clarifying reply as an answer", async () => {
+    const decision = baseDecision("Какой материал рассматриваете?");
+    decision.intent = "price_intake";
+    decision.requestedSlots = ["material"];
+    const provider = new FakeGroundedProvider([decision]);
+    const result = await new GroundedWidgetAiService({
+      provider,
+      verifier: new FakeVerifier([verification("pass", "answer")])
+    }).generateReply(turn("Сколько будет стоить памятник?"));
+
+    expect(result).toMatchObject({
+      decision: "reply_candidate",
+      action: "clarify",
+      intent: "price_intake",
+      text: "Для расчёта сначала уточним детали. Какой материал рассматриваете?",
+      metadata: {
+        model_provider: "fake",
+        verifier_contract_issues: []
       }
     });
     expect(provider.attempts).toEqual(["initial"]);
