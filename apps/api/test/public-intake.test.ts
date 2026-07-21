@@ -1530,6 +1530,10 @@ describe("public site_widget intake", () => {
         reason: "binding_terms_require_manager_confirmation"
       },
       {
+        text: "Нужен расчет памятника с гарантией и договором",
+        reason: "binding_terms_require_manager_confirmation"
+      },
+      {
         text: "Можно оплатить в рассрочку?",
         reason: "binding_terms_require_manager_confirmation"
       },

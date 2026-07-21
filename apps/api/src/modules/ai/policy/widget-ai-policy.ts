@@ -4,7 +4,7 @@ import {
   type WidgetAiRenderedReply
 } from "../rendering/widget-ai-reply-renderer.js";
 
-export const WIDGET_AI_POLICY_VERSION = "granit_widget_ai_policy.consult_first.v1";
+export const WIDGET_AI_POLICY_VERSION = "granit_widget_ai_policy.consult_first.v2";
 
 export type WidgetAiPolicyReply = WidgetAiRenderedReply;
 
@@ -55,9 +55,6 @@ export function buildWidgetAiPolicyReply(input: AiTurnInput): WidgetAiPolicyRepl
     };
   }
 
-  const calculationReply = buildWidgetAiCalculationFallbackReply(input);
-  if (calculationReply) return calculationReply;
-
   if (/(гарант|договор|контракт|скидк|наличи|оплат|рассроч|кредит|warranty|contract|discount|available|payment|installment)/i.test(normalized)) {
     return {
       text:
@@ -72,6 +69,9 @@ export function buildWidgetAiPolicyReply(input: AiTurnInput): WidgetAiPolicyRepl
       stopAiAfterReply: true
     };
   }
+
+  const calculationReply = buildWidgetAiCalculationFallbackReply(input);
+  if (calculationReply) return calculationReply;
 
   return null;
 }

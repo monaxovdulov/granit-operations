@@ -5,7 +5,7 @@ import type {
 } from "../ai-dialog-contract.js";
 import type { AiTurnInput } from "../ai-turn.js";
 import {
-  isValidCatalogReference,
+  resolveCatalogReferenceValue,
   WIDGET_AI_SYSTEM_POLICY_IDS
 } from "../grounding/ai-catalog-reference-validator.js";
 import { validateTextEvidence } from "../grounding/ai-slot-evidence-service.js";
@@ -21,6 +21,7 @@ export const WIDGET_AI_VERIFICATION_CONTRACT_ISSUES = [
   "unsupported_claim",
   "invalid_claim_grounding",
   "invalid_catalog_reference",
+  "catalog_claim_value_mismatch",
   "slot_verdict_count_mismatch",
   "duplicate_slot_verdict",
   "unexpected_slot_verdict",
@@ -105,15 +106,23 @@ export function validateWidgetAiVerification(input: {
         claim.systemPolicyId
       ) {
         issues.add("invalid_claim_grounding");
-      } else if (
-        !isValidCatalogReference(
+      } else {
+        const resolution = resolveCatalogReferenceValue(
           claim.catalogReference,
           input.snapshot,
           input.selectedRecords,
           input.turn.inboundMessage.submittedAt
-        )
-      ) {
-        issues.add("invalid_catalog_reference");
+        );
+
+        if (!resolution.found) {
+          issues.add("invalid_catalog_reference");
+        } else if (
+          spanIsValid &&
+          claim.catalogReference.path === "/frontend/url" &&
+          claim.text !== resolution.value
+        ) {
+          issues.add("catalog_claim_value_mismatch");
+        }
       }
     } else if (claim.kind === "visitor_message") {
       if (

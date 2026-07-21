@@ -5,7 +5,9 @@ import {
   type GroundedAiTurnCandidateDecision
 } from "../src/modules/ai/ai-dialog-contract.js";
 import { buildStageASiteWidgetAiTurnInput } from "../src/modules/ai/ai-turn.js";
+import type { CatalogRecord } from "../src/modules/ai/catalog/catalog-knowledge-port.js";
 import { EmptyCatalogKnowledgeProvider } from "../src/modules/ai/catalog/empty-catalog-knowledge-provider.js";
+import { FileCatalogKnowledgeProvider } from "../src/modules/ai/catalog/file-catalog-knowledge-provider.js";
 import { validateGroundedAiDecision } from "../src/modules/ai/grounding/ai-decision-validator.js";
 import { validateTextEvidence } from "../src/modules/ai/grounding/ai-slot-evidence-service.js";
 import { WIDGET_AI_POLICY_VERSION } from "../src/modules/ai/policy/widget-ai-policy.js";
@@ -29,6 +31,11 @@ import { validateWidgetAiVerification } from "../src/modules/ai/verification/wid
 
 const MESSAGE_ID = "11111111-1111-4111-8111-111111111111";
 const CONVERSATION_ID = "22222222-2222-4222-8222-222222222222";
+const ARFA_RECORD_ID = "ent_1395cd250bbce644514c7e44";
+const ARFA_URL =
+  "/catalog.html?section=pamyatniki&entity=ent_1395cd250bbce644514c7e44#block-vertical-monuments";
+const FABRICATED_ARFA_URL =
+  "/catalog.html?section=pamyatniki&entity=ent_fabricated#block-vertical-monuments";
 
 describe("grounded widget AI core", () => {
   it("does not instruct the model to extract catalog names or questions as fixed slots", () => {
@@ -282,6 +289,119 @@ describe("grounded widget AI core", () => {
     });
 
     expect(result).toEqual(expect.arrayContaining(["invalid_catalog_reference"]));
+  });
+
+  it("rejects a fabricated catalog URL backed by a real selected record", async () => {
+    const catalog = new FileCatalogKnowledgeProvider();
+    const snapshot = await catalog.getSnapshot();
+    const arfa = snapshot.records.find((record) => record.id === ARFA_RECORD_ID);
+
+    if (!arfa) throw new Error("missing Arfa catalog fixture");
+
+    const decision = answerDecision(`Посмотрите: ${FABRICATED_ARFA_URL}`);
+    const result = validateWidgetAiVerification({
+      turn: turn("Покажите памятник Арфа"),
+      decision,
+      snapshot,
+      selectedRecords: [arfa],
+      verification: catalogUrlVerification(
+        decision,
+        FABRICATED_ARFA_URL,
+        arfa,
+        snapshot.catalogVersion
+      )
+    });
+
+    expect(result).toEqual(expect.arrayContaining(["catalog_claim_value_mismatch"]));
+  });
+
+  it("accepts the exact canonical catalog URL from a real selected record", async () => {
+    const catalog = new FileCatalogKnowledgeProvider();
+    const snapshot = await catalog.getSnapshot();
+    const arfa = snapshot.records.find((record) => record.id === ARFA_RECORD_ID);
+
+    if (!arfa) throw new Error("missing Arfa catalog fixture");
+    expect(arfa.frontend?.url).toBe(ARFA_URL);
+
+    const decision = answerDecision(`Посмотрите: ${ARFA_URL}`);
+    const result = validateWidgetAiVerification({
+      turn: turn("Покажите памятник Арфа"),
+      decision,
+      snapshot,
+      selectedRecords: [arfa],
+      verification: catalogUrlVerification(
+        decision,
+        ARFA_URL,
+        arfa,
+        snapshot.catalogVersion
+      )
+    });
+
+    expect(result).toEqual([]);
+  });
+
+  it("does not use a duplicated data URL when top-level frontend is missing", async () => {
+    const catalog = new FileCatalogKnowledgeProvider();
+    const loadedSnapshot = await catalog.getSnapshot();
+    const loadedArfa = loadedSnapshot.records.find(
+      (record) => record.id === ARFA_RECORD_ID
+    );
+
+    if (!loadedArfa) throw new Error("missing Arfa catalog fixture");
+
+    const arfa = { ...loadedArfa, frontend: null };
+    const snapshot = {
+      ...loadedSnapshot,
+      records: loadedSnapshot.records.map((record) =>
+        record.id === ARFA_RECORD_ID ? arfa : record
+      )
+    };
+    const decision = answerDecision(`Посмотрите: ${ARFA_URL}`);
+    const result = validateWidgetAiVerification({
+      turn: turn("Покажите памятник Арфа"),
+      decision,
+      snapshot,
+      selectedRecords: [arfa],
+      verification: catalogUrlVerification(
+        decision,
+        ARFA_URL,
+        arfa,
+        snapshot.catalogVersion
+      )
+    });
+
+    expect(result).toEqual(expect.arrayContaining(["invalid_catalog_reference"]));
+  });
+
+  it("fails closed when a verifier passes a fabricated catalog URL", async () => {
+    const catalog = new FileCatalogKnowledgeProvider();
+    const snapshot = await catalog.getSnapshot();
+    const arfa = snapshot.records.find((record) => record.id === ARFA_RECORD_ID);
+
+    if (!arfa) throw new Error("missing Arfa catalog fixture");
+
+    const decision = answerDecision(`Посмотрите: ${FABRICATED_ARFA_URL}`);
+    const provider = new FakeGroundedProvider([decision]);
+    const verifier = new FakeVerifier([
+      catalogUrlVerification(
+        decision,
+        FABRICATED_ARFA_URL,
+        arfa,
+        snapshot.catalogVersion
+      )
+    ]);
+
+    const result = await new GroundedWidgetAiService({ provider, verifier, catalog })
+      .generateReply(turn("Покажите памятник Арфа"));
+
+    expect(result).toMatchObject({
+      decision: "no_reply",
+      reason: "grounding_validation_failed",
+      metadata: {
+        verifier_verdict: "pass"
+      }
+    });
+    expect(provider.attempts).toEqual(["initial"]);
   });
 
   it("keeps natural wording when verifier proves full coverage", async () => {
@@ -785,4 +905,36 @@ function verification(
     requirementVerdicts: options.requirementVerdicts ?? [],
     confidence: 0.97
   };
+}
+
+function catalogUrlVerification(
+  decision: GroundedAiTurnCandidateDecision,
+  url: string,
+  record: CatalogRecord,
+  catalogVersion: string
+): WidgetAiVerification {
+  const claimStart = decision.replyText.indexOf(url);
+
+  if (claimStart < 0) throw new Error("catalog URL is missing from decision text");
+
+  return verification("pass", "answer", {
+    claimVerdicts: [
+      {
+        text: url,
+        start: claimStart,
+        end: claimStart + url.length,
+        kind: "catalog",
+        supported: true,
+        catalogReference: {
+          recordId: record.id,
+          revision: record.revision,
+          path: "/frontend/url",
+          catalogVersion
+        },
+        messageEvidence: null,
+        systemPolicyId: null,
+        detail: null
+      }
+    ]
+  });
 }

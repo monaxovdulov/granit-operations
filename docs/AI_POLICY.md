@@ -10,8 +10,9 @@ Website AI remains disabled unless `AI_WIDGET_ENABLED=true`. Once enabled, the g
 2. A generator writes a natural Russian reply plus typed slots and flexible requirements with exact message evidence.
 3. App-owned structural checks validate values, quotes, offsets, requested slots and handoff shape.
 4. An independent semantic verifier extracts every factual span from the finished reply, grounds it, and returns exact one-to-one verdicts for every proposed slot and requirement.
-5. `handoff` is applied immediately with an app-owned response. Exactly one bounded repair is allowed only for `repair` while the shared 18-second turn deadline has enough budget; a handoff returned after repair is also terminal.
-6. Only a verified reply reaches the atomic send-time `agent_allowed_to_reply=true` gate.
+5. App-owned contract validation checks claim spans, coverage and references. A catalog URL must exactly equal the selected published record's canonical top-level `frontend.url`; a valid record reference cannot support altered URL text.
+6. `handoff` is applied immediately with an app-owned response. Exactly one bounded repair is allowed only for `repair` while the shared 18-second turn deadline has enough budget; a handoff returned after repair is also terminal.
+7. After a verified plan, the application may retain the model text or render deterministic customer-facing text for a safe commercial flow. Only the resulting app-approved reply reaches the atomic send-time `agent_allowed_to_reply=true` gate.
 
 Semantic decisions are not made by keyword regex in the grounded path. Requests for a manager, legal advice and binding commercial promises are judged from the full dialog context. Words such as `документ` or `связаны` do not trigger handoff by themselves.
 
@@ -43,7 +44,7 @@ Semantic decisions are not made by keyword regex in the grounded path. Requests 
 
 - `off`: legacy compatibility path.
 - `shadow`: the legacy reply is returned without waiting for grounded work; the full grounded/legacy comparison, evidence, verdicts and latency are recorded asynchronously.
-- `enforce`: only generator + verifier output can be sent.
+- `enforce`: unverified model text cannot be sent. Customer-facing text is either a model reply accepted by generator, verifier and app-side contract checks, or deterministic app-owned plan/fallback text allowed by policy; both still pass through the send-time gate.
 - Offline regression contains 40 realistic dialogs and checks extracted values/evidence, flexible requirements, claim coverage, semantic quality and latency in addition to action. Stateful persistence tests cover long dialogs and flexible requirements. Paid live evaluation additionally requires `AI_WIDGET_EVAL_LIVE=true` and owner-provided OpenAI credentials.
 
 Future owner updates, especially commercial terms, are documented in `docs/AI_ASSISTANT_OWNER_INPUT_GUIDE_RU.md`. A plain-Russian explanation of layers, message flow, controls and limitations is in `docs/AI_ASSISTANT_OWNER_ARCHITECTURE_GUIDE_RU.md`.

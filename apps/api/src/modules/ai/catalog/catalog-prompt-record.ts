@@ -19,4 +19,3 @@ export function toCatalogPromptRecord(record: CatalogRecord) {
     data: record.data
   };
 }
-
