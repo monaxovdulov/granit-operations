@@ -1,25 +1,12 @@
-import type {
-  AiHandoffReason,
-  AiRiskFlag,
-  AiSlotName,
-  AiTurnAction,
-  AiTurnIntent
-} from "../ai-dialog-contract.js";
 import type { AiTurnInput } from "../ai-turn.js";
+import {
+  buildWidgetAiCalculationFallbackReply,
+  type WidgetAiRenderedReply
+} from "../rendering/widget-ai-reply-renderer.js";
 
 export const WIDGET_AI_POLICY_VERSION = "granit_widget_ai_policy.consult_first.v1";
 
-export type WidgetAiPolicyReply = {
-  text: string;
-  fallbackMode: "manager_required" | "none";
-  reason: string;
-  action: AiTurnAction;
-  intent: AiTurnIntent;
-  requestedSlots: AiSlotName[];
-  riskFlags: AiRiskFlag[];
-  handoffReason?: AiHandoffReason;
-  stopAiAfterReply?: boolean;
-};
+export type WidgetAiPolicyReply = WidgetAiRenderedReply;
 
 export function buildWidgetAiPolicyReply(input: AiTurnInput): WidgetAiPolicyReply | null {
   const normalized = input.inboundMessage.text.toLocaleLowerCase("ru-RU");
@@ -68,7 +55,7 @@ export function buildWidgetAiPolicyReply(input: AiTurnInput): WidgetAiPolicyRepl
     };
   }
 
-  const calculationReply = buildWidgetAiCalculationPolicyReply(input);
+  const calculationReply = buildWidgetAiCalculationFallbackReply(input);
   if (calculationReply) return calculationReply;
 
   if (/(гарант|договор|контракт|скидк|наличи|оплат|рассроч|кредит|warranty|contract|discount|available|payment|installment)/i.test(normalized)) {
@@ -87,99 +74,6 @@ export function buildWidgetAiPolicyReply(input: AiTurnInput): WidgetAiPolicyRepl
   }
 
   return null;
-}
-
-export function buildWidgetAiCalculationPolicyReply(
-  input: AiTurnInput
-): WidgetAiPolicyReply | null {
-  const normalized = input.inboundMessage.text.toLocaleLowerCase("ru-RU");
-
-  if (
-    /(точн|финальн|окончательн).{0,24}(расч[её]т|смет)|(?:расч[её]т|смет).{0,24}(точн|финальн|окончательн)/i.test(
-      normalized
-    )
-  ) {
-    return {
-      text: handoffText(input, "Финальную стоимость подготовит менеджер."),
-      fallbackMode: "manager_required",
-      reason: "final_quote_pressure",
-      action: "handoff",
-      intent: "binding_terms",
-      requestedSlots: [],
-      riskFlags: ["exact_price_requested", "final_quote_pressure"],
-      handoffReason: "final_quote_pressure",
-      stopAiAfterReply: true
-    };
-  }
-
-  if (!isCalculationIntakeRequest(normalized)) {
-    return null;
-  }
-
-  const requestedSlot = nextCalculationSlot(input);
-
-  if (requestedSlot) {
-    return {
-      text: calculationQuestion(requestedSlot),
-      fallbackMode: "none",
-      reason: "calculation_intake_clarify",
-      action: "clarify",
-      intent: "price_intake",
-      requestedSlots: [requestedSlot],
-      riskFlags: ["exact_price_requested"]
-    };
-  }
-
-  return {
-    text: handoffText(input, "Финальную стоимость подготовит менеджер."),
-    fallbackMode: "manager_required",
-    reason: "calculation_intake_ready_for_manager",
-    action: "handoff",
-    intent: "binding_terms",
-    requestedSlots: [],
-    riskFlags: ["exact_price_requested", "final_quote_pressure"],
-    handoffReason: "final_quote_pressure",
-    stopAiAfterReply: true
-  };
-}
-
-function isCalculationIntakeRequest(normalized: string): boolean {
-  if (/(примерн|ориентир)/i.test(normalized)) {
-    return false;
-  }
-
-  return (
-    /(расч[её]т|смет)/i.test(normalized) &&
-    /(нужен|нужна|нужно|нужны|нужн|надо|сдела|подготов|посчита|расс?чита)/i.test(normalized)
-  );
-}
-
-function nextCalculationSlot(input: AiTurnInput): AiSlotName | null {
-  const preferredOrder: AiSlotName[] = ["monumentType", "material", "size", "city", "cemetery"];
-
-  return preferredOrder.find((slot) => !input.knownSlots.values[slot]) ?? null;
-}
-
-function calculationQuestion(slot: AiSlotName): string {
-  const questions: Record<AiSlotName, string> = {
-    monumentType:
-      "Для расчёта сначала уточним детали. Какой тип памятника нужен: одинарный, двойной, семейный или комплекс?",
-    material:
-      "Для расчёта сначала уточним детали. Какой материал рассматриваете?",
-    size: "Для расчёта сначала уточним детали. Какой размер памятника нужен?",
-    city: "Для расчёта сначала уточним детали. В каком городе или районе нужна установка?",
-    cemetery: "Для расчёта сначала уточним детали. На каком кладбище планируется установка?",
-    engraving: "Для расчёта сначала уточним детали. Нужна ли гравировка?",
-    installation: "Для расчёта сначала уточним детали. Нужна ли установка?",
-    budgetContext: "Для расчёта сначала уточним детали. Есть ли ориентир по бюджету?",
-    desiredTiming: "Для расчёта сначала уточним детали. К какому сроку нужна установка?",
-    customerName: "Для расчёта сначала уточним детали. Как к вам обращаться?",
-    phone: "Для расчёта сначала уточним детали. Напишите телефон для связи.",
-    preferredContact: "Для расчёта сначала уточним детали. Как удобнее связаться?",
-    questionSummary: "Для расчёта сначала уточним детали. Что важно учесть в заявке?"
-  };
-
-  return questions[slot];
 }
 
 function handoffText(input: AiTurnInput, prefix: string): string {

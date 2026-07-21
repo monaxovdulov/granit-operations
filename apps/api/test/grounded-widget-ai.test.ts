@@ -303,7 +303,33 @@ describe("grounded widget AI core", () => {
     });
   });
 
-  it("answers calculation intake with an app-owned clarify before model generation", async () => {
+  it("uses the model as a plan and renders calculation text through the app", async () => {
+    const decision = baseDecision("Модельный черновик не должен попасть клиенту.");
+    decision.intent = "price_intake";
+    decision.requestedSlots = ["material"];
+    const provider = new FakeGroundedProvider([decision]);
+    const result = await new GroundedWidgetAiService({
+      provider,
+      verifier: new FakeVerifier([verification("pass", "clarify")])
+    }).generateReply(turn("Нужен расчет памятника с установкой"));
+
+    expect(result).toMatchObject({
+      decision: "reply_candidate",
+      action: "clarify",
+      intent: "price_intake",
+      text: "Для расчёта сначала уточним детали. Какой материал рассматриваете?",
+      requestedSlots: ["material"],
+      metadata: {
+        model_provider: "fake",
+        reply_renderer: "app_owned",
+        render_reason: "app_render_price_intake_clarify",
+        grounding_verified: true
+      }
+    });
+    expect(provider.attempts).toEqual(["initial"]);
+  });
+
+  it("falls back to an app-owned calculation plan when model planning fails", async () => {
     const provider = new FakeGroundedProvider([]);
     const result = await new GroundedWidgetAiService({
       provider,
@@ -314,16 +340,19 @@ describe("grounded widget AI core", () => {
       decision: "reply_candidate",
       action: "clarify",
       intent: "price_intake",
+      text: "Для расчёта сначала уточним детали. Какой тип памятника нужен: одинарный, двойной, семейный или комплекс?",
       requestedSlots: ["monumentType"],
       metadata: {
         model_provider: "policy",
-        model_name: "deterministic",
+        planner_source: "deterministic_fallback",
         fallback_mode: "none",
         deterministic_policy_version: WIDGET_AI_POLICY_VERSION,
-        policy_reason: "calculation_intake_clarify"
+        policy_reason: "calculation_intake_clarify",
+        fallback_reason: "model_error",
+        reply_renderer: "app_owned"
       }
     });
-    expect(provider.attempts).toEqual([]);
+    expect(provider.attempts).toEqual(["initial"]);
   });
 
   it("does not send an unsupported draft even when the generator has no claim field", async () => {

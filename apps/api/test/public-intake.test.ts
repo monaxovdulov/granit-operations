@@ -14,10 +14,25 @@ import { afterEach, describe, expect, it } from "vitest";
 import { AI_TURN_INPUT_VERSION, type AiTurnInput } from "../src/modules/ai/ai-turn.js";
 import {
   AI_TURN_DECISION_VERSION,
-  type AiTurnCandidateDecision
+  GROUNDED_AI_TURN_DECISION_VERSION,
+  type AiTurnCandidateDecision,
+  type GroundedAiTurnCandidateDecision
 } from "../src/modules/ai/ai-dialog-contract.js";
 import { WIDGET_AI_POLICY_VERSION } from "../src/modules/ai/policy/widget-ai-policy.js";
 import { WIDGET_AI_PROMPT_VERSION } from "../src/modules/ai/prompts/widget-ai-prompt.js";
+import {
+  GroundedWidgetAiService,
+  type GroundedWidgetAiProvider,
+  type GroundedWidgetAiProviderInput,
+  type GroundedWidgetAiProviderResult
+} from "../src/modules/ai/services/grounded-widget-ai-service.js";
+import {
+  WIDGET_AI_VERIFIER_VERSION,
+  type WidgetAiSemanticVerifier,
+  type WidgetAiVerification,
+  type WidgetAiVerifierInput,
+  type WidgetAiVerifierResult
+} from "../src/modules/ai/verification/widget-ai-semantic-verifier.js";
 import { APPROVED_WIDGET_KNOWLEDGE_VERSION } from "../src/modules/ai/knowledge/approved-widget-knowledge.js";
 import { buildApi } from "../src/app.js";
 import { TelegramOutboundBlockedError } from "../src/repositories/intake-repository.js";
@@ -1413,7 +1428,7 @@ describe("public site_widget intake", () => {
     }
   });
 
-  it("answers calculation requests with a deterministic clarify before model generation", async () => {
+  it("keeps a deterministic calculation fallback for the legacy widget AI path", async () => {
     const repository = new MemoryIntakeRepository();
     let providerCalls = 0;
     const provider = new FakeWidgetAiProvider({
@@ -1454,6 +1469,51 @@ describe("public site_widget intake", () => {
       policy_reason: "calculation_intake_clarify",
       policy_version: WIDGET_AI_POLICY_VERSION,
       prompt_version: WIDGET_AI_PROMPT_VERSION
+    });
+  });
+
+  it("persists a grounded AI planner result with app-rendered calculation text", async () => {
+    const repository = new MemoryIntakeRepository();
+    const provider = new FakeGroundedPlanningProvider([
+      groundedDecision({
+        replyText: "Модельный черновик не должен попасть клиенту.",
+        intent: "price_intake",
+        requestedSlots: ["material"]
+      })
+    ]);
+    const replyGenerator = new GroundedWidgetAiService({
+      provider,
+      verifier: new FakeGroundedVerifier([groundedVerification("pass", "clarify")])
+    });
+    const app = track(
+      buildApi({
+        repository,
+        widgetAi: {
+          enabled: true,
+          replyGenerator
+        }
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/public/intake/site-widget/messages",
+      payload: validWidgetRequest({
+        idempotencyKey: "widget-grounded-plan-render-0001",
+        messageText: "Нужен расчет памятника с установкой"
+      })
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json().automation.status).toBe("replied");
+    expect(response.json().automation.reply.text).toBe(
+      "Для расчёта сначала уточним детали. Какой материал рассматриваете?"
+    );
+    expect(provider.attempts).toEqual(["initial"]);
+    expect(repository.lastAiSaveInput?.metadata).toMatchObject({
+      model_provider: "fake",
+      reply_renderer: "app_owned",
+      render_reason: "app_render_price_intake_clarify"
     });
   });
 
@@ -2645,6 +2705,83 @@ function validWidgetRequest(
     consent: {
       privacy_policy: true
     }
+  };
+}
+
+class FakeGroundedPlanningProvider implements GroundedWidgetAiProvider {
+  readonly attempts: Array<"initial" | "repair"> = [];
+
+  constructor(private readonly decisions: GroundedAiTurnCandidateDecision[]) {}
+
+  async generateGroundedReply(
+    input: GroundedWidgetAiProviderInput
+  ): Promise<GroundedWidgetAiProviderResult> {
+    this.attempts.push(input.attempt);
+    const decision = this.decisions.shift();
+
+    if (!decision) {
+      throw new Error("missing fake grounded decision");
+    }
+
+    return {
+      decision,
+      modelProvider: "fake",
+      modelName: "fake-grounded-planner"
+    };
+  }
+}
+
+class FakeGroundedVerifier implements WidgetAiSemanticVerifier {
+  constructor(private readonly verifications: WidgetAiVerification[]) {}
+
+  async verify(_input: WidgetAiVerifierInput): Promise<WidgetAiVerifierResult> {
+    const verification = this.verifications.shift();
+
+    if (!verification) {
+      throw new Error("missing fake grounded verification");
+    }
+
+    return {
+      verification,
+      modelProvider: "fake",
+      modelName: "fake-grounded-verifier"
+    };
+  }
+}
+
+function groundedDecision(
+  overrides: Partial<GroundedAiTurnCandidateDecision> = {}
+): GroundedAiTurnCandidateDecision {
+  return {
+    version: GROUNDED_AI_TURN_DECISION_VERSION,
+    action: "clarify",
+    intent: "product_selection",
+    replyText: "Могу помочь собрать детали заявки.",
+    extractedSlots: [],
+    extractedRequirements: [],
+    requestedSlots: ["material"],
+    riskFlags: [],
+    handoffReason: null,
+    confidence: 0.9,
+    ...overrides
+  };
+}
+
+function groundedVerification(
+  verdict: WidgetAiVerification["verdict"],
+  requiredAction: WidgetAiVerification["requiredAction"]
+): WidgetAiVerification {
+  return {
+    version: WIDGET_AI_VERIFIER_VERSION,
+    verdict,
+    requiredAction,
+    violations: [],
+    factualClaimsPresent: false,
+    claimCoverageComplete: true,
+    claimVerdicts: [],
+    slotVerdicts: [],
+    requirementVerdicts: [],
+    confidence: 0.97
   };
 }
 

@@ -18,16 +18,17 @@ import {
   type GroundedAiTurnCandidateDecision
 } from "../ai-dialog-contract.js";
 import { validateGroundedAiDecision } from "../grounding/ai-decision-validator.js";
-import {
-  buildWidgetAiCalculationPolicyReply,
-  WIDGET_AI_POLICY_VERSION,
-  type WidgetAiPolicyReply
-} from "../policy/widget-ai-policy.js";
+import { WIDGET_AI_POLICY_VERSION } from "../policy/widget-ai-policy.js";
 import {
   buildGroundedWidgetAiInstructions,
   buildGroundedWidgetAiUserInput,
   GROUNDED_WIDGET_AI_PROMPT_VERSION
 } from "../prompts/widget-ai-prompt.js";
+import {
+  buildWidgetAiCalculationFallbackReply,
+  renderWidgetAiPlannedReply,
+  type WidgetAiRenderedReply
+} from "../rendering/widget-ai-reply-renderer.js";
 import {
   buildWidgetAiVerifierInstructions,
   buildWidgetAiVerifierUserInput,
@@ -104,12 +105,6 @@ export class GroundedWidgetAiService implements PublicWidgetAiReplyGenerator {
     const timeout = setTimeout(() => controller.abort(), deadlineMs);
 
     try {
-      const policyReply = buildWidgetAiCalculationPolicyReply(input);
-
-      if (policyReply) {
-        return this.toPolicyReply(policyReply, startedAt);
-      }
-
       const snapshot = await this.catalog.getSnapshot();
       const selectedRecords = await this.catalog.search(snapshot, {
         query: buildCatalogQuery(input),
@@ -165,21 +160,22 @@ export class GroundedWidgetAiService implements PublicWidgetAiReplyGenerator {
         }
       }
 
-      return this.unavailable(
-        controller.signal.aborted ? "turn_timeout" : "grounding_validation_failed",
-        snapshot,
-        startedAt,
-        initial?.verification
+      const reason = controller.signal.aborted ? "turn_timeout" : "grounding_validation_failed";
+      return (
+        this.toCalculationFallbackReply(input, startedAt, reason, snapshot) ??
+        this.unavailable(reason, snapshot, startedAt, initial?.verification)
       );
     } catch (error) {
-      return this.unavailable(
+      const reason =
         controller.signal.aborted || isAbortError(error)
           ? "turn_timeout"
           : error instanceof SemanticVerifierCallError
           ? "semantic_verifier_error"
-          : "model_error",
-        undefined,
-        startedAt
+          : "model_error";
+
+      return (
+        this.toCalculationFallbackReply(input, startedAt, reason) ??
+        this.unavailable(reason, undefined, startedAt)
       );
     } finally {
       clearTimeout(timeout);
@@ -311,13 +307,25 @@ export class GroundedWidgetAiService implements PublicWidgetAiReplyGenerator {
     startedAt: number,
     repaired = false
   ): AiReplyCandidateDecision {
+    const rendered = renderWidgetAiPlannedReply({
+      turn: input,
+      plan: attempt.decision
+    });
+    const text = rendered?.text ?? attempt.decision.replyText.trim();
+    const action = rendered?.action ?? attempt.decision.action;
+    const intent = rendered?.intent ?? attempt.decision.intent;
+    const requestedSlots = rendered?.requestedSlots ?? attempt.decision.requestedSlots;
+    const riskFlags = rendered?.riskFlags ?? attempt.decision.riskFlags;
+    const handoffReason =
+      rendered?.handoffReason ?? attempt.decision.handoffReason ?? undefined;
+
     return {
       decision: "reply_candidate",
-      text: attempt.decision.replyText.trim(),
+      text,
       agentAllowedToReplyAfterSend:
-        attempt.decision.action === "handoff" ? false : undefined,
-      action: attempt.decision.action,
-      intent: attempt.decision.intent,
+        rendered?.stopAiAfterReply || action === "handoff" ? false : undefined,
+      action,
+      intent,
       slotUpdates: attempt.decision.extractedSlots.map((slot) => ({
         name: slot.name,
         value: slot.value,
@@ -331,9 +339,9 @@ export class GroundedWidgetAiService implements PublicWidgetAiReplyGenerator {
         source: "ai_extraction" as const,
         sourceMessageId: requirement.evidence.messageId
       })),
-      requestedSlots: attempt.decision.requestedSlots,
-      riskFlags: attempt.decision.riskFlags,
-      handoffReason: attempt.decision.handoffReason ?? undefined,
+      requestedSlots,
+      riskFlags,
+      handoffReason,
       confidence: Math.min(attempt.decision.confidence, attempt.verification.confidence),
       metadata: {
         ...this.baseMetadata(snapshot, startedAt),
@@ -349,6 +357,8 @@ export class GroundedWidgetAiService implements PublicWidgetAiReplyGenerator {
         claim_verdict_count: attempt.verification.claimVerdicts.length,
         slot_verdict_count: attempt.verification.slotVerdicts.length,
         requirement_verdict_count: attempt.verification.requirementVerdicts.length,
+        reply_renderer: rendered ? "app_owned" : "model",
+        render_reason: rendered?.reason ?? null,
         grounding_verified: true,
         fallback_mode: "none",
         repair_applied: repaired,
@@ -358,35 +368,56 @@ export class GroundedWidgetAiService implements PublicWidgetAiReplyGenerator {
     };
   }
 
-  private toPolicyReply(
-    policyReply: WidgetAiPolicyReply,
-    startedAt: number
+  private toRenderedFallbackReply(
+    rendered: WidgetAiRenderedReply,
+    startedAt: number,
+    options: {
+      fallbackReason?: AiUnavailableReason;
+      snapshot?: CatalogSnapshot;
+    } = {}
   ): AiReplyCandidateDecision {
     return {
       decision: "reply_candidate",
-      text: policyReply.text,
-      agentAllowedToReplyAfterSend: policyReply.stopAiAfterReply ? false : undefined,
-      action: policyReply.action,
-      intent: policyReply.intent,
-      requestedSlots: policyReply.requestedSlots,
-      riskFlags: policyReply.riskFlags,
-      handoffReason: policyReply.handoffReason,
+      text: rendered.text,
+      agentAllowedToReplyAfterSend: rendered.stopAiAfterReply ? false : undefined,
+      action: rendered.action,
+      intent: rendered.intent,
+      requestedSlots: rendered.requestedSlots,
+      riskFlags: rendered.riskFlags,
+      handoffReason: rendered.handoffReason,
       confidence: 1,
       metadata: {
-        ...this.baseMetadata(undefined, startedAt),
+        ...this.baseMetadata(options.snapshot, startedAt),
         model_provider: "policy",
         model_name: "deterministic",
-        fallback_mode: policyReply.fallbackMode,
+        fallback_mode: rendered.fallbackMode,
+        planner_source: "deterministic_fallback",
         deterministic_policy_version: WIDGET_AI_POLICY_VERSION,
-        policy_reason: policyReply.reason,
-        ...(policyReply.handoffReason
+        policy_reason: rendered.reason,
+        fallback_reason: options.fallbackReason ?? null,
+        reply_renderer: "app_owned",
+        render_reason: rendered.reason,
+        ...(rendered.handoffReason
           ? {
-              handoff_reason: policyReply.reason,
+              handoff_reason: rendered.reason,
               safe_handoff_reply: true
             }
           : {})
       }
     };
+  }
+
+  private toCalculationFallbackReply(
+    input: AiTurnInput,
+    startedAt: number,
+    fallbackReason: AiUnavailableReason,
+    snapshot?: CatalogSnapshot
+  ): AiReplyCandidateDecision | null {
+    const rendered = buildWidgetAiCalculationFallbackReply(input);
+
+    return rendered
+      ? this.toRenderedFallbackReply(rendered, startedAt, { fallbackReason, snapshot })
+      : null;
   }
 
   private toSafeHandoff(
