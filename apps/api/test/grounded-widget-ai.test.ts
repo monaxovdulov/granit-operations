@@ -311,7 +311,7 @@ describe("grounded widget AI core", () => {
     const result = await new GroundedWidgetAiService({
       provider,
       verifier: new FakeVerifier([verification("pass", "clarify")])
-    }).generateReply(turn("Нужен расчет памятника с установкой"));
+    }).generateReply(turn("Сколько будет стоить памятник?"));
 
     expect(result).toMatchObject({
       decision: "reply_candidate",
@@ -323,6 +323,38 @@ describe("grounded widget AI core", () => {
         model_provider: "fake",
         reply_renderer: "app_owned",
         render_reason: "app_render_price_intake_clarify",
+        grounding_verified: true
+      }
+    });
+    expect(provider.attempts).toEqual(["initial"]);
+  });
+
+  it("normalizes a verified calculation plan when the model misclassifies the intent", async () => {
+    const decision = baseDecision(
+      "Конечно, помогу с расчетом. Подскажите, вертикальный или горизонтальный?"
+    );
+    decision.intent = "product_selection";
+    decision.requestedSlots = ["material"];
+    const provider = new FakeGroundedProvider([decision]);
+    const result = await new GroundedWidgetAiService({
+      provider,
+      verifier: new FakeVerifier([verification("pass", "clarify")])
+    }).generateReply(turn("Нужен расчет памятника с установкой"));
+
+    expect(result).toMatchObject({
+      decision: "reply_candidate",
+      action: "clarify",
+      intent: "price_intake",
+      text: "Для расчёта сначала уточним детали. Какой тип памятника нужен: одинарный, двойной, семейный или комплекс?",
+      requestedSlots: ["monumentType"],
+      metadata: {
+        model_provider: "fake",
+        reply_renderer: "app_owned",
+        render_reason: "app_render_price_intake_clarify",
+        plan_normalized: true,
+        plan_normalization_reason: "commercial_intent_price_intake",
+        plan_original_intent: "product_selection",
+        plan_original_requested_slots: ["material"],
         grounding_verified: true
       }
     });

@@ -1507,13 +1507,15 @@ describe("public site_widget intake", () => {
     expect(response.statusCode).toBe(202);
     expect(response.json().automation.status).toBe("replied");
     expect(response.json().automation.reply.text).toBe(
-      "Для расчёта сначала уточним детали. Какой материал рассматриваете?"
+      "Для расчёта сначала уточним детали. Какой тип памятника нужен: одинарный, двойной, семейный или комплекс?"
     );
     expect(provider.attempts).toEqual(["initial"]);
     expect(repository.lastAiSaveInput?.metadata).toMatchObject({
       model_provider: "fake",
       reply_renderer: "app_owned",
-      render_reason: "app_render_price_intake_clarify"
+      render_reason: "app_render_price_intake_clarify",
+      plan_normalized: true,
+      plan_normalization_reason: "commercial_intent_price_intake"
     });
   });
 

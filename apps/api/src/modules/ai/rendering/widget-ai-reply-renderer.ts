@@ -27,6 +27,85 @@ export type WidgetAiRenderedReply = {
   stopAiAfterReply?: boolean;
 };
 
+export type WidgetAiPlanNormalization = {
+  plan: WidgetAiReplyPlan;
+  reason: string | null;
+  originalPlan?: WidgetAiReplyPlan;
+};
+
+export function normalizeWidgetAiReplyPlan(input: {
+  turn: AiTurnInput;
+  plan: WidgetAiReplyPlan;
+}): WidgetAiPlanNormalization {
+  const { turn, plan } = input;
+  const normalizedMessage = normalizeMessage(turn.inboundMessage.text);
+
+  if (isFinalQuotePressureRequest(normalizedMessage)) {
+    return normalizePlan(plan, "commercial_intent_final_quote_pressure", {
+      action: "handoff",
+      intent: "binding_terms",
+      requestedSlots: [],
+      riskFlags: mergeRiskFlags(plan.riskFlags, [
+        "exact_price_requested",
+        "final_quote_pressure"
+      ]),
+      handoffReason: "final_quote_pressure"
+    });
+  }
+
+  if (plan.action !== "handoff" && isCalculationIntakeRequest(normalizedMessage)) {
+    const requestedSlot = nextCalculationSlot(turn);
+
+    if (!requestedSlot) {
+      return normalizePlan(plan, "commercial_intent_price_ready_for_manager", {
+        action: "handoff",
+        intent: "binding_terms",
+        requestedSlots: [],
+        riskFlags: mergeRiskFlags(plan.riskFlags, [
+          "exact_price_requested",
+          "final_quote_pressure"
+        ]),
+        handoffReason: "final_quote_pressure"
+      });
+    }
+
+    return normalizePlan(plan, "commercial_intent_price_intake", {
+      action: "clarify",
+      intent: "price_intake",
+      requestedSlots: [requestedSlot],
+      riskFlags: mergeRiskFlags(plan.riskFlags, ["exact_price_requested"]),
+      handoffReason: null
+    });
+  }
+
+  if (plan.action !== "handoff" && isDeadlineIntakeRequest(normalizedMessage)) {
+    const requestedSlot = nextDeadlineSlot(turn);
+
+    if (!requestedSlot) {
+      return normalizePlan(plan, "commercial_intent_deadline_ready_for_manager", {
+        action: "handoff",
+        intent: "deadline_intake",
+        requestedSlots: [],
+        riskFlags: plan.riskFlags,
+        handoffReason: "lead_ready"
+      });
+    }
+
+    return normalizePlan(plan, "commercial_intent_deadline_intake", {
+      action: "clarify",
+      intent: "deadline_intake",
+      requestedSlots: [requestedSlot],
+      riskFlags: plan.riskFlags,
+      handoffReason: null
+    });
+  }
+
+  return {
+    plan,
+    reason: null
+  };
+}
+
 export function renderWidgetAiPlannedReply(input: {
   turn: AiTurnInput;
   plan: WidgetAiReplyPlan;
@@ -94,13 +173,9 @@ export function renderWidgetAiPlannedReply(input: {
 export function buildWidgetAiCalculationFallbackReply(
   input: AiTurnInput
 ): WidgetAiRenderedReply | null {
-  const normalized = input.inboundMessage.text.toLocaleLowerCase("ru-RU");
+  const normalized = normalizeMessage(input.inboundMessage.text);
 
-  if (
-    /(точн|финальн|окончательн).{0,24}(расч[её]т|смет)|(?:расч[её]т|смет).{0,24}(точн|финальн|окончательн)/i.test(
-      normalized
-    )
-  ) {
+  if (isFinalQuotePressureRequest(normalized)) {
     return {
       text: handoffText(input, "Финальную стоимость подготовит менеджер."),
       fallbackMode: "manager_required",
@@ -145,6 +220,28 @@ export function buildWidgetAiCalculationFallbackReply(
   };
 }
 
+function normalizePlan(
+  originalPlan: WidgetAiReplyPlan,
+  reason: string,
+  normalizedPlan: WidgetAiReplyPlan
+): WidgetAiPlanNormalization {
+  return {
+    plan: normalizedPlan,
+    reason,
+    originalPlan
+  };
+}
+
+function normalizeMessage(message: string): string {
+  return message.toLocaleLowerCase("ru-RU");
+}
+
+function isFinalQuotePressureRequest(normalized: string): boolean {
+  return /(точн|финальн|окончательн).{0,24}(расч[её]т|смет|цен|стоимост)|(?:расч[её]т|смет|цен|стоимост).{0,24}(точн|финальн|окончательн)/i.test(
+    normalized
+  );
+}
+
 function isCalculationIntakeRequest(normalized: string): boolean {
   if (/(примерн|ориентир)/i.test(normalized)) {
     return false;
@@ -156,10 +253,36 @@ function isCalculationIntakeRequest(normalized: string): boolean {
   );
 }
 
+function isDeadlineIntakeRequest(normalized: string): boolean {
+  return /(срок|сроки|когда|успе(?:ете|ем)|сколько.{0,24}(дела|изготов|готов)|буд(?:ет|ут).{0,24}готов)/i.test(
+    normalized
+  );
+}
+
 function nextCalculationSlot(input: AiTurnInput): AiSlotName | null {
   const preferredOrder: AiSlotName[] = ["monumentType", "material", "size", "city", "cemetery"];
 
   return preferredOrder.find((slot) => !input.knownSlots.values[slot]) ?? null;
+}
+
+function nextDeadlineSlot(input: AiTurnInput): AiSlotName | null {
+  const preferredOrder: AiSlotName[] = [
+    "monumentType",
+    "material",
+    "size",
+    "city",
+    "cemetery",
+    "desiredTiming"
+  ];
+
+  return preferredOrder.find((slot) => !input.knownSlots.values[slot]) ?? null;
+}
+
+function mergeRiskFlags(
+  existing: readonly AiRiskFlag[],
+  additional: readonly AiRiskFlag[]
+): AiRiskFlag[] {
+  return [...new Set([...existing, ...additional])];
 }
 
 function calculationQuestion(slot: AiSlotName): string {

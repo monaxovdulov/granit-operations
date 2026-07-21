@@ -26,6 +26,7 @@ import {
 } from "../prompts/widget-ai-prompt.js";
 import {
   buildWidgetAiCalculationFallbackReply,
+  normalizeWidgetAiReplyPlan,
   renderWidgetAiPlannedReply,
   type WidgetAiRenderedReply
 } from "../rendering/widget-ai-reply-renderer.js";
@@ -307,17 +308,21 @@ export class GroundedWidgetAiService implements PublicWidgetAiReplyGenerator {
     startedAt: number,
     repaired = false
   ): AiReplyCandidateDecision {
-    const rendered = renderWidgetAiPlannedReply({
+    const normalizedPlan = normalizeWidgetAiReplyPlan({
       turn: input,
       plan: attempt.decision
     });
+    const rendered = renderWidgetAiPlannedReply({
+      turn: input,
+      plan: normalizedPlan.plan
+    });
     const text = rendered?.text ?? attempt.decision.replyText.trim();
-    const action = rendered?.action ?? attempt.decision.action;
-    const intent = rendered?.intent ?? attempt.decision.intent;
-    const requestedSlots = rendered?.requestedSlots ?? attempt.decision.requestedSlots;
-    const riskFlags = rendered?.riskFlags ?? attempt.decision.riskFlags;
+    const action = rendered?.action ?? normalizedPlan.plan.action;
+    const intent = rendered?.intent ?? normalizedPlan.plan.intent;
+    const requestedSlots = rendered?.requestedSlots ?? normalizedPlan.plan.requestedSlots;
+    const riskFlags = rendered?.riskFlags ?? normalizedPlan.plan.riskFlags;
     const handoffReason =
-      rendered?.handoffReason ?? attempt.decision.handoffReason ?? undefined;
+      rendered?.handoffReason ?? normalizedPlan.plan.handoffReason ?? undefined;
 
     return {
       decision: "reply_candidate",
@@ -357,6 +362,11 @@ export class GroundedWidgetAiService implements PublicWidgetAiReplyGenerator {
         claim_verdict_count: attempt.verification.claimVerdicts.length,
         slot_verdict_count: attempt.verification.slotVerdicts.length,
         requirement_verdict_count: attempt.verification.requirementVerdicts.length,
+        plan_normalized: Boolean(normalizedPlan.reason),
+        plan_normalization_reason: normalizedPlan.reason,
+        plan_original_action: normalizedPlan.originalPlan?.action ?? null,
+        plan_original_intent: normalizedPlan.originalPlan?.intent ?? null,
+        plan_original_requested_slots: normalizedPlan.originalPlan?.requestedSlots ?? null,
         reply_renderer: rendered ? "app_owned" : "model",
         render_reason: rendered?.reason ?? null,
         grounding_verified: true,
