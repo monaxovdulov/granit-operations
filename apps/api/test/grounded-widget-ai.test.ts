@@ -8,6 +8,7 @@ import { buildStageASiteWidgetAiTurnInput } from "../src/modules/ai/ai-turn.js";
 import { EmptyCatalogKnowledgeProvider } from "../src/modules/ai/catalog/empty-catalog-knowledge-provider.js";
 import { validateGroundedAiDecision } from "../src/modules/ai/grounding/ai-decision-validator.js";
 import { validateTextEvidence } from "../src/modules/ai/grounding/ai-slot-evidence-service.js";
+import { WIDGET_AI_POLICY_VERSION } from "../src/modules/ai/policy/widget-ai-policy.js";
 import { buildGroundedWidgetAiInstructions } from "../src/modules/ai/prompts/widget-ai-prompt.js";
 import {
   GroundedWidgetAiService,
@@ -300,6 +301,29 @@ describe("grounded widget AI core", () => {
         verifier_verdict: "pass"
       }
     });
+  });
+
+  it("answers calculation intake with an app-owned clarify before model generation", async () => {
+    const provider = new FakeGroundedProvider([]);
+    const result = await new GroundedWidgetAiService({
+      provider,
+      verifier: new FakeVerifier([])
+    }).generateReply(turn("Нужен расчет памятника с установкой"));
+
+    expect(result).toMatchObject({
+      decision: "reply_candidate",
+      action: "clarify",
+      intent: "price_intake",
+      requestedSlots: ["monumentType"],
+      metadata: {
+        model_provider: "policy",
+        model_name: "deterministic",
+        fallback_mode: "none",
+        deterministic_policy_version: WIDGET_AI_POLICY_VERSION,
+        policy_reason: "calculation_intake_clarify"
+      }
+    });
+    expect(provider.attempts).toEqual([]);
   });
 
   it("does not send an unsupported draft even when the generator has no claim field", async () => {

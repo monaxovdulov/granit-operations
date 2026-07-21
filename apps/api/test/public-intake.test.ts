@@ -1413,6 +1413,50 @@ describe("public site_widget intake", () => {
     }
   });
 
+  it("answers calculation requests with a deterministic clarify before model generation", async () => {
+    const repository = new MemoryIntakeRepository();
+    let providerCalls = 0;
+    const provider = new FakeWidgetAiProvider({
+      fail: true,
+      onGenerate: () => {
+        providerCalls += 1;
+      }
+    });
+    const app = track(
+      buildApi({
+        repository,
+        widgetAi: {
+          enabled: true,
+          provider,
+          modelName: "gpt-5.5"
+        }
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/public/intake/site-widget/messages",
+      payload: validWidgetRequest({
+        idempotencyKey: "widget-calculation-policy-0001",
+        messageText: "Нужен расчет памятника с установкой"
+      })
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json().automation.status).toBe("replied");
+    expect(response.json().automation.reply.text).toMatch(/для расч[её]та/i);
+    expect(providerCalls).toBe(0);
+    expect(repository.lastAiSaveInput?.agentAllowedToReplyAfterSend).not.toBe(false);
+    expect(repository.lastAiSaveInput?.metadata).toMatchObject({
+      model_provider: "policy",
+      model_name: "deterministic",
+      fallback_mode: "none",
+      policy_reason: "calculation_intake_clarify",
+      policy_version: WIDGET_AI_POLICY_VERSION,
+      prompt_version: WIDGET_AI_PROMPT_VERSION
+    });
+  });
+
   it("hands final quote, binding terms and legal topics to a manager without model improvisation", async () => {
     const handoffPrompts = [
       {

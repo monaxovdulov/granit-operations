@@ -19,6 +19,11 @@ import {
 } from "../ai-dialog-contract.js";
 import { validateGroundedAiDecision } from "../grounding/ai-decision-validator.js";
 import {
+  buildWidgetAiCalculationPolicyReply,
+  WIDGET_AI_POLICY_VERSION,
+  type WidgetAiPolicyReply
+} from "../policy/widget-ai-policy.js";
+import {
   buildGroundedWidgetAiInstructions,
   buildGroundedWidgetAiUserInput,
   GROUNDED_WIDGET_AI_PROMPT_VERSION
@@ -99,6 +104,12 @@ export class GroundedWidgetAiService implements PublicWidgetAiReplyGenerator {
     const timeout = setTimeout(() => controller.abort(), deadlineMs);
 
     try {
+      const policyReply = buildWidgetAiCalculationPolicyReply(input);
+
+      if (policyReply) {
+        return this.toPolicyReply(policyReply, startedAt);
+      }
+
       const snapshot = await this.catalog.getSnapshot();
       const selectedRecords = await this.catalog.search(snapshot, {
         query: buildCatalogQuery(input),
@@ -343,6 +354,37 @@ export class GroundedWidgetAiService implements PublicWidgetAiReplyGenerator {
         repair_applied: repaired,
         generator_usage: usageMetadata(attempt.generator.usage),
         verifier_usage: usageMetadata(attempt.verifierUsage)
+      }
+    };
+  }
+
+  private toPolicyReply(
+    policyReply: WidgetAiPolicyReply,
+    startedAt: number
+  ): AiReplyCandidateDecision {
+    return {
+      decision: "reply_candidate",
+      text: policyReply.text,
+      agentAllowedToReplyAfterSend: policyReply.stopAiAfterReply ? false : undefined,
+      action: policyReply.action,
+      intent: policyReply.intent,
+      requestedSlots: policyReply.requestedSlots,
+      riskFlags: policyReply.riskFlags,
+      handoffReason: policyReply.handoffReason,
+      confidence: 1,
+      metadata: {
+        ...this.baseMetadata(undefined, startedAt),
+        model_provider: "policy",
+        model_name: "deterministic",
+        fallback_mode: policyReply.fallbackMode,
+        deterministic_policy_version: WIDGET_AI_POLICY_VERSION,
+        policy_reason: policyReply.reason,
+        ...(policyReply.handoffReason
+          ? {
+              handoff_reason: policyReply.reason,
+              safe_handoff_reply: true
+            }
+          : {})
       }
     };
   }
