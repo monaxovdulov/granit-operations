@@ -2,9 +2,11 @@
 
 Дата: 2026-07-21
 
-Статус: согласован владельцем, ожидает проверки перед implementation plan
+Статус: согласован владельцем; implementation plan подготовлен отдельно
 
 Основной issue: GitHub `monaxovdulov/granit-operations#13`
+
+Implementation plan: `docs/superpowers/plans/2026-07-21-widget-ai-consultation-catalog-navigation-plan.md`
 
 Затронутые репозитории:
 
@@ -22,9 +24,9 @@ Staging AI уже сохраняет и отправляет проверенн�
 - app-owned renderer ведёт клиента по фиксированной очереди `тип -> материал -> размер -> город -> кладбище`;
 - виджет обещает расчёт, хотя числовых published price records в текущем snapshot нет;
 - AI может получить `frontend.url` из каталога, но public reply поддерживает только обычный текст;
-- backend URL использует `section`/`entity`, а текущий `catalog.js` читает другие параметры и не умеет найти backend entity;
+- активная ветка лендинга уже генерирует `entity_links` из backend snapshot, читает `section`/`entity`, раскрывает нужный блок, подсвечивает и прокручивает к entity; этого механизма ещё нет в rich-action contract и сквозном browser flow;
 - текущий browser widget хранит public session id, open state и размер панели, но не восстанавливает rich message state;
-- widget подключён не на всех страницах текущего лендинга, поэтому обычный переход на `catalog.html` уничтожает его DOM.
+- widget подключён на `index.html` и `catalog.html`, но отсутствует на `about.html`; даже между страницами, где loader присутствует, обычный переход уничтожает текущий DOM-экземпляр.
 
 Пример провального сценария из issue `#13` включает несколько ответов `не знаю`, затем цикл вопроса о кладбище. Дизайн должен исправлять класс проблемы, а не одну фразу.
 
@@ -54,16 +56,19 @@ Disclosure не считается частью текста AI-ответа. Wi
 Используется Turbo Drive с постоянным widget host:
 
 - статические HTML-страницы и их прямые URL сохраняются;
-- на каждой customer-facing странице присутствует host с одинаковым уникальным `id` и `data-turbo-permanent`;
+- на каждой customer-facing странице присутствуют `#granit-page-content` и его sibling host с одинаковым уникальным `id` и `data-turbo-permanent`;
 - widget монтируется внутрь host один раз;
 - catalog navigation action из Shadow DOM создаёт composed custom event;
 - landing bridge вызывает `Turbo.visit()`;
-- Turbo меняет страницу и browser history, сохраняя permanent host и его дочерний widget;
+- landing использует официальный Turbo custom render и заменяет только `#granit-page-content`, оставляя текущие `<body>`, host и дочерний widget подключёнными;
+- Turbo продолжает владеть fetch, browser history, head merge, cache и navigation lifecycle;
 - page-specific JavaScript работает через повторяемый lifecycle, а не только через `DOMContentLoaded`.
+
+Одного `data-turbo-permanent` недостаточно для строгого требования `disconnectedCallback` не вызывается: стандартный Turbo `PageRenderer` временно переносит permanent node при замене `<body>`. Перед custom render bridge удаляет incoming duplicate host из `newBody`, синхронизирует allowlisted body attributes и заменяет page-content root. Текущий host не перемещается и не заменяется. `data-turbo-permanent` остаётся marker/защитой, но гарантия connectedness обеспечивается render boundary и browser regression test.
 
 Собственный PJAX router отклонён из-за необходимости вручную реализовывать navigation history, cache, head/body reconciliation, focus, scroll и error handling. Полная SPA-миграция отклонена как несоразмерная текущей задаче.
 
-Turbo поставляется как локально закреплённый и воспроизводимый asset, а не загружается с внешнего CDN во время работы сайта.
+Turbo поставляется как локально закреплённый и воспроизводимый asset, а не загружается с внешнего CDN во время работы сайта. Для первого релиза фиксируется `8.0.23`, проверенный по официальному release и исходникам; обновление версии требует повторного lifecycle/failure smoke.
 
 ## 5. Клиентское поведение AI
 
@@ -170,14 +175,18 @@ Suggestion принимается, только если:
 
 ### 6.2 Публичный contract
 
-`site_widget.v1` расширяется необязательным backward-compatible полем `reply.actions`:
+`site_widget.v1` расширяется необязательным полем `reply.actions` и явным capability negotiation. Новый widget добавляет к message request `client_capabilities: ["catalog_navigation.v1"]`, а к history GET — повторяемый query parameter `capability=catalog_navigation.v1`.
+
+Текущий widget runtime строго проверяет набор ключей ответа, поэтому полагаться на игнорирование неизвестного optional field нельзя. Backend включает `reply.actions` только когда одновременно включён server feature flag и конкретный клиент объявил capability. Старый client не объявляет capability, получает прежнюю точную форму ответа и остаётся совместимым.
+
+Форма action для capable client:
 
 ```json
 {
   "type": "catalog_navigation",
   "target": "item",
   "label": "Посмотреть модель «Арфа»",
-  "href": "/catalog.html?section=pamyatniki&entity=ent_...#catalog-list",
+  "href": "/catalog.html?section=pamyatniki&entity=ent_...#block-monuments",
   "catalog_version": "granit-cha.catalog....",
   "record_id": "ent_..."
 }
@@ -191,9 +200,11 @@ Suggestion принимается, только если:
 - href только относительный same-origin path;
 - разрешены только `/catalog.html`, allowlisted query keys и allowlisted fragment;
 - external origin, protocol-relative URL, JavaScript URL, encoded path escape и неизвестные параметры отклоняются;
-- старый client продолжает использовать `reply.text` и игнорирует optional `actions`.
+- отсутствие capability всегда сохраняет legacy text-only response shape;
+- неизвестные capabilities игнорируются, но не дают доступа к actions;
+- capability применяется и к первичному accepted/replayed response, и к history response.
 
-Actions сохраняются в outbound `conversation_messages.metadata.public_actions`. Idempotency replay возвращает ранее сохранённые actions, а не пересобирает их по новой версии каталога.
+Actions сохраняются в outbound `conversation_messages.metadata.public_actions` только для исходного send, где одновременно были включены flag и capability. Idempotency replay возвращает тот же сохранённый public result, а не добавляет или пересобирает actions по новому flag либо версии каталога.
 
 History response добавляет optional `actions` к каждому публичному сообщению. В history попадают только public action fields; verifier/internal provenance остаются серверными.
 
@@ -206,19 +217,21 @@ Runtime-сопоставление по названию, артикулу ил�
 - backend AI snapshot;
 - frontend `catalog-data.json` или детерминированный mapping artifact для него.
 
-Каждый frontend item получает `catalog_entity_id`, совпадающий с backend `record.id`. Category получает стабильный `sectionSlug`.
+Frontend artifact содержит `entity_links`, keyed по backend `record.id`; блоки и client items несут связанные `entity_ids`, а section имеет стабильный `sectionSlug`. Отдельный параллельный идентификатор для widget actions не вводится.
 
-Канонические URL:
+Канонические URL уже генерируются reviewed catalog source и не синтезируются повторно в AI runtime:
 
 ```text
-section: /catalog.html?section=<sectionSlug>#catalog-list
-item:    /catalog.html?section=<sectionSlug>&entity=<catalogEntityId>#catalog-list
+section: /catalog.html?section=<sectionSlug>
+item:    /catalog.html?section=<sectionSlug>&entity=<catalogEntityId>#<blockId>
 ```
 
-`catalog.js`:
+Backend action resolver использует сохранённый `frontend.url` и отдельно валидирует, что `sectionSlug`, `entity`, `blockId` и anchor принадлежат той же published record текущего snapshot.
+
+Активная ветка лендинга уже выполняет базовое сопоставление `section`/`entity`, раскрытие блока, прокрутку и подсветку. Реализация должна расширить этот канонический механизм, не создавать второй mapping или параллельный deep-link router. Итоговый `catalog.js`:
 
 1. читает `section` и находит категорию по slug;
-2. читает `entity` и находит item по `catalog_entity_id`;
+2. читает `entity` и находит отрендеренный target по `data-entity-id`, полученному из канонических `entity_ids`;
 3. применяет раздел/подраздел;
 4. увеличивает visible count, если item находился за текущей пагинацией;
 5. рендерит, прокручивает и фокусирует карточку;
@@ -235,19 +248,26 @@ Widget message model поддерживает отдельный массив ac
 Catalog action рендерится как доступная ссылка/команда с понятной подписью. При активации:
 
 1. widget создаёт `navigationId`;
-2. предотвращает обычную anchor navigation;
+2. для обычного primary click или Enter предотвращает обычную anchor navigation; modifier/middle click сохраняет стандартное открытие same-origin URL в новой вкладке и не запускает soft visit;
 3. отправляет bubbling, composed, cancelable event `site-widget:catalog-navigate`;
 4. event detail содержит только проверенные public action fields и `navigationId`;
-5. landing bridge принимает событие, сигнализирует обработку и вызывает Turbo;
-6. landing возвращает success/error event с тем же `navigationId`;
+5. landing bridge вызывает `preventDefault()` у custom event как handshake принятия, запоминает один active navigation и вызывает Turbo;
+6. landing возвращает через `window` одно событие `site-widget:catalog-navigation-result` с тем же `navigationId` и `status: success | error`;
 7. при ошибке widget оставляет текущую страницу и показывает возле action `Не удалось открыть каталог. Повторить`.
+
+`success` отправляется только после `turbo:load`, завершения catalog deep-link controller и появления target/section в DOM. Пока один navigation активен, повторный primary click не запускает второй visit. Result с неизвестным или устаревшим `navigationId` игнорируется.
 
 На Granit landing hard-navigation fallback для catalog action не используется, потому что он разрушил бы согласованное persistent-widget поведение.
 
 Widget loader должен быть идемпотентным и не монтировать второй custom element, если permanent host уже содержит активный widget.
 
+Все страницы используют один `data-widget-instance-id="landing-main"` и одинаковую widget/API конфигурацию. Это сохраняет одну storage key и одну public session также при прямом reload/deep link; текущий отдельный `landing-catalog` удаляется.
+
+Для согласования layout widget отправляет `site-widget:layout-change` с allowlisted `panelState: closed | minimized | open` и `panelSize: normal | wide | fullscreen`. Landing bridge отражает их как data attributes на постоянном `<html>` и повторно применяет после Turbo lifecycle. Сайт не читает внутренний Shadow DOM и не дублирует widget state.
+
 При прямом открытии страницы или настоящем browser reload widget использует существующий public history endpoint:
 
+- loader принимает optional `data-history-base-path` с default `/public/intake/site-widget/sessions`; к нему добавляются только validated public session UUID и `/history`;
 - `404` очищает stale public session id и начинает новую сессию;
 - временная network error не уничтожает существующий session id;
 - восстановление возвращает text и actions;
@@ -255,17 +275,21 @@ Widget loader должен быть идемпотентным и не монт�
 
 ## 9. Landing soft navigation
 
-На всех поддерживаемых страницах расположен один и тот же host:
+На всех поддерживаемых страницах page-specific content обёрнут в одинаковый root, а рядом расположен host:
 
 ```html
-<div id="granit-site-widget-host" data-turbo-permanent></div>
+<body>
+  <div id="granit-page-content">...</div>
+  <div id="granit-site-widget-host" data-turbo-permanent></div>
+</body>
 ```
 
-Widget host находится вне заменяемого page content. Версия widget runtime и Turbo закреплены локальными manifest/checksum artifacts.
+Widget host находится вне заменяемого page content. Custom render отклоняет response без ровно одного page root и incoming host до изменения DOM. Версия widget runtime и Turbo закреплены локальными manifest/checksum artifacts.
 
 Landing navigation bridge:
 
-- обрабатывает `site-widget:catalog-navigate` через `Turbo.visit()`;
+- повторно валидирует event detail, same-origin `/catalog.html`, allowlisted query/fragment и только затем обрабатывает `site-widget:catalog-navigate` через `Turbo.visit()`;
+- устанавливает `Turbo.session.drive = false`, поэтому обычные ссылки и формы не перехватываются, а Drive используется только программно;
 - поддерживает browser Back/Forward без размонтирования host;
 - может использовать тот же механизм для eligible same-origin HTML navigation, чтобы помощник оставался постоянным по сайту;
 - не перехватывает external links, downloads, `tel:`, `mailto:`, new-tab intent и modifier-click;
@@ -275,19 +299,24 @@ Turbo используется для явно выбранных page visits и
 
 Page scripts становятся lifecycle-aware:
 
+- Turbo, landing bridge, widget loader и общие controller scripts загружаются одинаковым `defer`-набором в `<head>` всех трёх страниц и не вставляются повторно через page-content;
 - общая инициализация после initial load и каждого `turbo:load`;
 - timers, observers, modal state и page-bound listeners очищаются до cache/render;
 - catalog, form, lazy-loading и slider controllers идемпотентны;
 - повторный Back/Forward не создаёт дублированных обработчиков.
 
-При Turbo fetch/parse/render error автоматический full reload не выполняется. Текущая страница и widget остаются интактны, action получает retry state.
+Page-specific stylesheet может быть `data-turbo-track="dynamic"`, но tracked reload signatures и общий runtime set должны совпадать на всех страницах: asset mismatch не имеет права переводить catalog action в full reload.
+
+У Turbo `8.0.23` стандартный BrowserAdapter вызывает `window.location` при network, timeout и content-type mismatch. Поэтому widget-initiated visit проходит через узкий landing failure adapter поверх закреплённой версии: он делегирует успешный lifecycle без изменений, а перечисленные failure statuses завершает как failed visit, очищает busy/progress state и отправляет correlated error в widget без вызова стандартного reload path. HTTP error/non-HTML response также отсекается до render. Любой `turbo:reload` во время catalog action считается тестовым провалом. Текущая страница и widget остаются интактны, action получает retry state.
+
+Опора на публичное поведение Turbo зафиксирована официальными материалами: [permanent elements и lifecycle](https://turbo.hotwired.dev/handbook/building), [programmatic visits и opt-in Drive](https://turbo.hotwired.dev/reference/drive), [navigation/fetch events](https://turbo.hotwired.dev/reference/events). Version-specific failure adapter проверяется против [source `v8.0.23`](https://github.com/hotwired/turbo/tree/v8.0.23), а не предполагается стабильным между обновлениями.
 
 ## 10. Responsive UX
 
 ### Desktop
 
 - normal/wide widget остаётся открытым;
-- catalog layout получает безопасную правую область или эквивалентный responsive reflow;
+- catalog layout по отражённому layout state получает безопасную правую область или эквивалентный responsive reflow;
 - target card не должен оказаться под panel;
 - fullscreen panel сворачивается перед переходом, иначе каталог визуально недоступен.
 
@@ -398,7 +427,7 @@ Playwright desktop и mobile проверяет:
 6. включение rich actions после подтверждённого smoke;
 7. публикация числовых price records только после owner review.
 
-`AI_WIDGET_RICH_ACTIONS_ENABLED` по умолчанию выключен до шага 5. При rollback backend продолжает возвращать обычный text reply, а старый widget остаётся совместимым. Price claim availability определяется published price records и не включается отдельной модельной догадкой.
+`AI_WIDGET_RICH_ACTIONS_ENABLED` по умолчанию выключен до шага 5. Даже при включённом flag actions возвращаются только клиенту с `catalog_navigation.v1`; старый widget всегда получает обычный text reply. При rollback достаточно выключить flag. Price claim availability определяется published price records и не включается отдельной модельной догадкой.
 
 ## 15. Acceptance criteria
 
