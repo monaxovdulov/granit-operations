@@ -65,6 +65,9 @@ export type AcceptInboundMessageInput = {
   idempotencyKey: string;
   requestFingerprint: string;
   automationRequested: boolean;
+  serverTimestamped?: boolean;
+  enqueueWidgetAiJob?: boolean;
+  widgetAiJobMaxAttempts?: number;
   needsManagerReason?: NeedsManagerReason;
   managerPanelBaseUrl?: string;
   metadata: Record<string, unknown>;
@@ -76,12 +79,19 @@ export type AcceptInboundMessageResult = {
   publicConversationId: string;
   channelIdentityId: string;
   publicMessageId: string;
+  submittedAt?: string;
   widgetPublicSessionId?: string;
   agentAllowedToReply: boolean;
   aiState: AiState;
   replayed: boolean;
   existingAiReply?: SiteWidgetStoredAiReply;
   aiTurnInput?: AiTurnInput;
+  widgetAiJob?: {
+    id: string;
+    status: "pending" | "processing" | "retrying" | "replied" | "degraded" | "blocked" | "failed";
+    attemptCount: number;
+    terminalReason?: string;
+  };
 };
 
 export type PersistAiReplyWithSendGateInput = {

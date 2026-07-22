@@ -6,7 +6,7 @@ import type {
   AiTurnAction
 } from "../ai-dialog-contract.js";
 
-export const WIDGET_AI_EVAL_CORPUS_VERSION = "granit_widget_eval.real_dialogs.v4";
+export const WIDGET_AI_EVAL_CORPUS_VERSION = "granit_widget_eval.real_dialogs.v5";
 
 export const AI_EVAL_LABELS = [
   "wrong_intent",
@@ -81,6 +81,38 @@ export type WidgetAiEvalOutput = {
 };
 
 export const WIDGET_AI_REGRESSION_CORPUS: WidgetAiEvalCase[] = [
+  scenario("issue14_uncertainty_guided_choice", "multi_turn", "repeated_question", [
+    "Нужен расчет памятника с установкой",
+    "Для расчёта сначала уточним детали. Какой тип памятника нужен: одинарный, двойной, семейный или комплекс?",
+    "не знаю"
+  ], "answer", undefined, {}, ["какой тип памятника", "одинарный, двойной"], {
+    requiredPhrasesAny: ["разбираться", "без терминов", "показать примеры"]
+  }),
+  scenario("issue14_tentative_one_person_context", "multi_turn", "wrong_intent", [
+    "не знаю",
+    "Это нормально — разбираться в типах памятников не нужно. Показать примеры без терминов?",
+    "у меня дед"
+  ], "answer", undefined, {}, ["какое кладбище", "минск"], {
+    requiredPhrasesAny: ["для дедушки", "для одного человека", "как ориентир"]
+  }),
+  scenario("issue14_first_frustration_repair", "multi_turn", "bad_tone", [
+    "у меня дед",
+    "Понял. Показать несколько простых вариантов?",
+    "я ж сказал не знаю я не разбираюсь"
+  ], "answer", undefined, {}, ["какой тип", "какое кладбище", "минск"], {
+    requiredPhrasesAny: ["извините", "не буду повторять"]
+  }),
+  scenario("issue14_repeated_frustration_handoff", "multi_turn", "missed_handoff", [
+    "я ж сказал не знаю я не разбираюсь",
+    "Извините, больше не буду повторять вопрос. Могу показать варианты или передать менеджеру.",
+    "ты че тоже самое мне говоришь"
+  ], "handoff", undefined, {}, ["какой тип", "какое кладбище", "минск"]),
+  scenario("issue14_retract_invented_location", "multi_turn", "unsupported_fact", [
+    "На каком кладбище в Минске планируется установка?",
+    "я ничего про минск не говорил"
+  ], "answer", undefined, {}, ["на каком кладбище"], {
+    requiredPhrasesAny: ["вы не называли", "не буду учитывать", "вы не говорили"]
+  }),
   scenario("multi_turn_selection", "multi_turn", "wrong_intent", [
     "Нужен двойной памятник.",
     "Какой материал рассматриваете?",

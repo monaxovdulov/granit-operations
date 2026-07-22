@@ -4,6 +4,7 @@ const ALLOWED_AI_METADATA_KEYS = new Set([
   "ai_disclosure_version",
   "ai_input_fingerprint",
   "catalog_content_hash",
+  "catalog_references",
   "catalog_schema_version",
   "catalog_version",
   "channel",

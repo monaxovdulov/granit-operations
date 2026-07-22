@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 
 import {
+  AnySiteWidgetMessageRequestSchema,
   SITE_WIDGET_CONTRACT_VERSION,
+  SITE_WIDGET_V2_CONTRACT_VERSION,
   SUPPORTED_SITE_WIDGET_VERSIONS,
-  SiteWidgetMessageRequestSchema,
   type SiteWidgetResponse,
   type SiteWidgetValidationIssue
 } from "@granit/contracts";
@@ -36,7 +37,12 @@ import {
   AgentReplyBlockedError,
   IdempotencyConflictError
 } from "../../conversations/repositories/lead-conversation-types.js";
-import type { PublicIntakeRepository } from "../../conversations/repositories/public-intake-repository.js";
+import type {
+  ClaimedSiteWidgetAiJob,
+  PublicIntakeRepository,
+  SaveAcceptedSiteWidgetMessageResult,
+  SiteWidgetAiJobStatus
+} from "../../conversations/repositories/public-intake-repository.js";
 import {
   WIDGET_AI_DISCLOSURE_TEXT,
   WIDGET_AI_DISCLOSURE_VERSION,
@@ -65,13 +71,46 @@ export type PublicWidgetHistoryServiceResult = {
           submitted_at: string;
         }>;
       }
+    | {
+        ok: true;
+        schema_version: "site_widget.history.v2";
+        public_session_id: string;
+        public_conversation_id: string;
+        conversation_state: "ai_active" | "manager_pending" | "manager_active" | "closed";
+        poll_after_ms?: number;
+        messages: Array<{
+          public_message_id: string;
+          sender_role: "visitor" | "ai_assistant" | "manager";
+          text: string;
+          submitted_at: string;
+          delivery_state: "accepted";
+          catalog_references?: Array<{
+            kind: "catalog_item";
+            label: string;
+            title: string;
+            href: string;
+            entity_id: string;
+          }>;
+          automation?: {
+            status: SiteWidgetAiJobStatus;
+            reason?: string;
+          };
+        }>;
+      }
     | { ok: false; error: { code: "widget_history_not_found" } };
+};
+
+export type ProcessedSiteWidgetAiJobResult = {
+  status: "replied" | "degraded" | "blocked";
+  terminalReason?: string;
+  outputPublicMessageId?: string;
 };
 
 export type PublicWidgetIntakeServiceOptions = {
   ai?: {
     enabled: boolean;
     replyGenerator?: PublicWidgetAiReplyGenerator;
+    jobMaxAttempts?: number;
   };
 };
 
@@ -85,7 +124,11 @@ export class PublicWidgetIntakeService {
     private readonly options: PublicWidgetIntakeServiceOptions = {}
   ) {}
 
-  async getSiteWidgetHistory(rawPublicSessionId: string): Promise<PublicWidgetHistoryServiceResult> {
+  async getSiteWidgetHistory(
+    rawPublicSessionId: string,
+    schemaVersion: "site_widget.history.v1" | "site_widget.history.v2" =
+      "site_widget.history.v1"
+  ): Promise<PublicWidgetHistoryServiceResult> {
     const parsed = z.string().uuid().safeParse(rawPublicSessionId);
 
     if (!parsed.success || !this.repository.getSiteWidgetHistory) {
@@ -96,6 +139,42 @@ export class PublicWidgetIntakeService {
 
     if (!history) {
       return widgetHistoryNotFound();
+    }
+
+    if (schemaVersion === "site_widget.history.v2") {
+      const hasActiveJob = history.messages.some(
+        (message) =>
+          message.automation?.status === "pending" ||
+          message.automation?.status === "processing" ||
+          message.automation?.status === "retrying"
+      );
+
+      return {
+        statusCode: 200,
+        body: {
+          ok: true,
+          schema_version: "site_widget.history.v2",
+          public_session_id: history.publicSessionId,
+          public_conversation_id: history.publicConversationId,
+          conversation_state: history.state,
+          poll_after_ms: hasActiveJob ? 700 : undefined,
+          messages: history.messages.map((message) => ({
+            public_message_id: message.publicMessageId,
+            sender_role: message.senderRole,
+            text: message.text,
+            submitted_at: message.submittedAt,
+            delivery_state: "accepted",
+            catalog_references: message.catalogReferences?.map((reference) => ({
+              kind: reference.kind,
+              label: reference.label,
+              title: reference.title,
+              href: reference.href,
+              entity_id: reference.entityId
+            })),
+            automation: message.automation
+          }))
+        }
+      };
     }
 
     return {
@@ -120,10 +199,15 @@ export class PublicWidgetIntakeService {
     const schemaVersion = readSchemaVersion(rawBody);
 
     if (!schemaVersion) {
-      return validationError([{ path: "schema_version", message: "schema_version is required" }]);
+      return validationError(
+        [{ path: "schema_version", message: "schema_version is required" }],
+        "invalid_request",
+        400,
+        SITE_WIDGET_CONTRACT_VERSION
+      );
     }
 
-    if (schemaVersion !== SITE_WIDGET_CONTRACT_VERSION) {
+    if (!SUPPORTED_SITE_WIDGET_VERSIONS.includes(schemaVersion as never)) {
       return {
         statusCode: 422,
         body: {
@@ -139,14 +223,20 @@ export class PublicWidgetIntakeService {
       };
     }
 
-    const parsed = SiteWidgetMessageRequestSchema.safeParse(rawBody);
+    const acceptedSchemaVersion = schemaVersion as
+      | typeof SITE_WIDGET_CONTRACT_VERSION
+      | typeof SITE_WIDGET_V2_CONTRACT_VERSION;
+    const parsed = AnySiteWidgetMessageRequestSchema.safeParse(rawBody);
 
     if (!parsed.success) {
       return validationError(
         parsed.error.issues.map((issue) => ({
           path: issue.path.join("."),
           message: issue.message
-        }))
+        })),
+        "invalid_request",
+        400,
+        acceptedSchemaVersion
       );
     }
 
@@ -161,8 +251,25 @@ export class PublicWidgetIntakeService {
         publicSessionId,
         agentAllowedToReply: aiCanRun,
         request: parsed.data,
-        requestFingerprint
+        requestFingerprint,
+        enqueueAiJob: acceptedSchemaVersion === SITE_WIDGET_V2_CONTRACT_VERSION && aiCanRun,
+        aiJobMaxAttempts: this.options.ai?.jobMaxAttempts ?? 3
       });
+
+      if (acceptedSchemaVersion === SITE_WIDGET_V2_CONTRACT_VERSION) {
+        return v2AcceptedSuccess(saved, aiCanRun);
+      }
+
+      return this.processAcceptedSiteWidgetMessage(saved);
+    } catch (error) {
+      return persistenceFailure(error, acceptedSchemaVersion);
+    }
+  }
+
+  async processAcceptedSiteWidgetMessage(
+    saved: SaveAcceptedSiteWidgetMessageResult
+  ): Promise<PublicWidgetIntakeServiceResult> {
+      const aiReplyGenerator = this.options.ai?.replyGenerator;
 
       if (saved.aiReply) {
         return aiReplySuccess(
@@ -375,35 +482,206 @@ export class PublicWidgetIntakeService {
           fallbackReason
         );
       }
-    } catch (error) {
-      if (error instanceof IdempotencyConflictError) {
-        return validationError(
-          [
-            {
-              path: "idempotency_key",
-              message: "idempotency_key was already used for a different widget message"
-            }
-          ],
-          "idempotency_conflict",
-          409
-        );
-      }
+  }
 
+  async processClaimedSiteWidgetAiJob(
+    job: ClaimedSiteWidgetAiJob
+  ): Promise<ProcessedSiteWidgetAiJobResult> {
+    const existingReply = await this.repository.findSiteWidgetAiReply?.(
+      job.inboundPublicMessageId
+    );
+
+    if (existingReply) {
       return {
-        statusCode: 503,
-        body: {
-          ok: false,
-          schema_version: SITE_WIDGET_CONTRACT_VERSION,
-          error: {
-            type: "retryable_backend_failure",
-            code: "persistence_unconfirmed",
-            action: "retry_or_show_fallback",
-            retry_after_seconds: 30
-          }
-        }
+        status: "replied",
+        outputPublicMessageId: existingReply.publicMessageId
       };
     }
+
+    const result = await this.processAcceptedSiteWidgetMessage({
+      leadId: job.leadId,
+      conversationId: job.conversationId,
+      publicConversationId: job.publicConversationId,
+      channelIdentityId: "",
+      publicSessionId: job.publicSessionId,
+      publicMessageId: job.inboundPublicMessageId,
+      submittedAt: job.aiTurnInput.inboundMessage.submittedAt,
+      agentAllowedToReply: job.aiTurnInput.gateSnapshot.agentAllowedToReply,
+      aiState: job.aiTurnInput.gateSnapshot.aiState,
+      replayed: false,
+      aiTurnInput: job.aiTurnInput,
+      widgetAiJob: job
+    });
+
+    return toProcessedSiteWidgetAiJobResult(result);
   }
+}
+
+function v2AcceptedSuccess(
+  saved: SaveAcceptedSiteWidgetMessageResult,
+  aiCanRun: boolean
+): PublicWidgetIntakeServiceResult {
+  const managerPending =
+    saved.aiState === "needs_manager" || saved.aiState === "manager_active";
+  const job = saved.widgetAiJob;
+  const automation = saved.aiReply
+    ? {
+        status: "replied" as const,
+        next_step: "history_available" as const,
+        conversation_state: managerPending ? ("manager_pending" as const) : ("ai_active" as const)
+      }
+    : !aiCanRun || !saved.agentAllowedToReply
+      ? {
+          status: "disabled" as const,
+          next_step: "manager_review" as const,
+          conversation_state: "manager_pending" as const
+        }
+      : job?.status === "replied"
+        ? {
+            status: "replied" as const,
+            next_step: "history_available" as const,
+            conversation_state: managerPending
+              ? ("manager_pending" as const)
+              : ("ai_active" as const)
+          }
+        : job?.status === "blocked"
+          ? {
+              status: "manager_pending" as const,
+              next_step: "manager_review" as const,
+              conversation_state: "manager_pending" as const,
+              reason: toV2ManagerReason(job.terminalReason)
+            }
+          : job?.status === "degraded" || job?.status === "failed"
+            ? {
+                status: "degraded" as const,
+                next_step: "retry_or_manager" as const,
+                conversation_state: "ai_active" as const,
+                reason: toV2DegradedReason(job.terminalReason)
+              }
+            : job
+              ? {
+                  status: "processing" as const,
+                  next_step: "poll_history" as const,
+                  conversation_state: "ai_active" as const,
+                  poll_after_ms: 700
+                }
+              : {
+                  status: "degraded" as const,
+                  next_step: "retry_or_manager" as const,
+                  conversation_state: "ai_active" as const,
+                  reason: "ai_persistence_unconfirmed" as const
+                };
+
+  return {
+    statusCode: 202,
+    body: {
+      ok: true,
+      schema_version: SITE_WIDGET_V2_CONTRACT_VERSION,
+      status: saved.replayed ? "replayed" : "accepted",
+      public_session_id: saved.publicSessionId,
+      public_conversation_id: saved.publicConversationId,
+      public_message_id: saved.publicMessageId,
+      submitted_at: saved.submittedAt,
+      action: "show_widget_saved",
+      automation,
+      message_to_user:
+        automation.status === "processing"
+          ? "Сообщение принято. AI-помощник готовит ответ."
+          : automation.status === "replied"
+            ? "Сообщение принято, ответ доступен в истории диалога."
+            : automation.status === "disabled" || automation.status === "manager_pending"
+              ? "Сообщение принято. Менеджер увидит его в панели."
+              : "Сообщение сохранено. Если AI не ответит, диалог увидит менеджер."
+    }
+  };
+}
+
+function toV2ManagerReason(reason: string | undefined): "agent_reply_blocked" | "handoff" {
+  return reason === "handoff" ? "handoff" : "agent_reply_blocked";
+}
+
+function toV2DegradedReason(
+  reason: string | undefined
+):
+  | PublicWidgetAiUnavailableReason
+  | "ai_persistence_unconfirmed"
+  | "worker_failed" {
+  return isPublicWidgetAiUnavailableReason(reason) || reason === "ai_persistence_unconfirmed"
+    ? reason
+    : "worker_failed";
+}
+
+function persistenceFailure(
+  error: unknown,
+  schemaVersion:
+    | typeof SITE_WIDGET_CONTRACT_VERSION
+    | typeof SITE_WIDGET_V2_CONTRACT_VERSION
+): PublicWidgetIntakeServiceResult {
+  if (error instanceof IdempotencyConflictError) {
+    return validationError(
+      [
+        {
+          path: "idempotency_key",
+          message: "idempotency_key was already used for a different widget message"
+        }
+      ],
+      "idempotency_conflict",
+      409,
+      schemaVersion
+    );
+  }
+
+  return {
+    statusCode: 503,
+    body: {
+      ok: false,
+      schema_version: schemaVersion,
+      error: {
+        type: "retryable_backend_failure",
+        code: "persistence_unconfirmed",
+        action: "retry_or_show_fallback",
+        retry_after_seconds: 30
+      }
+    }
+  };
+}
+
+function toProcessedSiteWidgetAiJobResult(
+  result: PublicWidgetIntakeServiceResult
+): ProcessedSiteWidgetAiJobResult {
+  if (!result.body.ok) {
+    throw new Error(`widget AI job failed with HTTP ${result.statusCode}`);
+  }
+
+  if (result.body.schema_version !== SITE_WIDGET_CONTRACT_VERSION) {
+    throw new Error("widget AI job returned an unexpected contract version");
+  }
+
+  if (result.body.automation.status === "replied") {
+    return {
+      status: "replied",
+      terminalReason:
+        result.body.automation.conversation_state === "manager_pending"
+          ? "handoff"
+          : undefined,
+      outputPublicMessageId: result.body.automation.reply.public_message_id
+    };
+  }
+
+  if (result.body.automation.status === "degraded") {
+    return {
+      status: "degraded",
+      terminalReason: result.body.automation.reason
+    };
+  }
+
+  return {
+    status: "blocked",
+    terminalReason:
+      result.body.automation.status === "fallback"
+        ? result.body.automation.reason
+        : "agent_reply_blocked"
+  };
 }
 
 function widgetHistoryNotFound(): PublicWidgetHistoryServiceResult {
@@ -547,13 +825,16 @@ function aiReplySuccess(
 function validationError(
   fields: SiteWidgetValidationIssue[],
   code: "invalid_request" | "idempotency_conflict" = "invalid_request",
-  statusCode = 400
+  statusCode = 400,
+  schemaVersion:
+    | typeof SITE_WIDGET_CONTRACT_VERSION
+    | typeof SITE_WIDGET_V2_CONTRACT_VERSION = SITE_WIDGET_CONTRACT_VERSION
 ): PublicWidgetIntakeServiceResult {
   return {
     statusCode,
     body: {
       ok: false,
-      schema_version: SITE_WIDGET_CONTRACT_VERSION,
+      schema_version: schemaVersion,
       error: {
         type: "validation",
         code,

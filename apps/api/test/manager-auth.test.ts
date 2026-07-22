@@ -753,6 +753,7 @@ class MemoryIntakeRepository implements IntakeRepository {
       channelIdentityId,
       publicSessionId: input.publicSessionId,
       publicMessageId: input.publicMessageId,
+      submittedAt: input.request.submitted_at,
       agentAllowedToReply: input.agentAllowedToReply,
       aiState: "ai_collecting_info",
       replayed: false

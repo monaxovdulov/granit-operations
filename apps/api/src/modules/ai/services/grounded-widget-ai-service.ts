@@ -5,7 +5,8 @@ import {
 import type {
   AiReplyCandidateDecision,
   AiTurnInput,
-  AiUnavailableReason
+  AiUnavailableReason,
+  WidgetCatalogReference
 } from "../ai-turn.js";
 import type {
   CatalogKnowledgePort,
@@ -19,6 +20,10 @@ import {
 } from "../ai-dialog-contract.js";
 import { validateGroundedAiDecision } from "../grounding/ai-decision-validator.js";
 import { WIDGET_AI_POLICY_VERSION } from "../policy/widget-ai-policy.js";
+import {
+  buildWidgetAiDialogueControlReply,
+  guardUnsupportedWidgetReply
+} from "../policy/widget-ai-dialogue-control.js";
 import {
   buildGroundedWidgetAiInstructions,
   buildGroundedWidgetAiUserInput,
@@ -106,6 +111,12 @@ export class GroundedWidgetAiService implements PublicWidgetAiReplyGenerator {
     const timeout = setTimeout(() => controller.abort(), deadlineMs);
 
     try {
+      const policyReply = buildWidgetAiDialogueControlReply(input);
+
+      if (policyReply) {
+        return this.toRenderedFallbackReply(policyReply, startedAt);
+      }
+
       const snapshot = await this.catalog.getSnapshot();
       const selectedRecords = await this.catalog.search(snapshot, {
         query: buildCatalogQuery(input),
@@ -316,19 +327,31 @@ export class GroundedWidgetAiService implements PublicWidgetAiReplyGenerator {
       turn: input,
       plan: normalizedPlan.plan
     });
-    const text = rendered?.text ?? attempt.decision.replyText.trim();
-    const action = rendered?.action ?? normalizedPlan.plan.action;
-    const intent = rendered?.intent ?? normalizedPlan.plan.intent;
-    const requestedSlots = rendered?.requestedSlots ?? normalizedPlan.plan.requestedSlots;
-    const riskFlags = rendered?.riskFlags ?? normalizedPlan.plan.riskFlags;
+    const catalogReferences = buildVerifiedCatalogReferences(
+      snapshot,
+      attempt.verification,
+      selectedRecordsForReferences(snapshot, attempt.verification)
+    );
+    const plannedText = stripVerifiedCatalogUrls(
+      rendered?.text ?? attempt.decision.replyText.trim(),
+      catalogReferences
+    );
+    const guarded = guardUnsupportedWidgetReply({ turn: input, text: plannedText });
+    const effectiveRendered = guarded ?? rendered;
+    const text = effectiveRendered?.text ?? plannedText;
+    const action = effectiveRendered?.action ?? normalizedPlan.plan.action;
+    const intent = effectiveRendered?.intent ?? normalizedPlan.plan.intent;
+    const requestedSlots =
+      effectiveRendered?.requestedSlots ?? normalizedPlan.plan.requestedSlots;
+    const riskFlags = effectiveRendered?.riskFlags ?? normalizedPlan.plan.riskFlags;
     const handoffReason =
-      rendered?.handoffReason ?? normalizedPlan.plan.handoffReason ?? undefined;
+      effectiveRendered?.handoffReason ?? normalizedPlan.plan.handoffReason ?? undefined;
 
     return {
       decision: "reply_candidate",
       text,
       agentAllowedToReplyAfterSend:
-        rendered?.stopAiAfterReply || action === "handoff" ? false : undefined,
+        effectiveRendered?.stopAiAfterReply || action === "handoff" ? false : undefined,
       action,
       intent,
       slotUpdates: attempt.decision.extractedSlots.map((slot) => ({
@@ -347,6 +370,7 @@ export class GroundedWidgetAiService implements PublicWidgetAiReplyGenerator {
       requestedSlots,
       riskFlags,
       handoffReason,
+      catalogReferences: catalogReferences.length ? catalogReferences : undefined,
       confidence: Math.min(attempt.decision.confidence, attempt.verification.confidence),
       metadata: {
         ...this.baseMetadata(snapshot, startedAt),
@@ -362,13 +386,14 @@ export class GroundedWidgetAiService implements PublicWidgetAiReplyGenerator {
         claim_verdict_count: attempt.verification.claimVerdicts.length,
         slot_verdict_count: attempt.verification.slotVerdicts.length,
         requirement_verdict_count: attempt.verification.requirementVerdicts.length,
+        catalog_references: catalogReferences,
         plan_normalized: Boolean(normalizedPlan.reason),
         plan_normalization_reason: normalizedPlan.reason,
         plan_original_action: normalizedPlan.originalPlan?.action ?? null,
         plan_original_intent: normalizedPlan.originalPlan?.intent ?? null,
         plan_original_requested_slots: normalizedPlan.originalPlan?.requestedSlots ?? null,
-        reply_renderer: rendered ? "app_owned" : "model",
-        render_reason: rendered?.reason ?? null,
+        reply_renderer: effectiveRendered ? "app_owned" : "model",
+        render_reason: effectiveRendered?.reason ?? null,
         grounding_verified: true,
         fallback_mode: "none",
         repair_applied: repaired,
@@ -407,6 +432,9 @@ export class GroundedWidgetAiService implements PublicWidgetAiReplyGenerator {
         fallback_reason: options.fallbackReason ?? null,
         reply_renderer: "app_owned",
         render_reason: rendered.reason,
+        grounding_verified: true,
+        claim_coverage_complete: true,
+        verifier_verdict: "app_policy_pass",
         ...(rendered.handoffReason
           ? {
               handoff_reason: rendered.reason,
@@ -606,4 +634,95 @@ function buildCatalogQuery(input: AiTurnInput) {
 
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
+}
+
+function selectedRecordsForReferences(
+  snapshot: CatalogSnapshot,
+  verification: WidgetAiVerification
+): readonly CatalogRecord[] {
+  const ids = new Set(
+    verification.claimVerdicts.flatMap((claim) =>
+      claim.catalogReference?.path === "/frontend/url"
+        ? [claim.catalogReference.recordId]
+        : []
+    )
+  );
+
+  return snapshot.records.filter((record) => ids.has(record.id));
+}
+
+function buildVerifiedCatalogReferences(
+  snapshot: CatalogSnapshot,
+  verification: WidgetAiVerification,
+  records: readonly CatalogRecord[]
+): WidgetCatalogReference[] {
+  const references: WidgetCatalogReference[] = [];
+  const seen = new Set<string>();
+
+  for (const claim of verification.claimVerdicts) {
+    const evidence = claim.catalogReference;
+    if (
+      claim.kind !== "catalog" ||
+      !claim.supported ||
+      !evidence ||
+      evidence.path !== "/frontend/url" ||
+      evidence.catalogVersion !== snapshot.catalogVersion
+    ) {
+      continue;
+    }
+
+    const record = records.find(
+      (candidate) =>
+        candidate.id === evidence.recordId &&
+        candidate.revision === evidence.revision &&
+        candidate.status === "published"
+    );
+    const href = record?.frontend?.url;
+    const title = readCatalogTitle(record);
+
+    if (!record || !href || !title || claim.text !== href || seen.has(href)) {
+      continue;
+    }
+
+    seen.add(href);
+    references.push({
+      kind: "catalog_item",
+      label: `Посмотреть «${title}»`,
+      title,
+      href,
+      entityId: record.frontend?.highlightEntityId ?? record.id
+    });
+  }
+
+  return references.slice(0, 8);
+}
+
+function readCatalogTitle(record: CatalogRecord | undefined): string | null {
+  const value = record?.data.title;
+  return typeof value === "string" && value.trim() ? value.trim().slice(0, 160) : null;
+}
+
+function stripVerifiedCatalogUrls(
+  text: string,
+  references: readonly WidgetCatalogReference[]
+): string {
+  let result = text;
+
+  for (const reference of references) {
+    result = result.replaceAll(reference.href, "");
+  }
+
+  result = result
+    .replace(/\s+([,.!?;:])/gu, "$1")
+    .replace(/:\s*(?=$|[.!?])/gu, ".")
+    .replace(/\s{2,}/gu, " ")
+    .trim();
+
+  if (!result || /^(?:посмотрите|ссылка|вот)[:.!\s-]*$/iu.test(result)) {
+    return references.length === 1
+      ? `Подобрал вариант «${references[0]!.title}» в каталоге.`
+      : "Подобрал подходящие варианты в каталоге.";
+  }
+
+  return result;
 }

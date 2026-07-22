@@ -4,10 +4,12 @@ import {
   PUBLIC_INTAKE_CONTRACT_VERSION,
   PUBLIC_INTAKE_EVENT_TYPE,
   SITE_WIDGET_CONTRACT_VERSION,
+  SITE_WIDGET_V2_CONTRACT_VERSION,
   SITE_WIDGET_MESSAGE_EVENT_TYPE,
   SiteWidgetResponseSchema,
   type SiteFormIntakeRequest,
-  type SiteWidgetMessageRequest
+  type SiteWidgetMessageRequest,
+  type SiteWidgetV2MessageRequest
 } from "@granit/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -453,6 +455,139 @@ describe("public site_form intake", () => {
 });
 
 describe("public site_widget intake", () => {
+  it("acknowledges v2 immediately, processes AI durably, and returns timestamps and catalog links through history", async () => {
+    const repository = new MemoryIntakeRepository();
+    let releaseGeneration!: () => void;
+    const generationGate = new Promise<void>((resolve) => {
+      releaseGeneration = resolve;
+    });
+    const replyGenerator: PublicWidgetAiReplyGenerator = {
+      async generateReply() {
+        await generationGate;
+        return {
+          decision: "reply_candidate",
+          text: "Подойдёт модель «Арфа». Откройте карточку, чтобы посмотреть детали.",
+          action: "answer",
+          intent: "product_selection",
+          requestedSlots: [],
+          slotUpdates: [],
+          requirementUpdates: [],
+          sourceEvidence: [],
+          metadata: {
+            grounding_verified: true,
+            catalog_references: [
+              {
+                kind: "catalog_item",
+                label: "Посмотреть «Арфа»",
+                title: "Арфа",
+                href: "/catalog.html?section=memorials&entity=ent_deadbeef#block-memorials",
+                entityId: "ent_deadbeef"
+              }
+            ]
+          }
+        };
+      }
+    };
+    const app = track(
+      buildApi({
+        repository,
+        widgetAi: {
+          enabled: true,
+          replyGenerator,
+          jobWorker: {
+            enabled: true,
+            pollIntervalMs: 25,
+            leaseMs: 5_000,
+            retryBackoffMs: 25,
+            maxAttempts: 3
+          }
+        }
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/public/intake/site-widget/messages",
+      payload: validWidgetV2Request({
+        idempotencyKey: "widget-v2-async-0001",
+        messageText: "Покажите модель Арфа"
+      })
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toMatchObject({
+      ok: true,
+      schema_version: SITE_WIDGET_V2_CONTRACT_VERSION,
+      status: "accepted",
+      automation: {
+        status: "processing",
+        next_step: "poll_history",
+        conversation_state: "ai_active"
+      }
+    });
+    expect(response.json().public_conversation_id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(response.json().submitted_at).not.toBe("2020-01-01T00:00:00.000Z");
+    expect(SiteWidgetResponseSchema.safeParse(response.json()).success).toBe(true);
+
+    const pendingHistory = await app.inject({
+      method: "GET",
+      url: `/public/intake/site-widget/sessions/${response.json().public_session_id}/history?schema_version=site_widget.history.v2`
+    });
+    expect(pendingHistory.json()).toMatchObject({
+      schema_version: "site_widget.history.v2",
+      poll_after_ms: 700,
+      messages: [
+        {
+          public_message_id: response.json().public_message_id,
+          sender_role: "visitor",
+          delivery_state: "accepted",
+          automation: { status: expect.stringMatching(/pending|processing/) }
+        }
+      ]
+    });
+
+    releaseGeneration();
+    let completedHistory = pendingHistory.json();
+    for (let attempt = 0; attempt < 80; attempt += 1) {
+      const historyResponse = await app.inject({
+        method: "GET",
+        url: `/public/intake/site-widget/sessions/${response.json().public_session_id}/history?schema_version=site_widget.history.v2`
+      });
+      completedHistory = historyResponse.json();
+
+      if (
+        completedHistory.messages?.length === 2 &&
+        completedHistory.messages[0]?.automation?.status === "replied"
+      ) {
+        break;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+
+    expect(completedHistory.poll_after_ms).toBeUndefined();
+    expect(completedHistory.messages).toMatchObject([
+      {
+        sender_role: "visitor",
+        submitted_at: response.json().submitted_at,
+        automation: { status: "replied" }
+      },
+      {
+        sender_role: "ai_assistant",
+        text: "Подойдёт модель «Арфа». Откройте карточку, чтобы посмотреть детали.",
+        delivery_state: "accepted",
+        catalog_references: [
+          {
+            label: "Посмотреть «Арфа»",
+            href: "/catalog.html?section=memorials&entity=ent_deadbeef#block-memorials",
+            entity_id: "ent_deadbeef"
+          }
+        ]
+      }
+    ]);
+    expect(JSON.stringify(completedHistory.messages[1])).not.toContain("https://");
+  });
+
   it("returns public success only after widget message persistence and exposes manager dialog", async () => {
     const repository = new MemoryIntakeRepository();
     const managerAuthRepository = new MemoryManagerAuthRepository();
@@ -2711,6 +2846,16 @@ function validWidgetRequest(
     consent: {
       privacy_policy: true
     }
+  };
+}
+
+function validWidgetV2Request(
+  overrides: { idempotencyKey?: string; messageText?: string; publicSessionId?: string } = {}
+): SiteWidgetV2MessageRequest {
+  return {
+    ...validWidgetRequest(overrides),
+    schema_version: SITE_WIDGET_V2_CONTRACT_VERSION,
+    submitted_at: "2020-01-01T00:00:00.000Z"
   };
 }
 

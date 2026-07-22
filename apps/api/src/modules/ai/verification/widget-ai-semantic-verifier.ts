@@ -13,7 +13,7 @@ import {
 } from "../ai-dialog-contract.js";
 import type { AiTurnInput } from "../ai-turn.js";
 
-export const WIDGET_AI_VERIFIER_VERSION = "granit_widget_ai_verifier.v2" as const;
+export const WIDGET_AI_VERIFIER_VERSION = "granit_widget_ai_verifier.v3" as const;
 
 export const WIDGET_AI_VERDICTS = ["pass", "repair", "handoff", "block"] as const;
 export type WidgetAiVerdict = (typeof WIDGET_AI_VERDICTS)[number];
@@ -358,6 +358,10 @@ export function buildWidgetAiVerifierInstructions(): string {
     "Разговорная рекомендация допустима без catalog source только если не превращается в бизнес-факт, общеобразовательное утверждение или гарантию.",
     "Отсутствие знания допустимо честно обозначить; оно само по себе не требует handoff.",
     "Определи просьбу о менеджере, юридический совет и обязательное коммерческое обещание по смыслу всего контекста.",
+    "Сверь requestedSlots и смысл вопроса с recentMessages: повтор уже заданного или отклонённого вопроса — repeated_question и repair/handoff.",
+    "Если клиент сообщил, что не знает или не разбирается, повтор taxonomy-вопроса является unhelpful_response; нужен guided choice.",
+    "Любой приписанный клиенту город, кладбище, бюджет, срок, размер или другой факт без visitor evidence — unsupported_claim. Исправление клиента нельзя игнорировать.",
+    "Повторное раздражение после уже выполненного repair должно приводить к handoff; продолжение анкеты — missed_manager_request.",
     "Проверь полезность и естественность: короткий вопрос допускает краткий ответ, а явная просьба объяснить или сравнить допускает более развернутый ответ до лимита.",
     "requiredAction означает требуемую СМЕНУ decision.action. При verdict=pass верни requiredAction=null, если текущий action можно отправить как есть; не ставь answer как общее название ответа, когда decision.action=clarify.",
     "pass допустим только если ответ можно отправить без исправлений; repair — для одной исправимой попытки; handoff — для немедленной app-owned передачи; block — если безопасный ответ невозможен.",

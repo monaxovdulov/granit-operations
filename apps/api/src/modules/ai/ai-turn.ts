@@ -130,6 +130,14 @@ export type AiReplyCandidateEvidence = {
   }>;
 };
 
+export type WidgetCatalogReference = {
+  kind: "catalog_item";
+  label: string;
+  title: string;
+  href: string;
+  entityId: string;
+};
+
 export type AiUnavailableReason =
   | "missing_openai_config"
   | "model_error"
@@ -154,6 +162,7 @@ export type AiReplyCandidateDecision =
       riskFlags?: AiRiskFlag[];
       handoffReason?: AiHandoffReason;
       sourceEvidence?: ApprovedSourceEvidence[];
+      catalogReferences?: WidgetCatalogReference[];
       confidence?: number;
     }
   | {

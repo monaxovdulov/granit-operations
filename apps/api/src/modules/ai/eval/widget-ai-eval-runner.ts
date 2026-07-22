@@ -121,7 +121,9 @@ export function validateWidgetAiEvalCorpus(cases: readonly WidgetAiEvalCase[]) {
 
     const selfCheck = runWidgetAiEvalCase(evalCase, {
       action: evalCase.expected.action,
-      replyText: "Нейтральный проверочный ответ без коммерческих обещаний.",
+      replyText:
+        evalCase.expected.requiredPhrasesAny?.join(" ") ??
+        "Нейтральный проверочный ответ без коммерческих обещаний.",
       requestedSlots: evalCase.expected.requestedSlot
         ? [evalCase.expected.requestedSlot]
         : [],

@@ -3,13 +3,17 @@ import {
   buildWidgetAiCalculationFallbackReply,
   type WidgetAiRenderedReply
 } from "../rendering/widget-ai-reply-renderer.js";
+import { buildWidgetAiDialogueControlReply } from "./widget-ai-dialogue-control.js";
 
-export const WIDGET_AI_POLICY_VERSION = "granit_widget_ai_policy.consult_first.v2";
+export const WIDGET_AI_POLICY_VERSION = "granit_widget_ai_policy.dialogue_control.v3";
 
 export type WidgetAiPolicyReply = WidgetAiRenderedReply;
 
 export function buildWidgetAiPolicyReply(input: AiTurnInput): WidgetAiPolicyReply | null {
   const normalized = input.inboundMessage.text.toLocaleLowerCase("ru-RU");
+  const dialogueReply = buildWidgetAiDialogueControlReply(input);
+
+  if (dialogueReply) return dialogueReply;
 
   if (/(менеджер|оператор|человек|живой|позвон|свяж|перезвон|manager|human|operator)/i.test(normalized)) {
     return {

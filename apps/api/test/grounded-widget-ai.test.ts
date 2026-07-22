@@ -404,6 +404,48 @@ describe("grounded widget AI core", () => {
     expect(provider.attempts).toEqual(["initial"]);
   });
 
+  it("moves a verified catalog URL into a structured reference and hides the raw URL", async () => {
+    const catalog = new FileCatalogKnowledgeProvider();
+    const snapshot = await catalog.getSnapshot();
+    const arfa = snapshot.records.find((record) => record.id === ARFA_RECORD_ID);
+
+    if (!arfa) throw new Error("missing Arfa catalog fixture");
+
+    const decision = answerDecision(`Памятник «Арфа»: ${ARFA_URL}`);
+    const result = await new GroundedWidgetAiService({
+      provider: new FakeGroundedProvider([decision]),
+      verifier: new FakeVerifier([
+        catalogUrlVerification(decision, ARFA_URL, arfa, snapshot.catalogVersion)
+      ]),
+      catalog
+    }).generateReply(turn("Покажите памятник «Арфа» и дайте ссылку на него."));
+
+    expect(result).toMatchObject({
+      decision: "reply_candidate",
+      action: "answer",
+      catalogReferences: [
+        {
+          kind: "catalog_item",
+          label: "Посмотреть «Арфа»",
+          title: "Арфа",
+          href: ARFA_URL,
+          entityId: ARFA_RECORD_ID
+        }
+      ],
+      metadata: {
+        grounding_verified: true,
+        catalog_references: [
+          {
+            label: "Посмотреть «Арфа»",
+            href: ARFA_URL
+          }
+        ]
+      }
+    });
+    expect(result.decision === "reply_candidate" ? result.text : "").not.toContain(ARFA_URL);
+    expect(result.decision === "reply_candidate" ? result.text : "").not.toContain("entity=");
+  });
+
   it("keeps natural wording when verifier proves full coverage", async () => {
     const provider = new FakeGroundedProvider([
       baseDecision("Можно связать оформление в единую композицию. Какой стиль вам ближе?")
