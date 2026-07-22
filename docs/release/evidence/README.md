@@ -32,6 +32,7 @@ Prefer the Russian template in this directory for new owner-facing evidence.
 
 Current evidence records:
 
+- `WIDGET_AI_AUDIT_13_20260722_RU.md` - итоговый staging-аудит issues #13–#17: dialogue quality, async delivery, safe catalog actions, manager gate, screenshots и rollback evidence.
 - `CATALOG_RAG_STAGING_20260720_RU.md` - staging evidence нового канонического каталога, knowledge snapshot, provider, deploy, QA и точного live-AI blocker.
 - `S01_PUBLIC_INTAKE_PROVIDER_RU.md` - public intake provider and manager visibility evidence.
 - `S02_MANAGER_AUTH_YANDEX_RU.md` - Yandex ID manager auth/session evidence.
