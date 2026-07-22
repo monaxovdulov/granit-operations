@@ -567,7 +567,8 @@ describe("grounded widget AI core", () => {
         deterministic_policy_version: WIDGET_AI_POLICY_VERSION,
         policy_reason: "calculation_intake_clarify",
         fallback_reason: "model_error",
-        reply_renderer: "app_owned"
+        reply_renderer: "app_owned",
+        verifier_verdict: "pass"
       }
     });
     expect(provider.attempts).toEqual(["initial"]);

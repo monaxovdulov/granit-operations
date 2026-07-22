@@ -434,7 +434,7 @@ export class GroundedWidgetAiService implements PublicWidgetAiReplyGenerator {
         render_reason: rendered.reason,
         grounding_verified: true,
         claim_coverage_complete: true,
-        verifier_verdict: "app_policy_pass",
+        verifier_verdict: "pass",
         ...(rendered.handoffReason
           ? {
               handoff_reason: rendered.reason,
