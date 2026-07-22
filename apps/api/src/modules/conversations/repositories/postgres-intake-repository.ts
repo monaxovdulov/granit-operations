@@ -1,4 +1,17 @@
-import { and, asc, desc, eq, gt, lt, ne, or, sql, type SQLWrapper } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  isNotNull,
+  lt,
+  lte,
+  ne,
+  or,
+  sql,
+  type SQLWrapper
+} from "drizzle-orm";
 
 import {
   aiQualityEvents,
@@ -1125,8 +1138,8 @@ export class PostgresIntakeRepository implements IntakeRepository {
         .where(
           and(
             eq(widgetAiJobs.status, "processing"),
-            sql`${widgetAiJobs.leaseExpiresAt} IS NOT NULL`,
-            sql`${widgetAiJobs.leaseExpiresAt} <= ${input.now}`,
+            isNotNull(widgetAiJobs.leaseExpiresAt),
+            lte(widgetAiJobs.leaseExpiresAt, input.now),
             sql`${widgetAiJobs.attemptCount} >= ${widgetAiJobs.maxAttempts}`
           )
         );
@@ -1171,12 +1184,12 @@ export class PostgresIntakeRepository implements IntakeRepository {
                   eq(widgetAiJobs.status, "pending"),
                   eq(widgetAiJobs.status, "retrying")
                 ),
-                sql`${widgetAiJobs.availableAt} <= ${input.now}`
+                lte(widgetAiJobs.availableAt, input.now)
               ),
               and(
                 eq(widgetAiJobs.status, "processing"),
-                sql`${widgetAiJobs.leaseExpiresAt} IS NOT NULL`,
-                sql`${widgetAiJobs.leaseExpiresAt} <= ${input.now}`
+                isNotNull(widgetAiJobs.leaseExpiresAt),
+                lte(widgetAiJobs.leaseExpiresAt, input.now)
               )
             )
           )
