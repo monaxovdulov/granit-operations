@@ -53,8 +53,8 @@ Owner/agent: Codex
 ## Runtime candidates
 
 - Widget: `d21589b4e8e103180d3fa5cbf9d808e5b2ad82ad`, package v1.1.0 ZIP SHA-256 `b96831048b47672025f833893a6463ccb91a029a2d6d7eeb5fab8212c8f9b5f0`.
-- Landing: `d8d01b0` before remote push.
-- Operations: runtime SHA будет записан после commit и до server handoff.
+- Landing: `d8d01b03d37afc84e0843fe8819e04d8e862a22a`.
+- Operations runtime: `12b428098c37014daf78a3b330199e9949b5460d`.
 
 ## Blockers
 

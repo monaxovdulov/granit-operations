@@ -54,9 +54,9 @@ Environment target: staging only
 
 | Компонент | Branch / commit | Artifact |
 |---|---|---|
-| `granit-operations` | `agent/widget-issues-14-17` / commit фиксируется перед rollout | API, policy, contracts, queue, migration |
+| `granit-operations` | `agent/widget-issues-14-17` / `12b428098c37014daf78a3b330199e9949b5460d` | API, policy, contracts, queue, migration |
 | `business-ai-web-widget` | `agent/widget-issues-14-17` / `d21589b4e8e103180d3fa5cbf9d808e5b2ad82ad` | `granit-site-widget-v1.1.0.zip`, SHA-256 `b96831048b47672025f833893a6463ccb91a029a2d6d7eeb5fab8212c8f9b5f0` |
-| `landing-granit-static` | `agent/widget-issues-14-17` / `d8d01b0` | content-addressed runtime `d21589b...`, entity map |
+| `landing-granit-static` | `agent/widget-issues-14-17` / `d8d01b03d37afc84e0843fe8819e04d8e862a22a` | content-addressed runtime `d21589b...`, entity map |
 
 ## Predeploy checks
 
