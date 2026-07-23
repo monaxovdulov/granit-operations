@@ -41,6 +41,13 @@ export type WidgetAiAssemblyOptions = {
   deadlineMs?: number;
   shadowObservationSink?: WidgetAiShadowObservationSink;
   replyGenerator?: PublicWidgetAiReplyGenerator;
+  jobWorker?: {
+    enabled: boolean;
+    pollIntervalMs: number;
+    leaseMs: number;
+    retryBackoffMs: number;
+    maxAttempts: number;
+  };
 };
 
 export function buildAppContext(options: AppContextOptions) {
@@ -55,7 +62,8 @@ export function buildAppContext(options: AppContextOptions) {
       ai: options.widgetAi
         ? {
             enabled: options.widgetAi.enabled,
-            replyGenerator: widgetAiReplyGenerator
+            replyGenerator: widgetAiReplyGenerator,
+            jobMaxAttempts: options.widgetAi.jobWorker?.maxAttempts
           }
         : undefined
     })

@@ -10,6 +10,7 @@ import {
 } from "./modules/manager/routes/manager-shell-routes.js";
 import { registerManagerRoutes } from "./modules/manager/routes/manager-routes.js";
 import { registerPublicIntakeRoutes } from "./modules/intake/routes/public-intake-routes.js";
+import { WidgetAiJobWorker } from "./modules/intake/services/widget-ai-job-worker.js";
 import { registerTelegramRoutes } from "./modules/telegram/inbound/routes/telegram-routes.js";
 import type { TelegramBotServiceOptions } from "./modules/telegram/inbound/telegram-bot-service.js";
 
@@ -48,6 +49,31 @@ export function buildApi(options: BuildApiOptions) {
   registerManagerShellRoutes(app, options.managerShell);
   registerManagerRoutes(app, context.managerLeads, context.managerAuth);
   registerTelegramRoutes(app, context.telegramWebhook);
+
+  if (options.widgetAi?.jobWorker?.enabled) {
+    const abortController = new AbortController();
+    const worker = new WidgetAiJobWorker(
+      options.repository,
+      context.publicIntake.siteWidget,
+      {
+        ...options.widgetAi.jobWorker,
+        onError: (error) => {
+          app.log.error({ err: error }, "site widget AI job worker iteration failed");
+        }
+      }
+    );
+    let workerRun: Promise<void> | undefined;
+
+    app.addHook("onReady", () => {
+      workerRun = worker.run(abortController.signal).catch((error: unknown) => {
+        app.log.error({ err: error }, "site widget AI job worker stopped unexpectedly");
+      });
+    });
+    app.addHook("onClose", async () => {
+      abortController.abort();
+      await workerRun;
+    });
+  }
 
   return app;
 }

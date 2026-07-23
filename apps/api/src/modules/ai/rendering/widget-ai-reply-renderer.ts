@@ -6,6 +6,7 @@ import type {
   AiTurnIntent
 } from "../ai-dialog-contract.js";
 import type { AiTurnInput } from "../ai-turn.js";
+import { duplicateRequestedSlot } from "../policy/widget-ai-dialogue-control.js";
 
 export type WidgetAiReplyPlan = {
   action: AiTurnAction;
@@ -50,6 +51,18 @@ export function normalizeWidgetAiReplyPlan(input: {
         "final_quote_pressure"
       ]),
       handoffReason: "final_quote_pressure"
+    });
+  }
+
+  const duplicateSlot = duplicateRequestedSlot(turn, plan);
+
+  if (plan.action === "clarify" && duplicateSlot) {
+    return normalizePlan(plan, `dialogue_duplicate_question_${duplicateSlot}`, {
+      action: "handoff",
+      intent: "manager_request",
+      requestedSlots: [],
+      riskFlags: mergeRiskFlags(plan.riskFlags, ["low_confidence"]),
+      handoffReason: "low_confidence"
     });
   }
 
@@ -260,22 +273,56 @@ function isDeadlineIntakeRequest(normalized: string): boolean {
 }
 
 function nextCalculationSlot(input: AiTurnInput): AiSlotName | null {
-  const preferredOrder: AiSlotName[] = ["monumentType", "material", "size", "city", "cemetery"];
+  const previouslyAsked = analyzePreviouslyAskedSlots(input);
+  const preferredOrder: AiSlotName[] = ["monumentType", "material", "size"];
 
-  return preferredOrder.find((slot) => !input.knownSlots.values[slot]) ?? null;
+  return (
+    preferredOrder.find(
+      (slot) => !input.knownSlots.values[slot] && !previouslyAsked.has(slot)
+    ) ?? null
+  );
 }
 
 function nextDeadlineSlot(input: AiTurnInput): AiSlotName | null {
+  const previouslyAsked = analyzePreviouslyAskedSlots(input);
   const preferredOrder: AiSlotName[] = [
+    "monumentType",
+    "material",
+    "size",
+    "desiredTiming"
+  ];
+
+  return (
+    preferredOrder.find(
+      (slot) => !input.knownSlots.values[slot] && !previouslyAsked.has(slot)
+    ) ?? null
+  );
+}
+
+function analyzePreviouslyAskedSlots(input: AiTurnInput): Set<AiSlotName> {
+  const plan: WidgetAiReplyPlan = {
+    action: "clarify",
+    intent: "general_question",
+    requestedSlots: [],
+    riskFlags: []
+  };
+  const candidates: AiSlotName[] = [
     "monumentType",
     "material",
     "size",
     "city",
     "cemetery",
+    "engraving",
+    "installation",
+    "budgetContext",
     "desiredTiming"
   ];
 
-  return preferredOrder.find((slot) => !input.knownSlots.values[slot]) ?? null;
+  return new Set(
+    candidates.filter((slot) =>
+      Boolean(duplicateRequestedSlot(input, { ...plan, requestedSlots: [slot] }))
+    )
+  );
 }
 
 function mergeRiskFlags(

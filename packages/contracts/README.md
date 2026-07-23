@@ -12,7 +12,7 @@ Initial S01 contract:
 
 S04 widget contract:
 
-- version: `site_widget.v1`;
+- versions: `site_widget.v1` (legacy synchronous) and `site_widget.v2` (durable async acknowledgement + history polling);
 - endpoint: `POST /public/intake/site-widget/messages`;
 - TypeScript/Zod artifact: `src/site-widget/v1.ts`;
 - JSON Schema artifact: `schemas/site-widget.v1.json`;

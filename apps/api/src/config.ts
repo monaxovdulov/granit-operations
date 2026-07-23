@@ -16,6 +16,13 @@ export type ApiConfig = {
     generatorTimeoutMs: number;
     verifierTimeoutMs: number;
     deadlineMs: number;
+    jobWorker: {
+      enabled: boolean;
+      pollIntervalMs: number;
+      leaseMs: number;
+      retryBackoffMs: number;
+      maxAttempts: number;
+    };
   };
   telegramBot: {
     enabled: boolean;
@@ -78,7 +85,30 @@ export function loadConfig(env: NodeJS.ProcessEnv): ApiConfig {
         fallback: 18000,
         min: 5000,
         max: 30000
-      })
+      }),
+      jobWorker: {
+        enabled: env.AI_WIDGET_JOB_WORKER_ENABLED === "true",
+        pollIntervalMs: parseIntegerEnv(env.AI_WIDGET_JOB_POLL_INTERVAL_MS, {
+          fallback: 250,
+          min: 50,
+          max: 5000
+        }),
+        leaseMs: parseIntegerEnv(env.AI_WIDGET_JOB_LEASE_MS, {
+          fallback: 45000,
+          min: 5000,
+          max: 120000
+        }),
+        retryBackoffMs: parseIntegerEnv(env.AI_WIDGET_JOB_RETRY_BACKOFF_MS, {
+          fallback: 1500,
+          min: 0,
+          max: 60000
+        }),
+        maxAttempts: parseIntegerEnv(env.AI_WIDGET_JOB_MAX_ATTEMPTS, {
+          fallback: 3,
+          min: 1,
+          max: 10
+        })
+      }
     },
     telegramBot: {
       enabled: env.TELEGRAM_BOT_ENABLED === "true",

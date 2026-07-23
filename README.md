@@ -165,6 +165,11 @@ Env names смотреть в [ENVIRONMENT.md](docs/ENVIRONMENT.md). Значе�
 - `AI_WIDGET_GENERATOR_TIMEOUT_MS`
 - `AI_WIDGET_VERIFIER_TIMEOUT_MS`
 - `AI_WIDGET_DEADLINE_MS`
+- `AI_WIDGET_JOB_WORKER_ENABLED` (default `false`; enable for `site_widget.v2` processing)
+- `AI_WIDGET_JOB_POLL_INTERVAL_MS`
+- `AI_WIDGET_JOB_LEASE_MS`
+- `AI_WIDGET_JOB_RETRY_BACKOFF_MS`
+- `AI_WIDGET_JOB_MAX_ATTEMPTS`
 
 Для первого preflight можно использовать `shadow`, но customer-visible grounded AI надо проверять именно в `enforce`.
 

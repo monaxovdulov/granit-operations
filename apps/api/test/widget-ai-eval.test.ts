@@ -28,7 +28,10 @@ describe("widget AI review and regression loop", () => {
         "provider_degradation",
         "document_word_not_handoff",
         "connection_word_not_handoff",
-        "empty_catalog_honest_answer"
+        "empty_catalog_honest_answer",
+        "issue14_uncertainty_guided_choice",
+        "issue14_repeated_frustration_handoff",
+        "issue14_retract_invented_location"
       ])
     );
   });

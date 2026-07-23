@@ -242,6 +242,52 @@ export const conversationMessages = pgTable(
   })
 );
 
+export const widgetAiJobs = pgTable(
+  "widget_ai_jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    inboundMessageId: uuid("inbound_message_id")
+      .notNull()
+      .references(() => conversationMessages.id, { onDelete: "cascade" }),
+    inboundPublicMessageId: uuid("inbound_public_message_id").notNull(),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    leadId: uuid("lead_id")
+      .notNull()
+      .references(() => leads.id, { onDelete: "cascade" }),
+    status: text("status").notNull().default("pending"),
+    inputPayload: jsonb("input_payload").$type<Record<string, unknown>>().notNull(),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    maxAttempts: integer("max_attempts").notNull().default(3),
+    availableAt: timestamp("available_at", { withTimezone: true }).notNull().defaultNow(),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    outputPublicMessageId: uuid("output_public_message_id"),
+    terminalReason: text("terminal_reason"),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true })
+  },
+  (table) => ({
+    inboundMessageIdx: uniqueIndex("widget_ai_jobs_inbound_message_idx").on(
+      table.inboundMessageId
+    ),
+    inboundPublicMessageIdx: uniqueIndex("widget_ai_jobs_inbound_public_message_idx").on(
+      table.inboundPublicMessageId
+    ),
+    claimIdx: index("widget_ai_jobs_claim_idx").on(
+      table.status,
+      table.availableAt,
+      table.createdAt
+    ),
+    conversationCreatedIdx: index("widget_ai_jobs_conversation_created_idx").on(
+      table.conversationId,
+      table.createdAt
+    )
+  })
+);
+
 export const conversationSlots = pgTable(
   "conversation_slots",
   {

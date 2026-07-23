@@ -13,7 +13,10 @@ export type PublicIntakeRouteUseCases = {
   };
   siteWidget: {
     acceptSiteWidgetMessage(rawBody: unknown): Promise<PublicWidgetIntakeServiceResult>;
-    getSiteWidgetHistory(publicSessionId: string): Promise<PublicWidgetHistoryServiceResult>;
+    getSiteWidgetHistory(
+      publicSessionId: string,
+      schemaVersion?: "site_widget.history.v1" | "site_widget.history.v2"
+    ): Promise<PublicWidgetHistoryServiceResult>;
   };
 };
 
@@ -37,7 +40,7 @@ export function registerPublicIntakeRoutes(
           origin: (origin, callback) => {
             callback(null, Boolean(origin && allowedOrigins.includes(origin)));
           },
-          methods: ["POST", "OPTIONS"],
+          methods: ["GET", "POST", "OPTIONS"],
           allowedHeaders: ["content-type", "accept"],
           credentials: false
         });
@@ -72,11 +75,17 @@ function registerPublicIntakeRouteHandlers(
     return reply.code(result.statusCode).send(result.body);
   });
 
-  app.get<{ Params: { publicSessionId: string } }>(
+  app.get<{
+    Params: { publicSessionId: string };
+    Querystring: { schema_version?: string };
+  }>(
     "/intake/site-widget/sessions/:publicSessionId/history",
     async (request, reply) => {
       const result = await useCases.siteWidget.getSiteWidgetHistory(
-        request.params.publicSessionId
+        request.params.publicSessionId,
+        request.query.schema_version === "site_widget.history.v2"
+          ? "site_widget.history.v2"
+          : "site_widget.history.v1"
       );
 
       return reply.code(result.statusCode).send(result.body);

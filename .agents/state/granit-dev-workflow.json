@@ -1,39 +1,39 @@
 {
   "schema_version": 1,
   "repo": "granit-operations",
-  "updated_at": "2026-07-20T15:37:47Z",
-  "git_head": "ff589b9",
-  "mode": "status",
-  "state": "source_of_truth_updated",
+  "updated_at": "2026-07-22T10:24:29Z",
+  "git_head": "a475f1c",
+  "mode": "design",
+  "state": "widget_issues_14_17_design_review",
   "dirty_worktree": {
     "status": "clean",
-    "summary": "main is clean and synced with origin/main after PR #9; release worktrees and sibling repos were not modified"
+    "summary": "agent/catalog-knowledge-staging has only the approved #14-#17 design and workflow-state update pending commit; sibling repo dirty main checkout is intentionally untouched"
   },
   "context": {
-    "last_scan_at": "2026-07-20T15:37:47Z",
-    "fresh_until": "2026-07-27T15:37:47Z",
+    "last_scan_at": "2026-07-22T10:24:29Z",
+    "fresh_until": "2026-07-29T10:24:29Z",
     "source_hashes": {}
   },
   "rules": {
     "status": "current",
-    "last_refresh_at": "2026-07-20T15:37:47Z"
+    "last_refresh_at": "2026-07-22T10:24:29Z"
   },
   "task": {
-    "type": "source-of-truth-fix",
-    "summary": "Recorded that the active customer-facing landing/widget smoke source is monaxovdulov/landing-granit-static, while granit-site-cms is only a separate CMS/baseline path unless promoted by a later ADR/task.",
-    "source": "PR #9"
+    "type": "widget-issues-14-17",
+    "summary": "Owner approved the cross-repository design for dialogue control, safe catalog references, durable asynchronous AI jobs, truthful widget progress, timestamps, staging rollout and the follow-up #13 quality audit.",
+    "source": "GitHub issues #14-#17 and owner instruction"
   },
   "checks": {
     "docs_diff_check": {
-      "command": "git diff --check && git diff --check HEAD~1..HEAD",
+      "command": "git diff --check",
       "status": "passed",
-      "reason": "docs-only source-of-truth change had no whitespace errors"
+      "reason": "approved design and workflow-state update have no whitespace errors"
     },
     "runtime_checks": {
       "command": "not run",
       "status": "skipped",
-      "reason": "docs/state-only change; no runtime code, migrations, env, deploy or release worktrees touched"
+      "reason": "design gate only; runtime implementation starts after owner review of the committed spec"
     }
   },
-  "next_action": "For customer-facing website/widget staging work, use landing-granit-static as the active landing repo and pair-smoke it against granit-operations; do not use granit-site-cms as the current rollout target without a later accepted ADR/task."
+  "next_action": "After owner review of docs/superpowers/specs/2026-07-22-widget-issues-14-17-design.md, implement P0 #14 and #16 first, then P1 #15 and #17."
 }

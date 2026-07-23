@@ -3,7 +3,7 @@
 Status: Consult-first Stage B additive AI dialog
 Provider: `granit-operations`
 Consumer: `granit-site-cms`
-Version: `site_widget.v1`
+Versions: `site_widget.v1` (legacy synchronous), `site_widget.v2` (durable async)
 
 ## Flow
 
@@ -13,9 +13,11 @@ public site widget
   -> widget session persisted
   -> lead/conversation/message persisted
   -> manager-visible dialog created
-  -> optional safe AI reply persisted
+  -> v2 AI job persisted in the same transaction
+  -> safe public receipt returned immediately
+  -> optional safe AI reply persisted by the background worker
   -> slots, AI run and handoff/degradation evidence persisted
-  -> safe public receipt returned
+  -> v2 client polls public history until the job is terminal
 ```
 
 ## Endpoint
@@ -24,9 +26,10 @@ public site widget
 POST /public/intake/site-widget/messages
 ```
 
-The endpoint accepts only:
+The endpoint accepts:
 
-- `schema_version: "site_widget.v1"`;
+- `schema_version: "site_widget.v1"` for backwards-compatible synchronous callers;
+- `schema_version: "site_widget.v2"` for immediate durable acknowledgement and history polling;
 - `event_type: "site_widget.message_submitted"`;
 - source channel `site_widget`.
 
@@ -50,6 +53,19 @@ Public success may be returned only after all S04 state is accepted and persiste
 - `conversations`;
 - `conversation_messages`;
 - manager timeline event.
+
+For `site_widget.v2`, an eligible `widget_ai_jobs` row and the complete bounded AI-turn input are inserted in that same transaction. The client-supplied `submitted_at` is replaced by an authoritative server timestamp before persistence and acknowledgement.
+
+## V2 Async Response
+
+`site_widget.v2` returns `202` without waiting for model generation. The response includes public session, conversation and message ids, authoritative `submitted_at`, plus one of:
+
+- `processing` + `poll_history` while a durable job is pending, processing or retrying;
+- `replied` when an idempotent replay finds a completed answer;
+- `degraded` after a terminal safe failure;
+- `manager_pending` or `disabled` when AI may not reply.
+
+The worker claims jobs with `FOR UPDATE SKIP LOCKED`, a bounded lease and retry budget. Final AI persistence still uses the existing atomic send-time gate, so manager takeover wins over a stale generated draft.
 
 ## Safe Public Response
 
@@ -171,3 +187,5 @@ The endpoint accepts only a UUID public session id and returns at most 100 publi
 ```
 
 Allowed states are `ai_active`, `manager_pending`, `manager_active`, and `closed`. Internal lead/conversation ids, slots, run metadata and manager destinations are never returned.
+
+`site_widget.history.v2` is requested with `?schema_version=site_widget.history.v2`. It adds authoritative message timestamps, visitor-job status, an optional `poll_after_ms`, and verified `catalog_references`. Catalog references are relative allowlisted deep links derived only from a published selected catalog record and a supported `/frontend/url` verifier claim; raw URLs are removed from assistant text.

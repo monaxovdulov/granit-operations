@@ -25,6 +25,11 @@ Future environment/config names:
 | `AI_WIDGET_GENERATOR_TIMEOUT_MS` | Generator request timeout, default `10000`, clamped `3000..25000` | server only | Grounded consultant runtime |
 | `AI_WIDGET_VERIFIER_TIMEOUT_MS` | Semantic verifier request timeout, default `6000`, clamped `3000..20000` | server only | Grounded consultant runtime |
 | `AI_WIDGET_DEADLINE_MS` | Shared generator/verifier/repair turn budget, default `18000`, clamped `5000..30000` | server only | Grounded consultant runtime |
+| `AI_WIDGET_JOB_WORKER_ENABLED` | Enables durable `site_widget.v2` AI-job processing; default `false` | server only | Async widget rollout |
+| `AI_WIDGET_JOB_POLL_INTERVAL_MS` | Idle worker poll interval, default `250`, clamped `50..5000` | server only | Async widget worker |
+| `AI_WIDGET_JOB_LEASE_MS` | Job claim lease, default `45000`, clamped `5000..120000` | server only | Async widget worker |
+| `AI_WIDGET_JOB_RETRY_BACKOFF_MS` | Unexpected worker-failure retry backoff, default `1500`, clamped `0..60000` | server only | Async widget worker |
+| `AI_WIDGET_JOB_MAX_ATTEMPTS` | Durable job attempt budget, default `3`, clamped `1..10` | server only | Async widget worker |
 | `AI_WIDGET_EVAL_LIVE` | Explicitly authorizes paid live model evals when exactly `true`; does not enable customer traffic | server only | Local/staging eval runtime |
 | `TELEGRAM_BOT_ENABLED` | Enables Telegram webhook adapter; default must remain `false` outside tested environments | server only | Telegram inbound + manager mini-panel runtime, default `false` |
 | `TELEGRAM_BOT_TOKEN` | Telegram adapter token; used only by the separate delivery sender, never by the webhook for direct business sends | server only | Telegram delivery sender runtime |

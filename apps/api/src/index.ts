@@ -45,7 +45,8 @@ const app = buildApi({
     catalog: catalogKnowledge,
     modelName: config.widgetAi.openAiModel,
     verifierModelName: config.widgetAi.verifierModel,
-    deadlineMs: config.widgetAi.deadlineMs
+    deadlineMs: config.widgetAi.deadlineMs,
+    jobWorker: config.widgetAi.jobWorker
   },
   publicIntakeCors: config.publicIntakeCors,
   telegramBot: config.telegramBot,

@@ -40,6 +40,7 @@ describe("public intake CORS", () => {
     expect(response.headers["access-control-allow-origin"]).toBe(allowedOrigin);
     expect(response.headers.vary).toBe("Origin");
     expect(response.headers["access-control-allow-methods"]?.split(/,\s*/)).toEqual([
+      "GET",
       "POST",
       "OPTIONS"
     ]);

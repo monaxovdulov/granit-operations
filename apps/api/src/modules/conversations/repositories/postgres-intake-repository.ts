@@ -1,4 +1,17 @@
-import { and, asc, desc, eq, gt, lt, ne, or, sql, type SQLWrapper } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  isNotNull,
+  lt,
+  lte,
+  ne,
+  or,
+  sql,
+  type SQLWrapper
+} from "drizzle-orm";
 
 import {
   aiQualityEvents,
@@ -21,14 +34,21 @@ import {
   managerNotificationOutbox,
   managerUsers,
   messageDeliveries,
+  widgetAiJobs,
   widgetSessions,
   type OperationsDb
 } from "@granit/db";
-import type { SiteFormIntakeRequest, SiteWidgetMessageRequest } from "@granit/contracts";
+import {
+  SITE_WIDGET_V2_CONTRACT_VERSION,
+  type SiteFormIntakeRequest,
+  type SiteWidgetMessageRequest
+} from "@granit/contracts";
 
 import {
+  AI_TURN_INPUT_VERSION,
   buildStageASiteWidgetAiTurnInput,
-  type AiTurnInput
+  type AiTurnInput,
+  type WidgetCatalogReference
 } from "../../ai/ai-turn.js";
 import {
   AI_REQUIREMENT_CATEGORIES,
@@ -70,7 +90,8 @@ import type {
   PersistAiReplyWithSendGateInput,
   SaveSiteWidgetAiMessageInput,
   SaveSiteWidgetAiMessageResult,
-  SiteWidgetAiMessageLookupResult
+  SiteWidgetAiMessageLookupResult,
+  SiteWidgetStoredAiReply
 } from "./conversation-message-repository.js";
 import type { IntakeRepository } from "./intake-repository.js";
 import { AI_REVIEW_LABELS } from "./manager-lead-repository.js";
@@ -116,7 +137,11 @@ import type {
   SaveAcceptedSiteWidgetMessageResult,
   RecordSiteWidgetAiDegradationInput,
   RecordSiteWidgetAiShadowComparisonInput,
-  SiteWidgetHistoryResult
+  SiteWidgetHistoryResult,
+  ClaimedSiteWidgetAiJob,
+  FinishSiteWidgetAiJobInput,
+  SiteWidgetAiJobStatus,
+  SiteWidgetAiJobSummary
 } from "./public-intake-repository.js";
 
 export class PostgresIntakeRepository implements IntakeRepository {
@@ -198,6 +223,16 @@ export class PostgresIntakeRepository implements IntakeRepository {
   }
 
   async acceptInboundMessage(input: AcceptInboundMessageInput): Promise<AcceptInboundMessageResult> {
+    if (input.serverTimestamped) {
+      input = {
+        ...input,
+        message: {
+          ...input.message,
+          submittedAt: new Date().toISOString()
+        }
+      };
+    }
+
     const existing = await this.findExistingInboundMessageByIdempotencyKey(input.idempotencyKey);
 
     if (existing) {
@@ -392,7 +427,8 @@ export class PostgresIntakeRepository implements IntakeRepository {
           })
           .returning({
             id: conversationMessages.id,
-            publicMessageId: conversationMessages.publicMessageId
+            publicMessageId: conversationMessages.publicMessageId,
+            submittedAt: conversationMessages.submittedAt
           });
 
         if (!message) {
@@ -504,27 +540,58 @@ export class PostgresIntakeRepository implements IntakeRepository {
         const effectiveAgentAllowedToReply =
           conversation.agentAllowedToReply && runtimeControl?.enabled === true;
 
+        const aiTurnInput = buildSiteWidgetAiTurnInput(input, {
+          publicConversationId: conversation.publicConversationId,
+          publicMessageId: message.publicMessageId,
+          publicSessionId: widgetSession?.publicSessionId,
+          agentAllowedToReply: effectiveAgentAllowedToReply,
+          aiState: toAiState(conversation.aiState),
+          recentMessages: toAiRecentMessages(recentMessageRows, message.publicMessageId),
+          rollingSummary,
+          persistedSlots: toAiKnownSlots(slotRows),
+          persistedRequirements: toAiKnownRequirements(requirementRows)
+        });
+        const [widgetAiJob] =
+          input.enqueueWidgetAiJob &&
+          input.channel === "site_widget" &&
+          effectiveAgentAllowedToReply &&
+          aiTurnInput
+            ? await tx
+                .insert(widgetAiJobs)
+                .values({
+                  inboundMessageId: message.id,
+                  inboundPublicMessageId: message.publicMessageId,
+                  conversationId: conversation.id,
+                  leadId: conversation.leadId,
+                  status: "pending",
+                  inputPayload: aiTurnInput,
+                  maxAttempts: Math.max(1, Math.min(input.widgetAiJobMaxAttempts ?? 3, 10)),
+                  availableAt: now,
+                  createdAt: now,
+                  updatedAt: now
+                })
+                .onConflictDoNothing({ target: widgetAiJobs.inboundMessageId })
+                .returning({
+                  id: widgetAiJobs.id,
+                  status: widgetAiJobs.status,
+                  attemptCount: widgetAiJobs.attemptCount,
+                  terminalReason: widgetAiJobs.terminalReason
+                })
+            : [];
+
         return {
           leadId: conversation.leadId,
           conversationId: conversation.id,
           publicConversationId: conversation.publicConversationId,
           channelIdentityId: identity.id,
           publicMessageId: message.publicMessageId,
+          submittedAt: message.submittedAt.toISOString(),
           widgetPublicSessionId: widgetSession?.publicSessionId ?? undefined,
           agentAllowedToReply: effectiveAgentAllowedToReply,
           aiState: toAiState(conversation.aiState),
           replayed: false,
-          aiTurnInput: buildSiteWidgetAiTurnInput(input, {
-            publicConversationId: conversation.publicConversationId,
-            publicMessageId: message.publicMessageId,
-            publicSessionId: widgetSession?.publicSessionId,
-            agentAllowedToReply: effectiveAgentAllowedToReply,
-            aiState: toAiState(conversation.aiState),
-            recentMessages: toAiRecentMessages(recentMessageRows, message.publicMessageId),
-            rollingSummary,
-            persistedSlots: toAiKnownSlots(slotRows),
-            persistedRequirements: toAiKnownRequirements(requirementRows)
-          })
+          aiTurnInput,
+          widgetAiJob: widgetAiJob ? toSiteWidgetAiJobSummary(widgetAiJob) : undefined
         };
       });
     } catch (error) {
@@ -571,6 +638,10 @@ export class PostgresIntakeRepository implements IntakeRepository {
       idempotencyKey: input.request.idempotency_key,
       requestFingerprint: input.requestFingerprint,
       automationRequested: input.agentAllowedToReply,
+      serverTimestamped:
+        input.request.schema_version === SITE_WIDGET_V2_CONTRACT_VERSION,
+      enqueueWidgetAiJob: input.enqueueAiJob,
+      widgetAiJobMaxAttempts: input.aiJobMaxAttempts,
       metadata: {
         schema_version: input.request.schema_version,
         event_type: input.request.event_type
@@ -584,11 +655,13 @@ export class PostgresIntakeRepository implements IntakeRepository {
       channelIdentityId: result.channelIdentityId,
       publicSessionId: result.widgetPublicSessionId ?? input.publicSessionId,
       publicMessageId: result.publicMessageId,
+      submittedAt: result.submittedAt ?? input.request.submitted_at,
       agentAllowedToReply: result.agentAllowedToReply,
       aiState: result.aiState,
       replayed: result.replayed,
       aiReply: result.existingAiReply,
-      aiTurnInput: result.aiTurnInput
+      aiTurnInput: result.aiTurnInput,
+      widgetAiJob: result.widgetAiJob
     };
   }
 
@@ -1045,6 +1118,173 @@ export class PostgresIntakeRepository implements IntakeRepository {
       .onConflictDoNothing({ target: aiShadowComparisons.inboundPublicMessageId });
   }
 
+  async claimSiteWidgetAiJob(input: {
+    leaseMs: number;
+    now: Date;
+  }): Promise<ClaimedSiteWidgetAiJob | null> {
+    const leaseMs = Math.max(5_000, Math.min(input.leaseMs, 120_000));
+
+    return this.db.transaction(async (tx) => {
+      await tx
+        .update(widgetAiJobs)
+        .set({
+          status: "failed",
+          terminalReason: "worker_failed",
+          lastError: "AI job exhausted its lease and retry budget",
+          leaseExpiresAt: null,
+          updatedAt: input.now,
+          completedAt: input.now
+        })
+        .where(
+          and(
+            eq(widgetAiJobs.status, "processing"),
+            isNotNull(widgetAiJobs.leaseExpiresAt),
+            lte(widgetAiJobs.leaseExpiresAt, input.now),
+            sql`${widgetAiJobs.attemptCount} >= ${widgetAiJobs.maxAttempts}`
+          )
+        );
+
+      const [row] = await tx
+        .select({
+          id: widgetAiJobs.id,
+          status: widgetAiJobs.status,
+          attemptCount: widgetAiJobs.attemptCount,
+          maxAttempts: widgetAiJobs.maxAttempts,
+          terminalReason: widgetAiJobs.terminalReason,
+          leadId: widgetAiJobs.leadId,
+          conversationId: widgetAiJobs.conversationId,
+          publicConversationId: conversations.publicConversationId,
+          publicSessionId: widgetSessions.publicSessionId,
+          inboundPublicMessageId: widgetAiJobs.inboundPublicMessageId,
+          inputPayload: widgetAiJobs.inputPayload
+        })
+        .from(widgetAiJobs)
+        .innerJoin(conversations, eq(widgetAiJobs.conversationId, conversations.id))
+        .innerJoin(widgetSessions, eq(conversations.widgetSessionId, widgetSessions.id))
+        .where(
+          and(
+            sql`${widgetAiJobs.attemptCount} < ${widgetAiJobs.maxAttempts}`,
+            sql`NOT EXISTS (
+              SELECT 1
+              FROM widget_ai_jobs older_widget_ai_jobs
+              WHERE older_widget_ai_jobs.conversation_id = ${widgetAiJobs.conversationId}
+                AND older_widget_ai_jobs.id <> ${widgetAiJobs.id}
+                AND older_widget_ai_jobs.status IN ('pending', 'processing', 'retrying')
+                AND (
+                  older_widget_ai_jobs.created_at < ${widgetAiJobs.createdAt}
+                  OR (
+                    older_widget_ai_jobs.created_at = ${widgetAiJobs.createdAt}
+                    AND older_widget_ai_jobs.id::text < ${widgetAiJobs.id}::text
+                  )
+                )
+            )`,
+            or(
+              and(
+                or(
+                  eq(widgetAiJobs.status, "pending"),
+                  eq(widgetAiJobs.status, "retrying")
+                ),
+                lte(widgetAiJobs.availableAt, input.now)
+              ),
+              and(
+                eq(widgetAiJobs.status, "processing"),
+                isNotNull(widgetAiJobs.leaseExpiresAt),
+                lte(widgetAiJobs.leaseExpiresAt, input.now)
+              )
+            )
+          )
+        )
+        .orderBy(asc(widgetAiJobs.availableAt), asc(widgetAiJobs.createdAt))
+        .limit(1)
+        .for("update", { of: widgetAiJobs, skipLocked: true });
+
+      if (!row) {
+        return null;
+      }
+
+      if (!isPersistedAiTurnInput(row.inputPayload)) {
+        await tx
+          .update(widgetAiJobs)
+          .set({
+            status: "failed",
+            terminalReason: "invalid_job_payload",
+            lastError: "Persisted AI turn payload failed validation",
+            leaseExpiresAt: null,
+            updatedAt: input.now,
+            completedAt: input.now
+          })
+          .where(eq(widgetAiJobs.id, row.id));
+        return null;
+      }
+
+      const attemptCount = row.attemptCount + 1;
+      await tx
+        .update(widgetAiJobs)
+        .set({
+          status: "processing",
+          attemptCount,
+          leaseExpiresAt: new Date(input.now.getTime() + leaseMs),
+          lastError: null,
+          updatedAt: input.now
+        })
+        .where(eq(widgetAiJobs.id, row.id));
+
+      return {
+        id: row.id,
+        status: "processing",
+        attemptCount,
+        maxAttempts: row.maxAttempts,
+        terminalReason: row.terminalReason ?? undefined,
+        leadId: row.leadId,
+        conversationId: row.conversationId,
+        publicConversationId: row.publicConversationId,
+        publicSessionId: row.publicSessionId,
+        inboundPublicMessageId: row.inboundPublicMessageId,
+        aiTurnInput: row.inputPayload
+      };
+    });
+  }
+
+  async finishSiteWidgetAiJob(input: FinishSiteWidgetAiJobInput): Promise<void> {
+    const retrying = input.status === "retrying";
+
+    await this.db
+      .update(widgetAiJobs)
+      .set({
+        status: input.status,
+        terminalReason: input.terminalReason ?? null,
+        outputPublicMessageId: input.outputPublicMessageId ?? null,
+        lastError: input.lastError?.slice(0, 500) ?? null,
+        availableAt: retrying ? input.retryAt ?? input.completedAt : input.completedAt,
+        leaseExpiresAt: null,
+        updatedAt: input.completedAt,
+        completedAt: retrying ? null : input.completedAt
+      })
+      .where(
+        and(
+          eq(widgetAiJobs.id, input.jobId),
+          eq(widgetAiJobs.status, "processing"),
+          eq(widgetAiJobs.attemptCount, input.attemptCount)
+        )
+      );
+  }
+
+  async findSiteWidgetAiReply(
+    inboundPublicMessageId: string
+  ): Promise<SiteWidgetStoredAiReply | null> {
+    const existing = await this.findExistingAiMessageByIdempotencyKey(
+      `ai:${inboundPublicMessageId}`
+    );
+
+    return existing
+      ? {
+          publicMessageId: existing.publicMessageId,
+          body: existing.body,
+          createdAt: existing.createdAt
+        }
+      : null;
+  }
+
   async getSiteWidgetHistory(publicSessionId: string): Promise<SiteWidgetHistoryResult | null> {
     const [session] = await this.db
       .select({
@@ -1069,12 +1309,24 @@ export class PostgresIntakeRepository implements IntakeRepository {
         senderRole: conversationMessages.senderRole,
         body: conversationMessages.body,
         contentType: conversationMessages.contentType,
-        submittedAt: conversationMessages.submittedAt
+        submittedAt: conversationMessages.submittedAt,
+        metadata: conversationMessages.metadata
       })
       .from(conversationMessages)
       .where(eq(conversationMessages.conversationId, session.conversationId))
       .orderBy(conversationMessages.createdAt)
       .limit(100);
+    const jobRows = await this.db
+      .select({
+        inboundPublicMessageId: widgetAiJobs.inboundPublicMessageId,
+        status: widgetAiJobs.status,
+        terminalReason: widgetAiJobs.terminalReason
+      })
+      .from(widgetAiJobs)
+      .where(eq(widgetAiJobs.conversationId, session.conversationId));
+    const jobs = new Map(
+      jobRows.map((job) => [job.inboundPublicMessageId, job] as const)
+    );
 
     return {
       publicSessionId: session.publicSessionId,
@@ -1088,12 +1340,24 @@ export class PostgresIntakeRepository implements IntakeRepository {
               row.senderRole === "ai_assistant" ||
               row.senderRole === "manager")
         )
-        .map((row) => ({
-          publicMessageId: row.publicMessageId,
-          senderRole: row.senderRole as "visitor" | "ai_assistant" | "manager",
-          text: row.body,
-          submittedAt: row.submittedAt.toISOString()
-        }))
+        .map((row) => {
+          const job = jobs.get(row.publicMessageId);
+          const catalogReferences = readWidgetCatalogReferences(row.metadata);
+
+          return {
+            publicMessageId: row.publicMessageId,
+            senderRole: row.senderRole as "visitor" | "ai_assistant" | "manager",
+            text: row.body,
+            submittedAt: row.submittedAt.toISOString(),
+            catalogReferences: catalogReferences.length ? catalogReferences : undefined,
+            automation: job
+              ? {
+                  status: toSiteWidgetAiJobStatus(job.status),
+                  reason: job.terminalReason ?? undefined
+                }
+              : undefined
+          };
+        })
     };
   }
 
@@ -1717,6 +1981,23 @@ export class PostgresIntakeRepository implements IntakeRepository {
       : null;
   }
 
+  private async findSiteWidgetAiJobSummary(
+    inboundPublicMessageId: string
+  ): Promise<SiteWidgetAiJobSummary | undefined> {
+    const [row] = await this.db
+      .select({
+        id: widgetAiJobs.id,
+        status: widgetAiJobs.status,
+        attemptCount: widgetAiJobs.attemptCount,
+        terminalReason: widgetAiJobs.terminalReason
+      })
+      .from(widgetAiJobs)
+      .where(eq(widgetAiJobs.inboundPublicMessageId, inboundPublicMessageId))
+      .limit(1);
+
+    return row ? toSiteWidgetAiJobSummary(row) : undefined;
+  }
+
   private async findPublicWidgetReferenceForLead(leadId: string): Promise<string> {
     const [message] = await this.db
       .select({
@@ -2113,6 +2394,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
     const existingAiReply = await this.findExistingAiMessageByIdempotencyKey(
       `ai:${existing.publicMessageId}`
     );
+    const widgetAiJob = await this.findSiteWidgetAiJobSummary(existing.publicMessageId);
     const context = await this.loadAiDialogContext(
       existing.conversationId,
       existing.publicMessageId
@@ -2132,6 +2414,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
       channelIdentityId:
         existing.messageChannelIdentityId ?? existing.conversationChannelIdentityId ?? "",
       publicMessageId: existing.publicMessageId,
+      submittedAt: existing.submittedAt.toISOString(),
       widgetPublicSessionId: existing.publicSessionId ?? undefined,
       agentAllowedToReply: effectiveAgentAllowedToReply,
       aiState: toAiState(existing.aiState),
@@ -2143,7 +2426,8 @@ export class PostgresIntakeRepository implements IntakeRepository {
             createdAt: existingAiReply.createdAt
           }
         : undefined,
-      aiTurnInput: buildPersistedSiteWidgetAiTurnInput(persistedInput, context)
+      aiTurnInput: buildPersistedSiteWidgetAiTurnInput(persistedInput, context),
+      widgetAiJob
     };
   }
 
@@ -2241,6 +2525,119 @@ export class PostgresIntakeRepository implements IntakeRepository {
 }
 
 type Transaction = Parameters<Parameters<OperationsDb["transaction"]>[0]>[0];
+
+const WIDGET_CATALOG_HREF_PATTERN =
+  /^\/catalog\.html\?section=[a-z0-9-]+&entity=ent_[a-f0-9]+#block-[a-z0-9-]+$/;
+
+function toSiteWidgetAiJobStatus(value: string): SiteWidgetAiJobStatus {
+  if (
+    value === "pending" ||
+    value === "processing" ||
+    value === "retrying" ||
+    value === "replied" ||
+    value === "degraded" ||
+    value === "blocked" ||
+    value === "failed"
+  ) {
+    return value;
+  }
+
+  throw new Error(`invalid site widget AI job status ${value}`);
+}
+
+function toSiteWidgetAiJobSummary(row: {
+  id: string;
+  status: string;
+  attemptCount: number;
+  terminalReason: string | null;
+}): SiteWidgetAiJobSummary {
+  return {
+    id: row.id,
+    status: toSiteWidgetAiJobStatus(row.status),
+    attemptCount: row.attemptCount,
+    terminalReason: row.terminalReason ?? undefined
+  };
+}
+
+function readWidgetCatalogReferences(
+  metadata: Record<string, unknown>
+): WidgetCatalogReference[] {
+  const raw = metadata.catalog_references;
+
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+
+  return raw.slice(0, 8).flatMap((entry) => {
+    if (!isRecord(entry)) {
+      return [];
+    }
+
+    const { kind, label, title, href, entityId } = entry;
+    if (
+      kind !== "catalog_item" ||
+      typeof label !== "string" ||
+      !label.trim() ||
+      label.length > 240 ||
+      typeof title !== "string" ||
+      !title.trim() ||
+      title.length > 160 ||
+      typeof href !== "string" ||
+      !WIDGET_CATALOG_HREF_PATTERN.test(href) ||
+      typeof entityId !== "string" ||
+      !/^ent_[a-f0-9]+$/.test(entityId)
+    ) {
+      return [];
+    }
+
+    return [
+      {
+        kind,
+        label: label.trim(),
+        title: title.trim(),
+        href,
+        entityId
+      }
+    ];
+  });
+}
+
+function isPersistedAiTurnInput(value: unknown): value is AiTurnInput {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    value.version === AI_TURN_INPUT_VERSION &&
+    value.channel === "site_widget" &&
+    value.replyCapability === "site_widget_sync_reply" &&
+    isRecord(value.turn) &&
+    typeof value.turn.idempotencyKey === "string" &&
+    typeof value.turn.acceptedRequestFingerprint === "string" &&
+    isRecord(value.conversation) &&
+    typeof value.conversation.publicConversationId === "string" &&
+    isRecord(value.gateSnapshot) &&
+    isRecord(value.inboundMessage) &&
+    typeof value.inboundMessage.publicMessageId === "string" &&
+    typeof value.inboundMessage.text === "string" &&
+    isRecord(value.page) &&
+    typeof value.page.url === "string" &&
+    typeof value.page.widgetInstanceId === "string" &&
+    isRecord(value.customer) &&
+    isRecord(value.visitor) &&
+    isRecord(value.compactContext) &&
+    Array.isArray(value.compactContext.messages) &&
+    isRecord(value.knownSlots) &&
+    Array.isArray(value.knownRequirements) &&
+    isRecord(value.boundaryConfig) &&
+    isRecord(value.approvedSources) &&
+    isRecord(value.evidence)
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 async function advanceAiRollingSummary(
   tx: Transaction,

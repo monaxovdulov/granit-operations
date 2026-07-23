@@ -7,7 +7,8 @@ import {
 
 import {
   buildStageASiteWidgetAiTurnInput,
-  type AiTurnInput
+  type AiTurnInput,
+  type WidgetCatalogReference
 } from "../../src/modules/ai/ai-turn.js";
 import type {
   AiKnownSlots,
@@ -26,6 +27,7 @@ import {
   type BindManagerTelegramChatInput,
   type BindManagerTelegramChatResult,
   type ChangeManagerLeadStatusInput,
+  type ClaimedSiteWidgetAiJob,
   type ClearManagerTelegramReplyContextInput,
   type ConversationContentType,
   type CreateManagerTelegramBindTokenInput,
@@ -33,6 +35,7 @@ import {
   type CreateManagerTelegramReplyContextInput,
   type CreateManagerTelegramReplyContextResult,
   type FindManagerTelegramActorInput,
+  type FinishSiteWidgetAiJobInput,
   type IntakeRepository,
   type ManagerAiControl,
   type ManagerAiQualitySummary,
@@ -54,6 +57,7 @@ import {
   type SaveSiteWidgetAiMessageInput,
   type SaveSiteWidgetAiMessageResult,
   type SiteWidgetHistoryResult,
+  type SiteWidgetAiJobSummary,
   type SetConversationAiControlInput,
   type SetManagerAiControlInput,
   type SetNextStepInput,
@@ -88,6 +92,7 @@ export class MemoryIntakeRepository implements IntakeRepository {
       leadId: string;
       publicSessionId: string;
       publicMessageId: string;
+      submittedAt: string;
       requestFingerprint: string;
     }
   >();
@@ -100,6 +105,12 @@ export class MemoryIntakeRepository implements IntakeRepository {
       requestFingerprint: string;
     }
   >();
+  private readonly widgetAiJobs = new Map<
+    string,
+    ClaimedSiteWidgetAiJob & { availableAt: Date }
+  >();
+  private readonly widgetAiJobIdsByInboundMessage = new Map<string, string>();
+  private readonly widgetCatalogReferences = new Map<string, WidgetCatalogReference[]>();
   private readonly telegramIdempotency = new Map<
     string,
     {
@@ -483,6 +494,8 @@ export class MemoryIntakeRepository implements IntakeRepository {
         );
       const agentAllowedToReply = conversation?.agentAllowedToReply ?? false;
       const aiState = conversation?.aiState ?? "ai_collecting_info";
+      const existingJobId = this.widgetAiJobIdsByInboundMessage.get(existing.publicMessageId);
+      const existingJob = existingJobId ? this.widgetAiJobs.get(existingJobId) : undefined;
 
       return {
         leadId: existing.leadId,
@@ -491,6 +504,7 @@ export class MemoryIntakeRepository implements IntakeRepository {
         channelIdentityId,
         publicSessionId: existing.publicSessionId,
         publicMessageId: existing.publicMessageId,
+        submittedAt: existing.submittedAt,
         agentAllowedToReply,
         aiState,
         replayed: true,
@@ -501,6 +515,7 @@ export class MemoryIntakeRepository implements IntakeRepository {
               createdAt: aiReply.createdAt
             }
           : undefined,
+        widgetAiJob: existingJob ? toMemoryWidgetAiJobSummary(existingJob) : undefined,
         aiTurnInput: buildMemorySiteWidgetAiTurnInput(input, {
           publicConversationId,
           publicMessageId: existing.publicMessageId,
@@ -599,6 +614,7 @@ export class MemoryIntakeRepository implements IntakeRepository {
       leadId,
       publicSessionId,
       publicMessageId: input.publicMessageId,
+      submittedAt: now,
       requestFingerprint: input.requestFingerprint
     });
 
@@ -612,23 +628,15 @@ export class MemoryIntakeRepository implements IntakeRepository {
     const agentAllowedToReply =
       (conversation?.agentAllowedToReply ?? false) && this.managerAiControl.enabled;
     const aiState = conversation?.aiState ?? "ai_collecting_info";
-
-    return {
-      leadId,
-      conversationId,
-      publicConversationId,
-      channelIdentityId,
-      publicSessionId,
-      publicMessageId: input.publicMessageId,
-      agentAllowedToReply,
-      aiState,
-      replayed: false,
-      aiTurnInput: buildMemorySiteWidgetAiTurnInput(input, {
+    const aiTurnInput = buildMemorySiteWidgetAiTurnInput(
+      input,
+      {
         publicConversationId,
         publicMessageId: input.publicMessageId,
         agentAllowedToReply,
         aiState
-      }, {
+      },
+      {
         recentMessages: toMemoryAiRecentMessages(
           conversation?.messages ?? [],
           input.publicMessageId
@@ -640,7 +648,43 @@ export class MemoryIntakeRepository implements IntakeRepository {
         persistedSlots: this.aiSlotsByConversation.get(conversationId) ?? {},
         persistedRequirements:
           this.aiRequirementsByConversation.get(conversationId) ?? []
-      })
+      }
+    );
+    let widgetAiJob: SiteWidgetAiJobSummary | undefined;
+
+    if (input.enqueueAiJob && agentAllowedToReply) {
+      const jobId = randomUUID();
+      const job: ClaimedSiteWidgetAiJob & { availableAt: Date } = {
+        id: jobId,
+        status: "pending",
+        attemptCount: 0,
+        maxAttempts: input.aiJobMaxAttempts ?? 3,
+        leadId,
+        conversationId,
+        publicConversationId,
+        publicSessionId,
+        inboundPublicMessageId: input.publicMessageId,
+        aiTurnInput,
+        availableAt: new Date(now)
+      };
+      this.widgetAiJobs.set(jobId, job);
+      this.widgetAiJobIdsByInboundMessage.set(input.publicMessageId, jobId);
+      widgetAiJob = toMemoryWidgetAiJobSummary(job);
+    }
+
+    return {
+      leadId,
+      conversationId,
+      publicConversationId,
+      channelIdentityId,
+      publicSessionId,
+      publicMessageId: input.publicMessageId,
+      submittedAt: now,
+      agentAllowedToReply,
+      aiState,
+      replayed: false,
+      aiTurnInput,
+      widgetAiJob
     };
   }
 
@@ -924,6 +968,11 @@ export class MemoryIntakeRepository implements IntakeRepository {
       };
     }
 
+    const catalogReferences = readMemoryCatalogReferences(sanitizedMetadata);
+    if (catalogReferences.length) {
+      this.widgetCatalogReferences.set(input.publicMessageId, catalogReferences);
+    }
+
     this.widgetAiIdempotency.set(input.idempotencyKey, {
       publicMessageId: input.publicMessageId,
       body: input.body,
@@ -1028,6 +1077,58 @@ export class MemoryIntakeRepository implements IntakeRepository {
     }
   }
 
+  async findSiteWidgetAiReply(
+    inboundPublicMessageId: string
+  ): Promise<SaveSiteWidgetAiMessageResult | null> {
+    const existing = this.widgetAiIdempotency.get(`ai:${inboundPublicMessageId}`);
+
+    return existing
+      ? {
+          publicMessageId: existing.publicMessageId,
+          body: existing.body,
+          createdAt: existing.createdAt
+        }
+      : null;
+  }
+
+  async claimSiteWidgetAiJob(input: {
+    leaseMs: number;
+    now: Date;
+  }): Promise<ClaimedSiteWidgetAiJob | null> {
+    const job = Array.from(this.widgetAiJobs.values())
+      .filter(
+        (candidate) =>
+          (candidate.status === "pending" || candidate.status === "retrying") &&
+          candidate.attemptCount < candidate.maxAttempts &&
+          candidate.availableAt <= input.now
+      )
+      .sort((left, right) => left.availableAt.getTime() - right.availableAt.getTime())[0];
+
+    if (!job) {
+      return null;
+    }
+
+    job.status = "processing";
+    job.attemptCount += 1;
+    return structuredClone(job);
+  }
+
+  async finishSiteWidgetAiJob(input: FinishSiteWidgetAiJobInput): Promise<void> {
+    const job = this.widgetAiJobs.get(input.jobId);
+
+    if (
+      !job ||
+      job.status !== "processing" ||
+      job.attemptCount !== input.attemptCount
+    ) {
+      return;
+    }
+
+    job.status = input.status;
+    job.terminalReason = input.terminalReason;
+    job.availableAt = input.retryAt ?? input.completedAt;
+  }
+
   async getSiteWidgetHistory(publicSessionId: string): Promise<SiteWidgetHistoryResult | null> {
     const conversationId = this.sessionConversations.get(publicSessionId);
     const leadId = conversationId ? this.conversationLeads.get(conversationId) : undefined;
@@ -1059,12 +1160,24 @@ export class MemoryIntakeRepository implements IntakeRepository {
               message.senderRole === "ai_assistant" ||
               message.senderRole === "manager")
         )
-        .map((message) => ({
-          publicMessageId: message.publicMessageId,
-          senderRole: message.senderRole as "visitor" | "ai_assistant" | "manager",
-          text: message.body,
-          submittedAt: message.createdAt
-        }))
+        .map((message) => {
+          const jobId = this.widgetAiJobIdsByInboundMessage.get(message.publicMessageId);
+          const job = jobId ? this.widgetAiJobs.get(jobId) : undefined;
+
+          return {
+            publicMessageId: message.publicMessageId,
+            senderRole: message.senderRole as "visitor" | "ai_assistant" | "manager",
+            text: message.body,
+            submittedAt: message.createdAt,
+            catalogReferences: this.widgetCatalogReferences.get(message.publicMessageId),
+            automation: job
+              ? {
+                  status: job.status,
+                  reason: job.terminalReason
+                }
+              : undefined
+          };
+        })
     };
   }
 
@@ -1858,6 +1971,42 @@ function toManagerWidgetLead(
     structuredIntake: emptyStructuredIntake(),
     internalNotePlaceholder: ""
   };
+}
+
+function toMemoryWidgetAiJobSummary(
+  job: ClaimedSiteWidgetAiJob
+): SiteWidgetAiJobSummary {
+  return {
+    id: job.id,
+    status: job.status,
+    attemptCount: job.attemptCount,
+    terminalReason: job.terminalReason
+  };
+}
+
+function readMemoryCatalogReferences(
+  metadata: Record<string, unknown>
+): WidgetCatalogReference[] {
+  if (!Array.isArray(metadata.catalog_references)) {
+    return [];
+  }
+
+  return metadata.catalog_references.flatMap((reference) => {
+    if (
+      !reference ||
+      typeof reference !== "object" ||
+      Array.isArray(reference) ||
+      (reference as { kind?: unknown }).kind !== "catalog_item" ||
+      typeof (reference as { label?: unknown }).label !== "string" ||
+      typeof (reference as { title?: unknown }).title !== "string" ||
+      typeof (reference as { href?: unknown }).href !== "string" ||
+      typeof (reference as { entityId?: unknown }).entityId !== "string"
+    ) {
+      return [];
+    }
+
+    return [structuredClone(reference) as WidgetCatalogReference];
+  });
 }
 
 function buildMemorySiteWidgetAiTurnInput(
