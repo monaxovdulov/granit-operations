@@ -55,23 +55,19 @@ PublicWidgetIntakeService
 
 ## 4. Текущее состояние знаний / RAG
 
-Граница под каталог уже есть, но полноценный RAG-каталог не подключён.
+Каталог подключён как детерминированный versioned snapshot из проверенных артефактов `pdf-analiz`. Runtime не читает HTML и не использует память модели как источник бизнес-фактов.
 
 Смотреть код:
 
 - `apps/api/src/modules/ai/catalog/catalog-knowledge-port.ts` — app-owned `CatalogKnowledgePort`;
-- `apps/api/src/modules/ai/catalog/empty-catalog-knowledge-provider.ts` — текущий безопасный fallback `empty.v1`;
+- `apps/api/src/modules/ai/catalog/file-catalog-knowledge-provider.ts` — production-shaped in-process provider с published-only retrieval;
+- `apps/api/src/modules/ai/catalog/snapshots/catalog-knowledge.v1.json` — воспроизводимый snapshot с version/content hash;
+- `apps/api/src/scripts/build-catalog-knowledge.ts` — детерминированная сборка snapshot из reviewed JSON/JSONL;
 - `apps/api/src/modules/ai/services/grounded-widget-ai-service.ts` — где runtime запрашивает snapshot/search и передаёт selected catalog records в prompt/verifier;
 - `apps/api/src/app-context.ts` — сборка AI runtime принимает `catalog?: CatalogKnowledgePort`;
-- `apps/api/src/index.ts` — текущая server assembly пока не передаёт реальный catalog provider, значит используется `empty.v1`.
+- `apps/api/src/index.ts` — server assembly передаёт `FileCatalogKnowledgeProvider`; `empty.v1` остаётся только явным безопасным fallback для изолированных тестов/rollback-кода.
 
-Следовательно, задача “подключить каталог/RAG” означает:
-
-1. подготовить owner-approved machine-readable catalog или безопасный source adapter;
-2. реализовать provider за существующим `CatalogKnowledgePort`;
-3. подключить provider в server assembly;
-4. доказать, что verifier блокирует unsupported/invalid catalog claims;
-5. прогнать eval/smoke и paired smoke с настоящим лендингом `landing-granit-static`.
+Текущий snapshot: `granit-cha.catalog.2026-07-20.v1`, 481 запись (465 published, 16 draft по `review.required=true`). Коммерческие условия по-прежнему можно отвечать только при наличии отдельной явной published-записи; их отсутствие означает честное ограничение или передачу менеджеру.
 
 HTML сайта не является автоматическим источником истины. Если данные берутся из сайта, их надо превратить в reviewed catalog records с `id`, `revision`, `status`, `validFrom/validUntil` при необходимости, provenance and owner approval.
 
@@ -166,6 +162,8 @@ Env names смотреть в [ENVIRONMENT.md](docs/ENVIRONMENT.md). Значе�
 - `OPENAI_API_KEY`
 - `OPENAI_MODEL`
 - `OPENAI_VERIFIER_MODEL`
+- `AI_WIDGET_GENERATOR_TIMEOUT_MS`
+- `AI_WIDGET_VERIFIER_TIMEOUT_MS`
 - `AI_WIDGET_DEADLINE_MS`
 
 Для первого preflight можно использовать `shadow`, но customer-visible grounded AI надо проверять именно в `enforce`.

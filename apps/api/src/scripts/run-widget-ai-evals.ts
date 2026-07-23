@@ -1,6 +1,6 @@
 import { OpenAiWidgetAssistantProvider } from "../modules/ai/adapters/openai-widget-assistant-provider.js";
 import { OpenAiWidgetSemanticVerifier } from "../modules/ai/adapters/openai-widget-semantic-verifier.js";
-import { EmptyCatalogKnowledgeProvider } from "../modules/ai/catalog/empty-catalog-knowledge-provider.js";
+import { FileCatalogKnowledgeProvider } from "../modules/ai/catalog/file-catalog-knowledge-provider.js";
 import {
   runWidgetAiEvals,
   validateWidgetAiEvalCorpus
@@ -13,6 +13,8 @@ import { GroundedWidgetAiService } from "../modules/ai/services/grounded-widget-
 
 const corpusValidation = validateWidgetAiEvalCorpus(WIDGET_AI_REGRESSION_CORPUS);
 const dryRun = process.argv.includes("--dry-run");
+const catalog = new FileCatalogKnowledgeProvider();
+const catalogSnapshot = await catalog.getSnapshot();
 
 if (!corpusValidation.valid) {
   throw new Error(`invalid eval corpus: ${corpusValidation.failures.join(", ")}`);
@@ -25,7 +27,15 @@ if (dryRun) {
         ok: true,
         mode: "dry-run",
         corpusVersion: WIDGET_AI_EVAL_CORPUS_VERSION,
-        cases: WIDGET_AI_REGRESSION_CORPUS.length
+        cases: WIDGET_AI_REGRESSION_CORPUS.length,
+        catalogVersion: catalogSnapshot.catalogVersion,
+        catalogContentHash: catalogSnapshot.contentHash,
+        publishedRecords: catalogSnapshot.records.filter(
+          (record) => record.status === "published"
+        ).length,
+        draftRecords: catalogSnapshot.records.filter(
+          (record) => record.status === "draft"
+        ).length
       },
       null,
       2
@@ -51,7 +61,7 @@ const verifier = new OpenAiWidgetSemanticVerifier({ apiKey, model: verifierModel
 const service = new GroundedWidgetAiService({
   provider,
   verifier,
-  catalog: new EmptyCatalogKnowledgeProvider(),
+  catalog,
   modelName: generatorModel,
   verifierModelName: verifierModel,
   deadlineMs: 18000

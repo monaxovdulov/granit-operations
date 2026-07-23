@@ -13,6 +13,8 @@ export type ApiConfig = {
     openAiApiKey?: string;
     openAiModel: string;
     verifierModel: string;
+    generatorTimeoutMs: number;
+    verifierTimeoutMs: number;
     deadlineMs: number;
   };
   telegramBot: {
@@ -62,6 +64,16 @@ export function loadConfig(env: NodeJS.ProcessEnv): ApiConfig {
       openAiApiKey: env.OPENAI_API_KEY,
       openAiModel: env.OPENAI_MODEL ?? "gpt-5.5",
       verifierModel: env.OPENAI_VERIFIER_MODEL ?? env.OPENAI_MODEL ?? "gpt-5.5",
+      generatorTimeoutMs: parseIntegerEnv(env.AI_WIDGET_GENERATOR_TIMEOUT_MS, {
+        fallback: 10000,
+        min: 3000,
+        max: 25000
+      }),
+      verifierTimeoutMs: parseIntegerEnv(env.AI_WIDGET_VERIFIER_TIMEOUT_MS, {
+        fallback: 6000,
+        min: 3000,
+        max: 20000
+      }),
       deadlineMs: parseIntegerEnv(env.AI_WIDGET_DEADLINE_MS, {
         fallback: 18000,
         min: 5000,

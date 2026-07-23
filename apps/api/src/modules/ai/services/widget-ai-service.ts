@@ -90,7 +90,8 @@ export class WidgetAiService implements PublicWidgetAiReplyGenerator {
           model_provider: "policy",
           model_name: "deterministic",
           fallback_mode: policyReply.fallbackMode,
-          handoff_reason: policyReply.reason
+          policy_reason: policyReply.reason,
+          ...(policyReply.handoffReason ? { handoff_reason: policyReply.reason } : {})
         }
       };
     }

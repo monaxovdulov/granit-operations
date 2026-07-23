@@ -8,14 +8,18 @@ export const WIDGET_AI_SYSTEM_POLICY_IDS = new Set([
   "widget.handoff"
 ]);
 
-export function isValidCatalogReference(
+export type CatalogReferenceResolution =
+  | { found: false }
+  | { found: true; value: unknown };
+
+export function resolveCatalogReferenceValue(
   reference: CatalogReference,
   snapshot: CatalogSnapshot,
   selectedRecords: readonly CatalogRecord[],
   at: string
-): boolean {
+): CatalogReferenceResolution {
   if (reference.catalogVersion !== snapshot.catalogVersion) {
-    return false;
+    return { found: false };
   }
 
   const selectedRecord = selectedRecords.find(
@@ -31,12 +35,19 @@ export function isValidCatalogReference(
       candidate.status === "published"
   );
 
-  return Boolean(
-    selectedRecord &&
-      snapshotRecord &&
-      isCatalogRecordActive(snapshotRecord, at) &&
-      resolveJsonPointer(snapshotRecord.data, reference.path).found
-  );
+  if (!selectedRecord || !snapshotRecord || !isCatalogRecordActive(snapshotRecord, at)) {
+    return { found: false };
+  }
+
+  if (reference.path === "/frontend/url") {
+    const url = snapshotRecord.frontend?.url;
+
+    return typeof url === "string" && url.length > 0
+      ? { found: true, value: url }
+      : { found: false };
+  }
+
+  return resolveJsonPointer(snapshotRecord.data, reference.path);
 }
 
 function isCatalogRecordActive(record: CatalogRecord, at: string): boolean {
@@ -68,7 +79,7 @@ function isCatalogRecordActive(record: CatalogRecord, at: string): boolean {
 function resolveJsonPointer(
   value: unknown,
   path: string
-): { found: boolean; value?: unknown } {
+): CatalogReferenceResolution {
   if (path === "") {
     return { found: true, value };
   }

@@ -5,9 +5,13 @@ import {
   type GroundedAiTurnCandidateDecision
 } from "../src/modules/ai/ai-dialog-contract.js";
 import { buildStageASiteWidgetAiTurnInput } from "../src/modules/ai/ai-turn.js";
+import type { CatalogRecord } from "../src/modules/ai/catalog/catalog-knowledge-port.js";
 import { EmptyCatalogKnowledgeProvider } from "../src/modules/ai/catalog/empty-catalog-knowledge-provider.js";
+import { FileCatalogKnowledgeProvider } from "../src/modules/ai/catalog/file-catalog-knowledge-provider.js";
 import { validateGroundedAiDecision } from "../src/modules/ai/grounding/ai-decision-validator.js";
 import { validateTextEvidence } from "../src/modules/ai/grounding/ai-slot-evidence-service.js";
+import { WIDGET_AI_POLICY_VERSION } from "../src/modules/ai/policy/widget-ai-policy.js";
+import { buildGroundedWidgetAiInstructions } from "../src/modules/ai/prompts/widget-ai-prompt.js";
 import {
   GroundedWidgetAiService,
   type GroundedWidgetAiProvider,
@@ -15,6 +19,8 @@ import {
   type GroundedWidgetAiProviderResult
 } from "../src/modules/ai/services/grounded-widget-ai-service.js";
 import {
+  buildWidgetAiVerifierInstructions,
+  normalizeWidgetAiVerificationSpans,
   WIDGET_AI_VERIFIER_VERSION,
   type WidgetAiSemanticVerifier,
   type WidgetAiVerification,
@@ -25,8 +31,90 @@ import { validateWidgetAiVerification } from "../src/modules/ai/verification/wid
 
 const MESSAGE_ID = "11111111-1111-4111-8111-111111111111";
 const CONVERSATION_ID = "22222222-2222-4222-8222-222222222222";
+const ARFA_RECORD_ID = "ent_1395cd250bbce644514c7e44";
+const ARFA_URL =
+  "/catalog.html?section=pamyatniki&entity=ent_1395cd250bbce644514c7e44#block-vertical-monuments";
+const FABRICATED_ARFA_URL =
+  "/catalog.html?section=pamyatniki&entity=ent_fabricated#block-vertical-monuments";
 
 describe("grounded widget AI core", () => {
+  it("does not instruct the model to extract catalog names or questions as fixed slots", () => {
+    const instructions = buildGroundedWidgetAiInstructions();
+
+    expect(instructions).toContain("Не извлекай fixed slots из вопроса клиента");
+    expect(instructions).toContain("monumentType означает только тип композиции");
+    expect(instructions).toContain("никогда не возвращай приблизительные offsets");
+    expect(instructions).toContain("Не копируй длинные таблицы целиком");
+  });
+
+  it("gives the verifier an exact deep-link and missing-commercial-fact contract", () => {
+    const instructions = buildWidgetAiVerifierInstructions();
+
+    expect(instructions).toContain("path=/frontend/url");
+    expect(instructions).toContain("никогда не используй path=frontend.url");
+    expect(instructions).toContain("systemPolicyId=widget.missing_knowledge");
+    expect(instructions).toContain("Не помечай такую фразу unsupported_claim");
+    expect(instructions).toContain("requiredAction означает требуемую СМЕНУ");
+  });
+
+  it("anchors verifier claims to one exact reply occurrence", () => {
+    const result = normalizeWidgetAiVerificationSpans(
+      {
+        ...verification("pass", "answer"),
+        factualClaimsPresent: true,
+        claimVerdicts: [
+          {
+            text: "Памятник «Арфа»",
+            start: 0,
+            end: 15,
+            kind: "catalog",
+            supported: true,
+            catalogReference: {
+              recordId: "ent_1395cd250bbce644514c7e44",
+              revision: 1,
+              path: "/title",
+              catalogVersion: "catalog.v1"
+            },
+            messageEvidence: null,
+            systemPolicyId: null,
+            detail: null
+          }
+        ]
+      },
+      "Вот Памятник «Арфа» в каталоге."
+    );
+
+    expect(result.claimVerdicts[0]).toMatchObject({ start: 4, end: 19 });
+  });
+
+  it("does not guess a claim span when the same text is repeated", () => {
+    const original = {
+      ...verification("pass", "answer"),
+      factualClaimsPresent: true,
+      claimVerdicts: [
+        {
+          text: "Арфа",
+          start: 1,
+          end: 5,
+          kind: "catalog" as const,
+          supported: true,
+          catalogReference: {
+            recordId: "ent_1395cd250bbce644514c7e44",
+            revision: 1,
+            path: "/title",
+            catalogVersion: "catalog.v1"
+          },
+          messageEvidence: null,
+          systemPolicyId: null,
+          detail: null
+        }
+      ]
+    };
+
+    expect(normalizeWidgetAiVerificationSpans(original, "Арфа и Арфа"))
+      .toEqual(original);
+  });
+
   it("uses an explicit empty catalog without inventing temporary facts", async () => {
     const catalog = new EmptyCatalogKnowledgeProvider();
     const snapshot = await catalog.getSnapshot();
@@ -160,10 +248,14 @@ describe("grounded widget AI core", () => {
           revision: 1,
           kind: "price" as const,
           status: "published" as const,
+          catalogVersion: "catalog.test.v1",
+          contentHash: "c".repeat(64),
           validUntil: "2026-07-16T23:59:59.000Z",
           aliases: [],
           searchText: "цена памятника",
           qualifiers: {},
+          provenance: { source: "test" },
+          frontend: null,
           data: { amount: 100000 }
         }
       ]
@@ -199,6 +291,119 @@ describe("grounded widget AI core", () => {
     expect(result).toEqual(expect.arrayContaining(["invalid_catalog_reference"]));
   });
 
+  it("rejects a fabricated catalog URL backed by a real selected record", async () => {
+    const catalog = new FileCatalogKnowledgeProvider();
+    const snapshot = await catalog.getSnapshot();
+    const arfa = snapshot.records.find((record) => record.id === ARFA_RECORD_ID);
+
+    if (!arfa) throw new Error("missing Arfa catalog fixture");
+
+    const decision = answerDecision(`Посмотрите: ${FABRICATED_ARFA_URL}`);
+    const result = validateWidgetAiVerification({
+      turn: turn("Покажите памятник Арфа"),
+      decision,
+      snapshot,
+      selectedRecords: [arfa],
+      verification: catalogUrlVerification(
+        decision,
+        FABRICATED_ARFA_URL,
+        arfa,
+        snapshot.catalogVersion
+      )
+    });
+
+    expect(result).toEqual(expect.arrayContaining(["catalog_claim_value_mismatch"]));
+  });
+
+  it("accepts the exact canonical catalog URL from a real selected record", async () => {
+    const catalog = new FileCatalogKnowledgeProvider();
+    const snapshot = await catalog.getSnapshot();
+    const arfa = snapshot.records.find((record) => record.id === ARFA_RECORD_ID);
+
+    if (!arfa) throw new Error("missing Arfa catalog fixture");
+    expect(arfa.frontend?.url).toBe(ARFA_URL);
+
+    const decision = answerDecision(`Посмотрите: ${ARFA_URL}`);
+    const result = validateWidgetAiVerification({
+      turn: turn("Покажите памятник Арфа"),
+      decision,
+      snapshot,
+      selectedRecords: [arfa],
+      verification: catalogUrlVerification(
+        decision,
+        ARFA_URL,
+        arfa,
+        snapshot.catalogVersion
+      )
+    });
+
+    expect(result).toEqual([]);
+  });
+
+  it("does not use a duplicated data URL when top-level frontend is missing", async () => {
+    const catalog = new FileCatalogKnowledgeProvider();
+    const loadedSnapshot = await catalog.getSnapshot();
+    const loadedArfa = loadedSnapshot.records.find(
+      (record) => record.id === ARFA_RECORD_ID
+    );
+
+    if (!loadedArfa) throw new Error("missing Arfa catalog fixture");
+
+    const arfa = { ...loadedArfa, frontend: null };
+    const snapshot = {
+      ...loadedSnapshot,
+      records: loadedSnapshot.records.map((record) =>
+        record.id === ARFA_RECORD_ID ? arfa : record
+      )
+    };
+    const decision = answerDecision(`Посмотрите: ${ARFA_URL}`);
+    const result = validateWidgetAiVerification({
+      turn: turn("Покажите памятник Арфа"),
+      decision,
+      snapshot,
+      selectedRecords: [arfa],
+      verification: catalogUrlVerification(
+        decision,
+        ARFA_URL,
+        arfa,
+        snapshot.catalogVersion
+      )
+    });
+
+    expect(result).toEqual(expect.arrayContaining(["invalid_catalog_reference"]));
+  });
+
+  it("fails closed when a verifier passes a fabricated catalog URL", async () => {
+    const catalog = new FileCatalogKnowledgeProvider();
+    const snapshot = await catalog.getSnapshot();
+    const arfa = snapshot.records.find((record) => record.id === ARFA_RECORD_ID);
+
+    if (!arfa) throw new Error("missing Arfa catalog fixture");
+
+    const decision = answerDecision(`Посмотрите: ${FABRICATED_ARFA_URL}`);
+    const provider = new FakeGroundedProvider([decision]);
+    const verifier = new FakeVerifier([
+      catalogUrlVerification(
+        decision,
+        FABRICATED_ARFA_URL,
+        arfa,
+        snapshot.catalogVersion
+      )
+    ]);
+
+    const result = await new GroundedWidgetAiService({ provider, verifier, catalog })
+      .generateReply(turn("Покажите памятник Арфа"));
+
+    expect(result).toMatchObject({
+      decision: "no_reply",
+      reason: "grounding_validation_failed",
+      metadata: {
+        verifier_verdict: "pass"
+      }
+    });
+    expect(provider.attempts).toEqual(["initial"]);
+  });
+
   it("keeps natural wording when verifier proves full coverage", async () => {
     const provider = new FakeGroundedProvider([
       baseDecision("Можно связать оформление в единую композицию. Какой стиль вам ближе?")
@@ -217,6 +422,113 @@ describe("grounded widget AI core", () => {
         verifier_verdict: "pass"
       }
     });
+  });
+
+  it("uses the model as a plan and renders calculation text through the app", async () => {
+    const decision = baseDecision("Модельный черновик не должен попасть клиенту.");
+    decision.intent = "price_intake";
+    decision.requestedSlots = ["material"];
+    const provider = new FakeGroundedProvider([decision]);
+    const result = await new GroundedWidgetAiService({
+      provider,
+      verifier: new FakeVerifier([verification("pass", "clarify")])
+    }).generateReply(turn("Сколько будет стоить памятник?"));
+
+    expect(result).toMatchObject({
+      decision: "reply_candidate",
+      action: "clarify",
+      intent: "price_intake",
+      text: "Для расчёта сначала уточним детали. Какой материал рассматриваете?",
+      requestedSlots: ["material"],
+      metadata: {
+        model_provider: "fake",
+        reply_renderer: "app_owned",
+        render_reason: "app_render_price_intake_clarify",
+        grounding_verified: true
+      }
+    });
+    expect(provider.attempts).toEqual(["initial"]);
+  });
+
+  it("accepts verifier pass when it labels a clarifying reply as an answer", async () => {
+    const decision = baseDecision("Какой материал рассматриваете?");
+    decision.intent = "price_intake";
+    decision.requestedSlots = ["material"];
+    const provider = new FakeGroundedProvider([decision]);
+    const result = await new GroundedWidgetAiService({
+      provider,
+      verifier: new FakeVerifier([verification("pass", "answer")])
+    }).generateReply(turn("Сколько будет стоить памятник?"));
+
+    expect(result).toMatchObject({
+      decision: "reply_candidate",
+      action: "clarify",
+      intent: "price_intake",
+      text: "Для расчёта сначала уточним детали. Какой материал рассматриваете?",
+      metadata: {
+        model_provider: "fake",
+        verifier_contract_issues: []
+      }
+    });
+    expect(provider.attempts).toEqual(["initial"]);
+  });
+
+  it("normalizes a verified calculation plan when the model misclassifies the intent", async () => {
+    const decision = baseDecision(
+      "Конечно, помогу с расчетом. Подскажите, вертикальный или горизонтальный?"
+    );
+    decision.intent = "product_selection";
+    decision.requestedSlots = ["material"];
+    const provider = new FakeGroundedProvider([decision]);
+    const result = await new GroundedWidgetAiService({
+      provider,
+      verifier: new FakeVerifier([verification("pass", "clarify")])
+    }).generateReply(turn("Нужен расчет памятника с установкой"));
+
+    expect(result).toMatchObject({
+      decision: "reply_candidate",
+      action: "clarify",
+      intent: "price_intake",
+      text: "Для расчёта сначала уточним детали. Какой тип памятника нужен: одинарный, двойной, семейный или комплекс?",
+      requestedSlots: ["monumentType"],
+      metadata: {
+        model_provider: "fake",
+        reply_renderer: "app_owned",
+        render_reason: "app_render_price_intake_clarify",
+        plan_normalized: true,
+        plan_normalization_reason: "commercial_intent_price_intake",
+        plan_original_intent: "product_selection",
+        plan_original_requested_slots: ["material"],
+        grounding_verified: true
+      }
+    });
+    expect(provider.attempts).toEqual(["initial"]);
+  });
+
+  it("falls back to an app-owned calculation plan when model planning fails", async () => {
+    const provider = new FakeGroundedProvider([]);
+    const result = await new GroundedWidgetAiService({
+      provider,
+      verifier: new FakeVerifier([])
+    }).generateReply(turn("Нужен расчет памятника с установкой"));
+
+    expect(result).toMatchObject({
+      decision: "reply_candidate",
+      action: "clarify",
+      intent: "price_intake",
+      text: "Для расчёта сначала уточним детали. Какой тип памятника нужен: одинарный, двойной, семейный или комплекс?",
+      requestedSlots: ["monumentType"],
+      metadata: {
+        model_provider: "policy",
+        planner_source: "deterministic_fallback",
+        fallback_mode: "none",
+        deterministic_policy_version: WIDGET_AI_POLICY_VERSION,
+        policy_reason: "calculation_intake_clarify",
+        fallback_reason: "model_error",
+        reply_renderer: "app_owned"
+      }
+    });
+    expect(provider.attempts).toEqual(["initial"]);
   });
 
   it("does not send an unsupported draft even when the generator has no claim field", async () => {
@@ -593,4 +905,36 @@ function verification(
     requirementVerdicts: options.requirementVerdicts ?? [],
     confidence: 0.97
   };
+}
+
+function catalogUrlVerification(
+  decision: GroundedAiTurnCandidateDecision,
+  url: string,
+  record: CatalogRecord,
+  catalogVersion: string
+): WidgetAiVerification {
+  const claimStart = decision.replyText.indexOf(url);
+
+  if (claimStart < 0) throw new Error("catalog URL is missing from decision text");
+
+  return verification("pass", "answer", {
+    claimVerdicts: [
+      {
+        text: url,
+        start: claimStart,
+        end: claimStart + url.length,
+        kind: "catalog",
+        supported: true,
+        catalogReference: {
+          recordId: record.id,
+          revision: record.revision,
+          path: "/frontend/url",
+          catalogVersion
+        },
+        messageEvidence: null,
+        systemPolicyId: null,
+        detail: null
+      }
+    ]
+  });
 }

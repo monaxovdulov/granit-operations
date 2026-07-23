@@ -9,6 +9,7 @@
   ],
   "scripts": {
     "build": "npm run typecheck && npm -w @granit/manager run build",
+    "build:catalog-knowledge": "tsx apps/api/src/scripts/build-catalog-knowledge.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit && npm -w @granit/manager run typecheck",
     "test": "vitest run",
     "smoke:api": "vitest run apps/api/test/public-intake.test.ts",

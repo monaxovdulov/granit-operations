@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import type { CatalogRecord, CatalogSnapshot } from "../catalog/catalog-knowledge-port.js";
+import { toCatalogPromptRecord } from "../catalog/catalog-prompt-record.js";
 import {
   AI_REQUIREMENT_CATEGORIES,
   AI_REQUIREMENT_MODES,
@@ -161,6 +162,28 @@ export type WidgetAiVerifierResult = {
 
 export interface WidgetAiSemanticVerifier {
   verify(input: WidgetAiVerifierInput, signal?: AbortSignal): Promise<WidgetAiVerifierResult>;
+}
+
+export function normalizeWidgetAiVerificationSpans(
+  verification: WidgetAiVerification,
+  replyText: string
+): WidgetAiVerification {
+  return {
+    ...verification,
+    claimVerdicts: verification.claimVerdicts.map((claim) => {
+      const first = replyText.indexOf(claim.text);
+
+      if (first < 0 || replyText.indexOf(claim.text, first + 1) >= 0) {
+        return claim;
+      }
+
+      return {
+        ...claim,
+        start: first,
+        end: first + claim.text.length
+      };
+    })
+  };
 }
 
 const stringEnumSchema = (values: readonly string[]) => ({
@@ -325,7 +348,10 @@ export function buildWidgetAiVerifierInstructions(): string {
     "Не включай в claimVerdicts вопросы, эмпатию и чисто разговорные связки. Если фактических фрагментов нет, верни factualClaimsPresent=false и пустой claimVerdicts.",
     "claimCoverageComplete=true означает, что ни один factual span не пропущен. verdict=pass запрещен при неполном покрытии.",
     "Факт о компании, ассортименте, материале, услуге, цене, сроке, наличии, гарантии или договоре допустим только при точном подтверждении catalogRecords.",
+    "URL каталога тоже является проверяемым фактом: он допустим только при точном совпадении с frontend.url published-записи из catalogRecords и catalog reference с RFC 6901 path=/frontend/url этой записи; никогда не используй path=frontend.url.",
+    "Для названия модели и URL создавай отдельные минимальные непересекающиеся claim spans: название подтверждай catalog reference path=/title, URL — path=/frontend/url.",
     "Факт о клиенте или его пожелании допустим только при visitor message evidence. App-owned оговорка допустима только с известным systemPolicyId.",
+    "Если клиент спрашивает цену, срок, наличие, гарантию или другое коммерческое условие, а ни одна selected catalogRecords не содержит явного опубликованного значения этого условия, честная фраза 'не подтверждено доступными данными' является поддержанной app-owned оговоркой: kind=system_policy, supported=true, systemPolicyId=widget.missing_knowledge. Не помечай такую фразу unsupported_claim.",
     "Для КАЖДОГО extractedSlot верни ровно один slotVerdict: дословно повтори name, value и evidence кандидата и отдельно проверь, что значение по смыслу следует из цитаты и контекста.",
     "Для КАЖДОГО extractedRequirement верни ровно один requirementVerdict с теми же category, mode, value и evidence и проверь смысловую связь значения с доказательством.",
     "Не добавляй verdict для несуществующего slot или requirement и не дублируй verdict.",
@@ -333,6 +359,7 @@ export function buildWidgetAiVerifierInstructions(): string {
     "Отсутствие знания допустимо честно обозначить; оно само по себе не требует handoff.",
     "Определи просьбу о менеджере, юридический совет и обязательное коммерческое обещание по смыслу всего контекста.",
     "Проверь полезность и естественность: короткий вопрос допускает краткий ответ, а явная просьба объяснить или сравнить допускает более развернутый ответ до лимита.",
+    "requiredAction означает требуемую СМЕНУ decision.action. При verdict=pass верни requiredAction=null, если текущий action можно отправить как есть; не ставь answer как общее название ответа, когда decision.action=clarify.",
     "pass допустим только если ответ можно отправить без исправлений; repair — для одной исправимой попытки; handoff — для немедленной app-owned передачи; block — если безопасный ответ невозможен.",
     "Не возвращай рассуждения или скрытые цепочки мыслей, только JSON verdict."
   ].join("\n");
@@ -356,6 +383,6 @@ export function buildWidgetAiVerifierUserInput(input: {
       catalogVersion: input.snapshot.catalogVersion,
       contentHash: input.snapshot.contentHash
     },
-    catalogRecords: input.selectedRecords
+    catalogRecords: input.selectedRecords.map(toCatalogPromptRecord)
   });
 }

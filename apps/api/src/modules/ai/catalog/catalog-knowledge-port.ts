@@ -19,11 +19,23 @@ export type CatalogRecord = {
   revision: number;
   kind: CatalogRecordKind;
   status: CatalogRecordStatus;
+  catalogVersion: string;
+  contentHash: string;
   validFrom?: string;
   validUntil?: string;
   aliases: string[];
   searchText: string;
   qualifiers: Record<string, string | number | boolean>;
+  sectionId?: string;
+  blockId?: string;
+  provenance: Record<string, unknown>;
+  frontend: {
+    url: string;
+    sectionSlug: string;
+    blockId?: string;
+    anchor?: string;
+    highlightEntityId?: string;
+  } | null;
   data: Record<string, unknown>;
 };
 

@@ -62,4 +62,19 @@ describe("widget AI rollout config", () => {
 
     expect(config.widgetAi.groundedMode).toBe("off");
   });
+
+  it("loads bounded generator, verifier and turn timeouts independently", () => {
+    const config = loadConfig({
+      DATABASE_URL: "postgres://example.test/granit",
+      AI_WIDGET_GENERATOR_TIMEOUT_MS: "12000",
+      AI_WIDGET_VERIFIER_TIMEOUT_MS: "10000",
+      AI_WIDGET_DEADLINE_MS: "24000"
+    });
+
+    expect(config.widgetAi).toMatchObject({
+      generatorTimeoutMs: 12000,
+      verifierTimeoutMs: 10000,
+      deadlineMs: 24000
+    });
+  });
 });

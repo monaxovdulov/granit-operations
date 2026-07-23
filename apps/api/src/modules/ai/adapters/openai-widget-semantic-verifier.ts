@@ -1,6 +1,7 @@
 import {
   WIDGET_AI_VERIFICATION_JSON_SCHEMA,
   WidgetAiVerificationSchema,
+  normalizeWidgetAiVerificationSpans,
   type WidgetAiSemanticVerifier,
   type WidgetAiVerifierInput,
   type WidgetAiVerifierResult
@@ -32,12 +33,17 @@ export class OpenAiWidgetSemanticVerifier implements WidgetAiSemanticVerifier {
         channel: "site_widget",
         role: "semantic_verifier"
       },
-      maxOutputTokens: 1600,
+      maxOutputTokens: 3200,
       signal
     });
 
+    const verification = WidgetAiVerificationSchema.parse(JSON.parse(response.outputText));
+
     return {
-      verification: WidgetAiVerificationSchema.parse(JSON.parse(response.outputText)),
+      verification: normalizeWidgetAiVerificationSpans(
+        verification,
+        input.decision.replyText
+      ),
       modelProvider: "openai",
       modelName: response.model,
       responseId: response.id,

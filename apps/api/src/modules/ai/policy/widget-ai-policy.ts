@@ -1,25 +1,12 @@
-import type {
-  AiHandoffReason,
-  AiRiskFlag,
-  AiSlotName,
-  AiTurnAction,
-  AiTurnIntent
-} from "../ai-dialog-contract.js";
 import type { AiTurnInput } from "../ai-turn.js";
+import {
+  buildWidgetAiCalculationFallbackReply,
+  type WidgetAiRenderedReply
+} from "../rendering/widget-ai-reply-renderer.js";
 
-export const WIDGET_AI_POLICY_VERSION = "granit_widget_ai_policy.consult_first.v1";
+export const WIDGET_AI_POLICY_VERSION = "granit_widget_ai_policy.consult_first.v2";
 
-export type WidgetAiPolicyReply = {
-  text: string;
-  fallbackMode: "manager_required";
-  reason: string;
-  action: AiTurnAction;
-  intent: AiTurnIntent;
-  requestedSlots: AiSlotName[];
-  riskFlags: AiRiskFlag[];
-  handoffReason: AiHandoffReason;
-  stopAiAfterReply?: boolean;
-};
+export type WidgetAiPolicyReply = WidgetAiRenderedReply;
 
 export function buildWidgetAiPolicyReply(input: AiTurnInput): WidgetAiPolicyReply | null {
   const normalized = input.inboundMessage.text.toLocaleLowerCase("ru-RU");
@@ -53,7 +40,7 @@ export function buildWidgetAiPolicyReply(input: AiTurnInput): WidgetAiPolicyRepl
     };
   }
 
-  if (/(точн|финальн|окончательн).{0,24}(цен|стоим|смет)|(?:цен|стоим|смет).{0,24}(точн|финальн|окончательн)|коммерческ(?:ое|ого) предложен/i.test(normalized)) {
+  if (/(точн|финальн|окончательн).{0,24}(цен|стоим|смет|расч[её]т)|(?:цен|стоим|смет|расч[её]т).{0,24}(точн|финальн|окончательн)|коммерческ(?:ое|ого) предложен/i.test(normalized)) {
     return {
       text:
         handoffText(input, "Финальную стоимость подготовит менеджер."),
@@ -82,6 +69,9 @@ export function buildWidgetAiPolicyReply(input: AiTurnInput): WidgetAiPolicyRepl
       stopAiAfterReply: true
     };
   }
+
+  const calculationReply = buildWidgetAiCalculationFallbackReply(input);
+  if (calculationReply) return calculationReply;
 
   return null;
 }
