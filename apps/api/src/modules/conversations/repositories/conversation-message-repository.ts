@@ -1,6 +1,6 @@
 import type { SiteWidgetUtm } from "@granit/contracts";
 
-import type { AiTurnInput } from "../../ai/ai-turn.js";
+import type { AiTurnExecutionContext, AiTurnInput } from "../../ai/ai-turn.js";
 import type {
   AiHandoffReason,
   AiRequirementUpdate,
@@ -17,6 +17,7 @@ import type {
 } from "./lead-conversation-types.js";
 
 export type SiteWidgetStoredAiReply = {
+  internalMessageId?: string;
   publicMessageId: string;
   body: string;
   createdAt: string;
@@ -78,6 +79,7 @@ export type AcceptInboundMessageResult = {
   conversationId: string;
   publicConversationId: string;
   channelIdentityId: string;
+  inboundMessageId?: string;
   publicMessageId: string;
   submittedAt?: string;
   widgetPublicSessionId?: string;
@@ -86,6 +88,7 @@ export type AcceptInboundMessageResult = {
   replayed: boolean;
   existingAiReply?: SiteWidgetStoredAiReply;
   aiTurnInput?: AiTurnInput;
+  aiTurnExecutionContext?: AiTurnExecutionContext;
   widgetAiJob?: {
     id: string;
     status: "pending" | "processing" | "retrying" | "replied" | "degraded" | "blocked" | "failed";

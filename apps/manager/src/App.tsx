@@ -1448,7 +1448,7 @@ function ConversationHistory({
         >
           <Group gap="xs" mb={4}>
             <Text size="sm" fw={700}>
-              {aiQualityEventLabel(conversation.latestUnresolvedAiQuality)}
+              {aiQualityEventLabel(conversation.latestUnresolvedAiQuality.eventType)}
             </Text>
             <Badge
               size="xs"

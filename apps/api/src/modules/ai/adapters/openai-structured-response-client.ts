@@ -6,8 +6,8 @@ export type OpenAiStructuredResponseRequest = {
   timeoutMs: number;
   instructions: string;
   input: string;
-  formatName: string;
-  schema: Record<string, unknown>;
+  formatName?: string;
+  schema?: Record<string, unknown>;
   metadata: Record<string, string>;
   maxOutputTokens: number;
   signal?: AbortSignal;
@@ -49,15 +49,19 @@ export async function requestOpenAiStructuredResponse(
         reasoning: {
           effort: "low"
         },
-        text: {
-          verbosity: "low",
-          format: {
-            type: "json_schema",
-            name: request.formatName,
-            strict: true,
-            schema: request.schema
-          }
-        },
+        text: request.schema && request.formatName
+          ? {
+              verbosity: "low",
+              format: {
+                type: "json_schema",
+                name: request.formatName,
+                strict: true,
+                schema: request.schema
+              }
+            }
+          : {
+              verbosity: "low"
+            },
         metadata: request.metadata
       }),
       signal: controller.signal
@@ -136,4 +140,3 @@ function readUsage(usage: unknown): WidgetAiUsage | undefined {
     totalTokens: typeof value.total_tokens === "number" ? value.total_tokens : undefined
   };
 }
-

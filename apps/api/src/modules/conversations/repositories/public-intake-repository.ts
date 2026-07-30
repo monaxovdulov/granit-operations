@@ -1,6 +1,10 @@
 import type { SiteFormIntakeRequest, SiteWidgetMessageRequest } from "@granit/contracts";
 
-import type { AiTurnInput, WidgetCatalogReference } from "../../ai/ai-turn.js";
+import type {
+  AiTurnExecutionContext,
+  AiTurnInput,
+  WidgetCatalogReference
+} from "../../ai/ai-turn.js";
 import type { AiState } from "./lead-conversation-types.js";
 import type {
   SaveSiteWidgetAiMessageInput,
@@ -35,6 +39,7 @@ export type SaveAcceptedSiteWidgetMessageResult = {
   conversationId: string;
   publicConversationId: string;
   channelIdentityId: string;
+  inboundMessageId?: string;
   publicSessionId: string;
   publicMessageId: string;
   submittedAt: string;
@@ -43,6 +48,7 @@ export type SaveAcceptedSiteWidgetMessageResult = {
   replayed: boolean;
   aiReply?: SiteWidgetStoredAiReply;
   aiTurnInput?: AiTurnInput;
+  aiTurnExecutionContext?: AiTurnExecutionContext;
   widgetAiJob?: SiteWidgetAiJobSummary;
 };
 

@@ -5,6 +5,12 @@ import type {
   AiRequirementMode,
   AiSlotName
 } from "../../ai/ai-dialog-contract.js";
+import type {
+  AiQualityEventType,
+  AiQualityReasonCode,
+  AiQualitySeverity,
+  AiRunStatus
+} from "../../ai/repositories/ai-run-repository.js";
 
 import type {
   AiState,
@@ -79,16 +85,10 @@ export type ManagerChannelIdentity = {
 };
 
 export type ManagerAiQualitySummary = {
-  eventType:
-    | "handoff"
-    | "degradation"
-    | "blocked"
-    | "policy_violation"
-    | "model_failure"
-    | "runtime_failure";
-  reasonCode: string;
-  severity: "info" | "warning" | "error" | "critical";
-  runStatus: "replied" | "handoff" | "degraded";
+  eventType: AiQualityEventType;
+  reasonCode: AiQualityReasonCode;
+  severity: AiQualitySeverity;
+  runStatus: AiRunStatus;
   createdAt: string;
 };
 

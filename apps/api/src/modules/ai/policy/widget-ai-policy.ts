@@ -9,15 +9,19 @@ export const WIDGET_AI_POLICY_VERSION = "granit_widget_ai_policy.dialogue_contro
 
 export type WidgetAiPolicyReply = WidgetAiRenderedReply;
 
-export function buildWidgetAiPolicyReply(input: AiTurnInput): WidgetAiPolicyReply | null {
-  const normalized = input.inboundMessage.text.toLocaleLowerCase("ru-RU");
-  const dialogueReply = buildWidgetAiDialogueControlReply(input);
+export function buildWidgetAiPolicyReply(input: AiTurnInput | string): WidgetAiPolicyReply | null {
+  const turnInput = typeof input === "string" ? null : input;
+  const rawText: string = typeof input === "string" ? input : input.inboundMessage.text;
+  const normalized = rawText.toLocaleLowerCase("ru-RU");
+  const dialogueReply = turnInput ? buildWidgetAiDialogueControlReply(turnInput) : null;
 
   if (dialogueReply) return dialogueReply;
 
   if (/(менеджер|оператор|человек|живой|позвон|свяж|перезвон|manager|human|operator)/i.test(normalized)) {
     return {
-      text: handoffText(input, "Передам менеджеру."),
+      text: turnInput
+        ? handoffText(turnInput, "Передам менеджеру.")
+        : "Передам менеджеру. Напишите телефон или удобный способ связи.",
       fallbackMode: "manager_required",
       reason: "manager_requested",
       action: "handoff",
@@ -47,7 +51,9 @@ export function buildWidgetAiPolicyReply(input: AiTurnInput): WidgetAiPolicyRepl
   if (/(точн|финальн|окончательн).{0,24}(цен|стоим|смет|расч[её]т)|(?:цен|стоим|смет|расч[её]т).{0,24}(точн|финальн|окончательн)|коммерческ(?:ое|ого) предложен/i.test(normalized)) {
     return {
       text:
-        handoffText(input, "Финальную стоимость подготовит менеджер."),
+        turnInput
+          ? handoffText(turnInput, "Финальную стоимость подготовит менеджер.")
+          : "Финальную стоимость подготовит менеджер. Напишите телефон или удобный способ связи.",
       fallbackMode: "manager_required",
       reason: "final_quote_pressure",
       action: "handoff",
@@ -62,7 +68,9 @@ export function buildWidgetAiPolicyReply(input: AiTurnInput): WidgetAiPolicyRepl
   if (/(гарант|договор|контракт|скидк|наличи|оплат|рассроч|кредит|warranty|contract|discount|available|payment|installment)/i.test(normalized)) {
     return {
       text:
-        handoffText(input, "Такие условия подтверждает менеджер."),
+        turnInput
+          ? handoffText(turnInput, "Такие условия подтверждает менеджер.")
+          : "Такие условия подтверждает менеджер. Напишите телефон или удобный способ связи.",
       fallbackMode: "manager_required",
       reason: "binding_terms_require_manager_confirmation",
       action: "handoff",
@@ -74,7 +82,7 @@ export function buildWidgetAiPolicyReply(input: AiTurnInput): WidgetAiPolicyRepl
     };
   }
 
-  const calculationReply = buildWidgetAiCalculationFallbackReply(input);
+  const calculationReply = turnInput ? buildWidgetAiCalculationFallbackReply(turnInput) : null;
   if (calculationReply) return calculationReply;
 
   return null;

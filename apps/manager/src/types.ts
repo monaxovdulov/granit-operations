@@ -105,6 +105,52 @@ export type AiState =
   | "watching"
   | "closed";
 
+export type AiQualityEventType =
+  | "handoff"
+  | "degradation"
+  | "blocked"
+  | "policy_violation"
+  | "model_failure"
+  | "tool_failure"
+  | "runtime_failure";
+
+export type AiQualityReasonCode =
+  | "handoff_to_manager"
+  | "missing_openai_config"
+  | "model_error"
+  | "semantic_verifier_error"
+  | "turn_timeout"
+  | "empty_model_response"
+  | "unsafe_model_response"
+  | "grounding_validation_failed"
+  | "agent_reply_blocked"
+  | "ai_persistence_unconfirmed"
+  | "execution_context_mismatch"
+  | "candidate_invalid"
+  | "gate_closed"
+  | "send_gate_blocked"
+  | "tool_failed"
+  | "runtime_failed"
+  | "recorder_failed";
+
+export type AiQualitySeverity = "info" | "warning" | "error" | "critical";
+
+export type AiRunStatus =
+  | "running"
+  | "persisted"
+  | "handed_off"
+  | "blocked"
+  | "fallback_unavailable"
+  | "failed";
+
+export type ManagerAiQualitySummary = {
+  eventType: AiQualityEventType;
+  reasonCode: AiQualityReasonCode;
+  severity: AiQualitySeverity;
+  runStatus: AiRunStatus;
+  createdAt: string;
+};
+
 export type ManagerChannelIdentity = {
   provider: string;
   displayName?: string;
@@ -113,20 +159,6 @@ export type ManagerChannelIdentity = {
   externalUserId?: string;
   widgetPublicSessionId?: string;
   widgetInstanceId?: string;
-};
-
-export type ManagerAiQualitySummary = {
-  eventType:
-    | "handoff"
-    | "degradation"
-    | "blocked"
-    | "policy_violation"
-    | "model_failure"
-    | "runtime_failure";
-  reasonCode: string;
-  severity: "info" | "warning" | "error" | "critical";
-  runStatus: "replied" | "handoff" | "degraded";
-  createdAt: string;
 };
 
 export type ManagerConversation = {

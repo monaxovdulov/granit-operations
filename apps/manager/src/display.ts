@@ -2,6 +2,10 @@ import { ApiRequestError, AuthRequiredError } from "./api";
 import {
   LEAD_STATUS_VALUES,
   isLeadStatus,
+  type AiQualityEventType,
+  type AiQualityReasonCode,
+  type AiQualitySeverity,
+  type AiRunStatus,
   type LeadStatus,
   type AiReviewLabel,
   type ManagerAiQualitySummary,
@@ -30,6 +34,68 @@ export function formatDate(value: string) {
   }
 
   return dateFormatter.format(date);
+}
+
+export function aiQualityEventLabel(eventType: AiQualityEventType) {
+  const labels: Record<AiQualityEventType, string> = {
+    handoff: "Передача менеджеру",
+    degradation: "AI требует внимания",
+    blocked: "AI-ответ заблокирован",
+    policy_violation: "Ответ отклонен политикой",
+    model_failure: "Ошибка AI-модели",
+    tool_failure: "Ошибка AI-инструмента",
+    runtime_failure: "Ошибка AI-обработки"
+  };
+
+  return labels[eventType];
+}
+
+export function aiQualityReasonLabel(reasonCode: AiQualityReasonCode) {
+  const labels: Record<AiQualityReasonCode, string> = {
+    handoff_to_manager: "Клиенту нужен менеджер",
+    missing_openai_config: "AI временно недоступен",
+    model_error: "Модель не смогла подготовить ответ",
+    semantic_verifier_error: "Проверка ответа завершилась ошибкой",
+    turn_timeout: "AI-ответ превысил лимит времени",
+    empty_model_response: "Модель вернула пустой ответ",
+    unsafe_model_response: "Ответ не прошел проверку безопасности",
+    grounding_validation_failed: "Ответ не прошел проверку источников",
+    agent_reply_blocked: "Отправка AI-ответа запрещена",
+    ai_persistence_unconfirmed: "Сохранение AI-ответа не подтверждено",
+    execution_context_mismatch: "Контекст обработки изменился",
+    candidate_invalid: "AI-ответ не прошел проверку",
+    gate_closed: "Отправка AI-ответа закрыта",
+    send_gate_blocked: "Проверка отправки заблокировала ответ",
+    tool_failed: "AI-инструмент завершился ошибкой",
+    runtime_failed: "AI-обработка завершилась ошибкой",
+    recorder_failed: "Не удалось сохранить состояние AI-обработки"
+  };
+
+  return labels[reasonCode];
+}
+
+export function aiRunStatusLabel(status: AiRunStatus) {
+  const labels: Record<AiRunStatus, string> = {
+    running: "выполняется",
+    persisted: "ответ сохранен",
+    handed_off: "передан менеджеру",
+    blocked: "заблокирован",
+    fallback_unavailable: "ответ недоступен",
+    failed: "ошибка"
+  };
+
+  return labels[status];
+}
+
+export function aiQualitySeverityColor(severity: AiQualitySeverity) {
+  const colors: Record<AiQualitySeverity, string> = {
+    info: "blue",
+    warning: "yellow",
+    error: "orange",
+    critical: "red"
+  };
+
+  return colors[severity];
 }
 
 export function errorMessage(error: unknown) {
@@ -166,46 +232,6 @@ export function aiReviewLabel(value: AiReviewLabel) {
   return labels[value];
 }
 
-export function aiQualityEventLabel(event: ManagerAiQualitySummary) {
-  const labels: Record<ManagerAiQualitySummary["eventType"], string> = {
-    handoff: "AI передал диалог",
-    degradation: "AI не ответил",
-    blocked: "AI-ответ заблокирован",
-    policy_violation: "Ответ отклонен policy gate",
-    model_failure: "Ошибка AI runtime",
-    runtime_failure: "Ошибка сохранения AI"
-  };
-
-  return labels[event.eventType];
-}
-
-export function aiQualityReasonLabel(reasonCode: string) {
-  const labels: Record<string, string> = {
-    missing_openai_config: "AI-провайдер не настроен",
-    model_error: "Ошибка модели",
-    semantic_verifier_error: "Ошибка verifier",
-    turn_timeout: "Превышено время ответа",
-    empty_model_response: "Пустой ответ модели",
-    unsafe_model_response: "Ответ не прошел safety/grounding gate",
-    grounding_validation_failed: "Ответ не прошел grounding validation",
-    agent_reply_blocked: "Send gate заблокировал ответ",
-    ai_persistence_unconfirmed: "Сохранение AI-ответа не подтверждено"
-  };
-
-  return labels[reasonCode] ?? reasonCode;
-}
-
-export function aiQualitySeverityColor(severity: ManagerAiQualitySummary["severity"]) {
-  const colors: Record<ManagerAiQualitySummary["severity"], string> = {
-    info: "gray",
-    warning: "yellow",
-    error: "orange",
-    critical: "red"
-  };
-
-  return colors[severity];
-}
-
 export function timelineEventLabel(eventType: string) {
   const labels: Record<string, string> = {
     "lead.created_from_site_form": "Заявка создана",
@@ -216,8 +242,8 @@ export function timelineEventLabel(eventType: string) {
     "conversation.ai_handoff_created": "Передача менеджеру",
     "conversation.ai_degraded": "AI не ответил",
     "conversation.ai_review_labeled": "Оценка AI-ответа",
-    "conversation.ai_control_changed": "Управление AI",
     "conversation.manager_takeover": "AI отключен менеджером",
+    "conversation.ai_control_changed": "Настройка AI изменена",
     "conversation.manager_message_queued": "Ответ ожидает отправки",
     "conversation.delivery_sent": "Сообщение доставлено",
     "conversation.delivery_retrying": "Повтор доставки",

@@ -46,6 +46,7 @@ import {
 
 import {
   AI_TURN_INPUT_VERSION,
+  buildSiteWidgetAiTurnExecutionContext,
   buildStageASiteWidgetAiTurnInput,
   type AiTurnInput,
   type WidgetCatalogReference
@@ -584,6 +585,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
           conversationId: conversation.id,
           publicConversationId: conversation.publicConversationId,
           channelIdentityId: identity.id,
+          inboundMessageId: message.id,
           publicMessageId: message.publicMessageId,
           submittedAt: message.submittedAt.toISOString(),
           widgetPublicSessionId: widgetSession?.publicSessionId ?? undefined,
@@ -591,6 +593,16 @@ export class PostgresIntakeRepository implements IntakeRepository {
           aiState: toAiState(conversation.aiState),
           replayed: false,
           aiTurnInput,
+          aiTurnExecutionContext: aiTurnInput
+            ? buildSiteWidgetAiTurnExecutionContext({
+                leadId: conversation.leadId,
+                conversationId: conversation.id,
+                inboundMessageId: message.id,
+                publicConversationId: conversation.publicConversationId,
+                publicInboundMessageId: message.publicMessageId,
+                requestFingerprint: input.requestFingerprint
+              })
+            : undefined,
           widgetAiJob: widgetAiJob ? toSiteWidgetAiJobSummary(widgetAiJob) : undefined
         };
       });
@@ -653,6 +665,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
       conversationId: result.conversationId,
       publicConversationId: result.publicConversationId,
       channelIdentityId: result.channelIdentityId,
+      inboundMessageId: result.inboundMessageId,
       publicSessionId: result.widgetPublicSessionId ?? input.publicSessionId,
       publicMessageId: result.publicMessageId,
       submittedAt: result.submittedAt ?? input.request.submitted_at,
@@ -661,6 +674,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
       replayed: result.replayed,
       aiReply: result.existingAiReply,
       aiTurnInput: result.aiTurnInput,
+      aiTurnExecutionContext: result.aiTurnExecutionContext,
       widgetAiJob: result.widgetAiJob
     };
   }
@@ -1923,6 +1937,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
         aiState: conversations.aiState,
         messageChannelIdentityId: conversationMessages.channelIdentityId,
         conversationChannelIdentityId: conversations.channelIdentityId,
+        inboundMessageId: conversationMessages.id,
         publicSessionId: widgetSessions.publicSessionId,
         widgetInstanceId: conversations.widgetInstanceId,
         sessionWidgetInstanceId: widgetSessions.widgetInstanceId,
@@ -2082,9 +2097,9 @@ export class PostgresIntakeRepository implements IntakeRepository {
 
       latestQualityByConversation.set(quality.conversationId, {
         eventType: toManagerAiQualityEventType(quality.eventType),
-        reasonCode: quality.reasonCode,
+        reasonCode: toManagerAiQualityReasonCode(quality.reasonCode),
         severity: toManagerAiQualitySeverity(quality.severity),
-        runStatus: toManagerAiRunStatus(quality.runStatus),
+        runStatus: toManagerAiQualityRunStatus(quality.runStatus),
         createdAt: quality.createdAt.toISOString()
       });
     }
@@ -2367,6 +2382,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
       aiState: string;
       messageChannelIdentityId: string | null;
       conversationChannelIdentityId: string | null;
+      inboundMessageId: string;
       publicSessionId: string | null;
       widgetInstanceId: string | null;
       sessionWidgetInstanceId: string | null;
@@ -2413,6 +2429,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
       publicConversationId: existing.publicConversationId,
       channelIdentityId:
         existing.messageChannelIdentityId ?? existing.conversationChannelIdentityId ?? "",
+      inboundMessageId: existing.inboundMessageId,
       publicMessageId: existing.publicMessageId,
       submittedAt: existing.submittedAt.toISOString(),
       widgetPublicSessionId: existing.publicSessionId ?? undefined,
@@ -2427,6 +2444,17 @@ export class PostgresIntakeRepository implements IntakeRepository {
           }
         : undefined,
       aiTurnInput: buildPersistedSiteWidgetAiTurnInput(persistedInput, context),
+      aiTurnExecutionContext:
+        existing.channel === "site_widget"
+          ? buildSiteWidgetAiTurnExecutionContext({
+              leadId: existing.leadId,
+              conversationId: existing.conversationId,
+              inboundMessageId: existing.inboundMessageId,
+              publicConversationId: existing.publicConversationId,
+              publicInboundMessageId: existing.publicMessageId,
+              requestFingerprint: existing.requestFingerprint
+            })
+          : undefined,
       widgetAiJob
     };
   }
@@ -3620,6 +3648,7 @@ async function findExistingProviderInbound(
       aiState: conversations.aiState,
       messageChannelIdentityId: conversationMessages.channelIdentityId,
       conversationChannelIdentityId: conversations.channelIdentityId,
+      inboundMessageId: conversationMessages.id,
       publicSessionId: widgetSessions.publicSessionId,
       widgetInstanceId: conversations.widgetInstanceId,
       sessionWidgetInstanceId: widgetSessions.widgetInstanceId,
@@ -3839,6 +3868,33 @@ function toManagerAiRunStatus(
   throw new Error(`invalid AI run status ${value}`);
 }
 
+function toManagerAiQualityRunStatus(value: string): ManagerAiQualitySummary["runStatus"] {
+  if (value === "replied") {
+    return "persisted";
+  }
+
+  if (value === "handoff") {
+    return "handed_off";
+  }
+
+  if (value === "degraded") {
+    return "fallback_unavailable";
+  }
+
+  if (
+    value === "running" ||
+    value === "persisted" ||
+    value === "handed_off" ||
+    value === "blocked" ||
+    value === "fallback_unavailable" ||
+    value === "failed"
+  ) {
+    return value;
+  }
+
+  throw new Error(`invalid AI quality run status ${value}`);
+}
+
 function toManagerAiQualityEventType(value: string): ManagerAiQualitySummary["eventType"] {
   if (
     value === "handoff" ||
@@ -3852,6 +3908,34 @@ function toManagerAiQualityEventType(value: string): ManagerAiQualitySummary["ev
   }
 
   throw new Error(`invalid AI quality event type ${value}`);
+}
+
+function toManagerAiQualityReasonCode(value: string): ManagerAiQualitySummary["reasonCode"] {
+  if (
+    value === "handoff_to_manager" ||
+    value === "missing_openai_config" ||
+    value === "model_error" ||
+    value === "semantic_verifier_error" ||
+    value === "turn_timeout" ||
+    value === "empty_model_response" ||
+    value === "unsafe_model_response" ||
+    value === "grounding_validation_failed" ||
+    value === "agent_reply_blocked" ||
+    value === "ai_persistence_unconfirmed" ||
+    value === "execution_context_mismatch" ||
+    value === "candidate_invalid" ||
+    value === "no_safe_answer" ||
+    value === "missing_approved_fact" ||
+    value === "gate_closed" ||
+    value === "send_gate_blocked" ||
+    value === "tool_failed" ||
+    value === "runtime_failed" ||
+    value === "recorder_failed"
+  ) {
+    return value;
+  }
+
+  return "runtime_failed";
 }
 
 function toManagerAiQualitySeverity(value: string): ManagerAiQualitySummary["severity"] {
@@ -3901,10 +3985,8 @@ function toAiQualityEvent(reason: string): Pick<
   };
 }
 
-function normalizeReasonCode(value: string): string {
-  const normalized = value.trim().replace(/[^A-Za-z0-9_.:-]+/g, "_").slice(0, 120);
-
-  return normalized || "unknown";
+function normalizeReasonCode(_value: string): ManagerAiQualitySummary["reasonCode"] {
+  return "runtime_failed";
 }
 
 function toAiReviewLabel(value: string): AiReviewLabel {

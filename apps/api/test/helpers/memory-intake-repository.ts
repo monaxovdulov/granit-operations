@@ -6,10 +6,19 @@ import {
 } from "@granit/contracts";
 
 import {
+  buildSiteWidgetAiTurnExecutionContext,
   buildStageASiteWidgetAiTurnInput,
   type AiTurnInput,
   type WidgetCatalogReference
 } from "../../src/modules/ai/ai-turn.js";
+import type {
+  AiRunTerminalCompletion,
+  AiRunSpanWrite,
+  BeginAiRunInput,
+  BeginAiRunResult,
+  RunningAiRunRecord,
+  TerminalAiRunRecord
+} from "../../src/modules/ai/repositories/ai-run-repository.js";
 import type {
   AiKnownSlots,
   AiSlotName
@@ -72,6 +81,8 @@ export class MemoryIntakeRepository implements IntakeRepository {
   aiSaveCalls = 0;
   lastAiSaveInput?: SaveSiteWidgetAiMessageInput;
   readonly shadowComparisons: RecordSiteWidgetAiShadowComparisonInput[] = [];
+  private readonly managerReviewTransitions: Array<Record<string, unknown>> = [];
+  private readonly recordedAiRuns: any[] = [];
   private managerAiControl: ManagerAiControl = {
     enabled: true,
     version: 1,
@@ -128,6 +139,314 @@ export class MemoryIntakeRepository implements IntakeRepository {
   private readonly conversationSessions = new Map<string, string>();
   private readonly conversationPublicIds = new Map<string, string>();
   private readonly publicConversationIds = new Map<string, string>();
+
+  get aiRunCount() {
+    return this.recordedAiRuns.length;
+  }
+
+  get managerReviewTransitionCalls() {
+    return this.managerReviewTransitions.length;
+  }
+
+  listAiRuns(): Array<{
+    status: string;
+    spans: Array<{ name: string; usedInFinalAnswer?: boolean }>;
+    [key: string]: any;
+  }> {
+    return [...this.recordedAiRuns];
+  }
+
+  async readRecordedSiteWidgetAiGate(input: {
+    leadId: string;
+    conversationId: string;
+  }): Promise<{ aiState: AiTurnInput["gateSnapshot"]["aiState"]; agentAllowedToReply: boolean }> {
+    const leadId = this.conversationLeads.get(input.conversationId);
+    const publicSessionId = this.conversationSessions.get(input.conversationId);
+    const lead = leadId ? this.leads.get(leadId) : undefined;
+    const conversation = lead?.conversations.find(
+      (candidate) => candidate.channelIdentity.widgetPublicSessionId === publicSessionId
+    );
+
+    if (leadId !== input.leadId) {
+      throw new Error("memory recorded site widget AI gate is unavailable");
+    }
+
+    return {
+      aiState: conversation?.aiState ?? "needs_manager",
+      agentAllowedToReply:
+        Boolean(conversation?.agentAllowedToReply) && this.managerAiControl.enabled
+    };
+  }
+
+  async transitionSiteWidgetConversationToManagerReview(input: Record<string, unknown>) {
+    this.managerReviewTransitions.push(input);
+    if (this.options.failManagerReviewTransition) {
+      throw new Error("manager review transition unavailable");
+    }
+
+    const leadId = typeof input.leadId === "string" ? input.leadId : undefined;
+    const conversationId =
+      typeof input.conversationId === "string" ? input.conversationId : undefined;
+    const reason = typeof input.reason === "string" ? input.reason : "ai_execution_failed";
+    const inboundPublicMessageId =
+      typeof input.inboundPublicMessageId === "string"
+        ? input.inboundPublicMessageId
+        : undefined;
+
+    if (!leadId || !conversationId) {
+      throw new Error("memory manager review transition identity is unavailable");
+    }
+
+    const lead = this.leads.get(leadId);
+    if (!lead) {
+      throw new Error("memory manager review lead is unavailable");
+    }
+
+    const updatedAt = new Date().toISOString();
+    const existingReviewEvent = lead.timeline.some(
+      (event) =>
+        event.eventType === "conversation.ai_manager_review_required" &&
+        event.metadata?.inbound_public_message_id === inboundPublicMessageId
+    );
+
+    if (existingReviewEvent) {
+      return;
+    }
+
+    this.leads.set(leadId, {
+      ...lead,
+      updatedAt,
+      timeline: [
+        ...lead.timeline,
+        {
+          eventType: "conversation.ai_manager_review_required",
+          summary: "Website widget AI requires manager review",
+          metadata: {
+            public_conversation_id:
+              typeof input.publicConversationId === "string"
+                ? input.publicConversationId
+                : this.conversationPublicIds.get(conversationId),
+            inbound_public_message_id: inboundPublicMessageId,
+            reason
+          },
+          createdAt: updatedAt
+        }
+      ],
+      conversations: lead.conversations.map((conversation) =>
+        this.conversationPublicIds.get(conversationId) === conversation.publicConversationId
+          ? {
+              ...conversation,
+              agentAllowedToReply: false,
+              aiState: "needs_manager",
+              updatedAt
+            }
+          : conversation
+      )
+    });
+  }
+
+  async beginOrReplay(input: BeginAiRunInput): Promise<BeginAiRunResult> {
+    if (this.options.failAiRunBegin) {
+      throw new Error("memory AI run begin unavailable");
+    }
+
+    const existing = this.recordedAiRuns.find(
+      (run) => run.idempotencyKey === input.idempotencyKey
+    );
+
+    if (existing) {
+      return existing.status === "running"
+        ? { kind: "running_replay" as const, run: existing }
+        : { kind: "terminal_replay" as const, run: existing };
+    }
+
+    const run: RunningAiRunRecord = {
+      ...input,
+      id: randomUUID(),
+      status: "running"
+    };
+    this.recordedAiRuns.push(run);
+
+    return { kind: "started" as const, run };
+  }
+
+  async completeWithoutReply(input: {
+    run: RunningAiRunRecord;
+    completion: AiRunTerminalCompletion;
+  }): Promise<TerminalAiRunRecord> {
+    if (this.options.failAiRunCompletion) {
+      throw new Error("memory AI run completion unavailable");
+    }
+
+    const completed: TerminalAiRunRecord = {
+      ...input.run,
+      ...input.completion
+    };
+    const index = this.recordedAiRuns.findIndex((run) => run.id === input.run.id);
+
+    if (index >= 0) {
+      this.recordedAiRuns[index] = completed;
+    } else {
+      this.recordedAiRuns.push(completed);
+    }
+
+    return completed;
+  }
+
+  async persistRecordedSiteWidgetAiReply(input: {
+    run: RunningAiRunRecord;
+    reply: { replyDraft: string; action?: string };
+    completionPlan: {
+      allowed: AiRunTerminalCompletion;
+      agentReplyBlocked: AiRunTerminalCompletion;
+      persistenceUnconfirmed: AiRunTerminalCompletion;
+    };
+    publicMessageId: string;
+    inboundPublicMessageId: string;
+    idempotencyKey: string;
+    requestFingerprint: string;
+    sourcePageUrl: string;
+    metadata: Record<string, unknown>;
+  }) {
+    let saved:
+      | {
+          publicMessageId: string;
+          body: string;
+          createdAt: string;
+          internalMessageId?: string;
+        }
+      | undefined;
+
+    try {
+      saved = await this.saveSiteWidgetAiMessage({
+        leadId: input.run.leadId,
+        conversationId: input.run.conversationId,
+        publicMessageId: input.publicMessageId,
+        inboundPublicMessageId: input.inboundPublicMessageId,
+        idempotencyKey: input.idempotencyKey,
+        requestFingerprint: input.requestFingerprint,
+        body: input.reply.replyDraft,
+        sourcePageUrl: input.sourcePageUrl,
+        agentAllowedToReplyAfterSend:
+          input.reply.action === "handoff_to_manager" ? false : undefined,
+        metadata: input.metadata
+      });
+      const completedRun = await this.completeWithoutReply({
+        run: input.run,
+        completion: {
+          ...input.completionPlan.allowed,
+          spans: [
+            ...input.completionPlan.allowed.spans,
+            {
+              spanId: randomUUID(),
+              kind: "send_gate",
+              name: "send_gate_check",
+              status: "succeeded",
+              latencyMs: 0,
+              usedInFinalAnswer: true
+            } satisfies AiRunSpanWrite,
+            {
+              spanId: randomUUID(),
+              kind: "runtime",
+              name: "reply_persistence",
+              status: "succeeded",
+              latencyMs: 0
+            } satisfies AiRunSpanWrite
+          ]
+        }
+      });
+      const completedWithOutbound = {
+        ...completedRun,
+        outboundMessageId: saved.internalMessageId ?? saved.publicMessageId
+      };
+      const index = this.recordedAiRuns.findIndex((run) => run.id === input.run.id);
+      if (index >= 0) {
+        this.recordedAiRuns[index] = completedWithOutbound;
+      }
+
+      return {
+        status: "persisted" as const,
+        internalMessageId: saved.internalMessageId ?? saved.publicMessageId,
+        publicMessageId: saved.publicMessageId,
+        body: saved.body,
+        completedRun: completedWithOutbound
+      };
+    } catch (error) {
+      if (saved) {
+        this.rollbackRecordedSiteWidgetAiReply({
+          run: input.run,
+          publicMessageId: saved.publicMessageId,
+          idempotencyKey: input.idempotencyKey
+        });
+      }
+
+      const blocked = error instanceof AgentReplyBlockedError;
+      const completion = blocked
+        ? {
+            ...input.completionPlan.agentReplyBlocked,
+            spans: [
+              ...input.completionPlan.agentReplyBlocked.spans,
+              {
+                spanId: randomUUID(),
+                kind: "send_gate",
+                name: "send_gate_check",
+                status: "blocked",
+                latencyMs: 0,
+                errorCode: "send_gate_blocked",
+                usedInFinalAnswer: false
+              } satisfies AiRunSpanWrite
+            ]
+          }
+        : input.completionPlan.persistenceUnconfirmed;
+      const completedRun = await this.completeWithoutReply({
+        run: input.run,
+        completion
+      });
+
+      return {
+        status: "blocked" as const,
+        reason: blocked
+          ? ("agent_reply_blocked" as const)
+          : ("ai_persistence_unconfirmed" as const),
+        completedRun
+      };
+    }
+  }
+
+  private rollbackRecordedSiteWidgetAiReply(input: {
+    run: RunningAiRunRecord;
+    publicMessageId: string;
+    idempotencyKey: string;
+  }) {
+    this.widgetAiIdempotency.delete(input.idempotencyKey);
+    const lead = this.leads.get(input.run.leadId);
+    const publicSessionId = this.conversationSessions.get(input.run.conversationId);
+
+    if (!lead || !publicSessionId) {
+      return;
+    }
+
+    this.leads.set(input.run.leadId, {
+      ...lead,
+      conversations: lead.conversations.map((conversation) =>
+        conversation.channelIdentity.widgetPublicSessionId === publicSessionId
+          ? {
+              ...conversation,
+              messages: conversation.messages.filter(
+                (message) => message.publicMessageId !== input.publicMessageId
+              )
+            }
+          : conversation
+      ),
+      timeline: lead.timeline.filter(
+        (event) =>
+          !(
+            event.eventType === "conversation.ai_message_sent" &&
+            event.metadata?.public_message_id === input.publicMessageId
+          )
+      )
+    });
+  }
   private readonly conversationIdentityIds = new Map<string, string>();
   private readonly aiSlotsByConversation = new Map<string, AiKnownSlots>();
   private readonly aiRequirementsByConversation = new Map<
@@ -185,7 +504,13 @@ export class MemoryIntakeRepository implements IntakeRepository {
   >();
 
   constructor(
-    private readonly options: { failPersistence?: boolean; failAiPersistence?: boolean } = {}
+    private readonly options: {
+      failPersistence?: boolean;
+      failAiPersistence?: boolean;
+      failAiRunBegin?: boolean;
+      failAiRunCompletion?: boolean;
+      failManagerReviewTransition?: boolean;
+    } = {}
   ) {}
 
   get leadCount() {
@@ -496,12 +821,31 @@ export class MemoryIntakeRepository implements IntakeRepository {
       const aiState = conversation?.aiState ?? "ai_collecting_info";
       const existingJobId = this.widgetAiJobIdsByInboundMessage.get(existing.publicMessageId);
       const existingJob = existingJobId ? this.widgetAiJobs.get(existingJobId) : undefined;
+      const replayAiTurnInput = buildMemorySiteWidgetAiTurnInput(input, {
+        publicConversationId,
+        publicMessageId: existing.publicMessageId,
+        agentAllowedToReply,
+        aiState
+      }, {
+        recentMessages: toMemoryAiRecentMessages(
+          conversation?.messages ?? [],
+          existing.publicMessageId
+        ),
+        rollingSummary: toMemoryAiRollingSummary(
+          conversation?.messages ?? [],
+          existing.publicMessageId
+        ),
+        persistedSlots: this.aiSlotsByConversation.get(conversationId) ?? {},
+        persistedRequirements:
+          this.aiRequirementsByConversation.get(conversationId) ?? []
+      });
 
       return {
         leadId: existing.leadId,
         conversationId,
         publicConversationId,
         channelIdentityId,
+        inboundMessageId: existing.publicMessageId,
         publicSessionId: existing.publicSessionId,
         publicMessageId: existing.publicMessageId,
         submittedAt: existing.submittedAt,
@@ -516,23 +860,14 @@ export class MemoryIntakeRepository implements IntakeRepository {
             }
           : undefined,
         widgetAiJob: existingJob ? toMemoryWidgetAiJobSummary(existingJob) : undefined,
-        aiTurnInput: buildMemorySiteWidgetAiTurnInput(input, {
+        aiTurnInput: replayAiTurnInput,
+        aiTurnExecutionContext: buildSiteWidgetAiTurnExecutionContext({
+          leadId: existing.leadId,
+          conversationId,
+          inboundMessageId: existing.publicMessageId,
           publicConversationId,
-          publicMessageId: existing.publicMessageId,
-          agentAllowedToReply,
-          aiState
-        }, {
-          recentMessages: toMemoryAiRecentMessages(
-            conversation?.messages ?? [],
-            existing.publicMessageId
-          ),
-          rollingSummary: toMemoryAiRollingSummary(
-            conversation?.messages ?? [],
-            existing.publicMessageId
-          ),
-          persistedSlots: this.aiSlotsByConversation.get(conversationId) ?? {},
-          persistedRequirements:
-            this.aiRequirementsByConversation.get(conversationId) ?? []
+          publicInboundMessageId: existing.publicMessageId,
+          requestFingerprint: input.requestFingerprint
         })
       };
     }
@@ -677,6 +1012,7 @@ export class MemoryIntakeRepository implements IntakeRepository {
       conversationId,
       publicConversationId,
       channelIdentityId,
+      inboundMessageId: input.publicMessageId,
       publicSessionId,
       publicMessageId: input.publicMessageId,
       submittedAt: now,
@@ -684,6 +1020,14 @@ export class MemoryIntakeRepository implements IntakeRepository {
       aiState,
       replayed: false,
       aiTurnInput,
+      aiTurnExecutionContext: buildSiteWidgetAiTurnExecutionContext({
+        leadId,
+        conversationId,
+        inboundMessageId: input.publicMessageId,
+        publicConversationId,
+        publicInboundMessageId: input.publicMessageId,
+        requestFingerprint: input.requestFingerprint
+      }),
       widgetAiJob
     };
   }
@@ -1054,7 +1398,7 @@ export class MemoryIntakeRepository implements IntakeRepository {
                 eventType: qualityEvent.eventType,
                 reasonCode: qualityEvent.reasonCode,
                 severity: qualityEvent.severity,
-                runStatus: "degraded",
+                runStatus: "fallback_unavailable",
                 createdAt
               },
               updatedAt: createdAt
@@ -2287,10 +2631,8 @@ function toMemoryAiQualityEvent(
   };
 }
 
-function normalizeMemoryReasonCode(value: string): string {
-  const normalized = value.trim().replace(/[^A-Za-z0-9_.:-]+/g, "_").slice(0, 120);
-
-  return normalized || "unknown";
+function normalizeMemoryReasonCode(_value: string): ManagerAiQualitySummary["reasonCode"] {
+  return "runtime_failed";
 }
 
 const CORE_STRUCTURED_INTAKE_SLOTS: readonly AiSlotName[] = [

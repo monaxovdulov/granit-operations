@@ -42,7 +42,33 @@ Current evidence records:
 - `S04_WIDGET_PERSISTENCE_RU.md` - widget message persistence and manager visibility evidence.
 - `S05_WEBSITE_SAFE_AI_RU.md` - local safe AI backend, persistence, manager visibility, and fallback evidence.
 - `S06_MANAGER_TAKEOVER_RU.md` - manager takeover, blocked follow-up AI, and stale draft send-time gate evidence.
+- `SITE_WIDGET_V1_CROSS_REPO_ACCEPTANCE_RU.md` - accepted G0/P0 record linking the exact
+  `site_widget.v1` provider, widget source, preview integration, CI/deploy runs and deployed bundle
+  hashes before P1/W0.
 - `AI_DIALOG_BOUNDARY_STAGE_A_RU.md` - neutral AI turn boundary implementation evidence before Mastra runtime, Telegram AI outbound or production AI approval.
+- `AI_DIALOG_APP_TURN_BOUNDARY_P1_RU.md` - G1/P1 evidence for bounded causal history,
+  app-only persistence identity, structural legacy orchestration and frozen direct S05 checks.
+- `AI_DIALOG_LIVE_V2_CORE_P1Q_RU.md` - local evidence for the disabled provider-neutral P1Q core
+  at `78c9947`; this records `core_local_checks_passed`, not G1Q sign-off, deployment or runtime
+  enablement. Its later gate status is superseded by the G1Q evidence below.
+- `AI_DIALOG_P1Q_FACTS_SOURCE_AUDIT_RU.md` - exact-object source and semantic audit of the
+  corrected 15-row P1Q facts proposal pinned to remote-resolvable `granit-site-cms@23f2ee8...`;
+  this remains historical pre-approval proposal evidence.
+- `AI_DIALOG_LIVE_V2_FACTS_G1Q_RU.md` - authoritative G1Q closure: exact owner acceptance,
+  schema-validated 15-row production snapshot at `1d737e0`, repeated checks, runtime still
+  disabled/not deployed and P2 unblocked.
+- `AI_DIALOG_OBSERVABILITY_P2_RU.md` - exact-SHA P2 evidence for app-owned run/span/quality
+  persistence, configured/observed model truth, atomic outbound linkage, fail-closed replay,
+  disposable PostgreSQL fresh/upgrade proof and zero live provider calls.
+- `AI_DIALOG_PRIVACY_VISIBILITY_P3_RU.md` - exact-SHA P3 evidence for protected manager quality
+  visibility, strict approved assets, centralized fail-closed observability sanitizer, bounded
+  span-only retention and zero live provider calls.
+- `AI_DIALOG_MASTRA_M2_RU.md` - exact-SHA M2 evidence for the deterministic local/fake Mastra
+  `live_v2` path, honest configured/observed runtime evidence, controlled no-reply semantics,
+  atomic takeover/replay checks, PostgreSQL fresh/upgrade proof and zero real provider calls.
+- `AI_DIALOG_MASTRA_OBSERVABILITY_FIRST_SLICE_RU.md` - honest M3 staging record: exact-SHA first
+  authenticated Mastra attempt, fail-closed generator failure, durable sanitized run/span/quality
+  evidence, no outbound/retry/secret leak and the remaining external/provider blocker.
 - `P0_CHANNEL_NEUTRAL_CONVERSATION_FOUNDATION_RU.md` - channel-neutral widget/Telegram-ready conversation foundation evidence.
 - `TELEGRAM_INBOUND_MANAGER_MINI_PANEL_RU.md` - Telegram inbound webhook, manager binding, takeover/reply mini-panel, and no-direct-send evidence.
 - `TELEGRAM_OUTBOUND_DELIVERY_SENDER_RU.md` - Telegram delivery sender path, retry/failure status and manager-visible delivery evidence.

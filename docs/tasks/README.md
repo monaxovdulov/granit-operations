@@ -18,6 +18,29 @@ Current task records:
 - `S04_WIDGET_PERSISTENCE_RU.md` - website widget message persistence before AI replies.
 - `SERIOUS_AI_LAYER_RU.md` - preparation plan for the serious backend AI layer after S05 website safe AI.
 - `AI_DIALOG_BOUNDARY_STAGE_A_RU.md` - local Stage A implementation of the neutral AI turn boundary before Mastra runtime, Telegram AI outbound or production AI approval.
+- `AI_DIALOG_APP_TURN_BOUNDARY_P1_RU.md` - locally passed G1/P1 implementation of bounded causal
+  history, app-owned identity, structural legacy decision orchestration and frozen direct S05
+  golden checks before P1Q.
+- `AI_DIALOG_LIVE_V2_CORE_P1Q_RU.md` - provider-neutral P1Q core at
+  `core_local_checks_passed` in `78c9947`, with accepted production facts snapshot at `1d737e0`:
+  strict `live_v2` context, candidate validation, deterministic apply semantics, exact 15-row
+  asset and fixed synthetic fixtures passed; G1Q passed, runtime remains disabled/not deployed.
+- `AI_DIALOG_LIVE_V2_FACTS_P1Q_REVIEW_RU.md` - exact accepted 15-row facts table pinned to
+  `granit-site-cms@23f2ee8...`, materialized as schema-validated `facts.v1.ts` with review boundary
+  `2026-10-14`.
+- `AI_DIALOG_OBSERVABILITY_P2_RU.md` - verified P2 implementation record for additive app-owned
+  run/span/quality persistence, configured/observed provider truth, atomic outbound/run linkage,
+  fail-closed recovery and terminal replay on the frozen direct path; exact-SHA evidence follows
+  the implementation commit, and no `live_v2`, Mastra or model call is enabled.
+- `AI_DIALOG_PRIVACY_VISIBILITY_P3_RU.md` - passed P3 record for protected manager-visible AI
+  quality state, strict repo-owned asset manifest, centralized observability allowlist and bounded
+  expired-span retention cleanup before any Mastra dependency.
+- `AI_DIALOG_MASTRA_OBSERVABILITY_FIRST_SLICE_RU.md` - active implementation plan: G0/G1/W0,
+  G1Q/P2/P3/G4/M1/M2/G5/G6 passed; exact G6 base `ad40c27...` was approved, but the first M3
+  Mastra call failed closed before trusted provider observation and M3 remains blocked
+  `P1 -> P1Q -> P2 -> P3 -> M1 disabled -> M2 local/fake -> G6 owner gate -> M3 authenticated
+  staging` (`OPENAI_API_KEY`, `gpt-5.6-sol`, medium), with frozen direct OpenAI emergency rollback
+  and future `codex_subscription` outside the slice.
 - `MODULAR_MONOLITH_REFACTOR_RU.md` - planned refactor to make `ops-api` a clearer modular monolith without changing runtime topology, public contracts, DB schema or production state.
 - `OPS_API_THICK_MODULE_REFACTOR_NEXT_TASKS_RU.md` - thick-module refactor task pack; P1/P2 and compatibility-export slices are accepted via ADR-004 through ADR-009, optional UI/test cleanup is deferred, and 2026-06-04 follow-up deepening candidates are recorded.
 - `P0_CHANNEL_NEUTRAL_CONVERSATION_FOUNDATION_RU.md` - implementation handoff for channel-neutral widget/Telegram conversation foundation before Telegram adapter and production.

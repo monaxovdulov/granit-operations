@@ -4,11 +4,10 @@ import { createOperationsDb } from "@granit/db";
 
 import { buildApi } from "./app.js";
 import { loadConfig } from "./config.js";
-import { OpenAiWidgetAssistantProvider } from "./modules/ai/adapters/openai-widget-assistant-provider.js";
-import { OpenAiWidgetSemanticVerifier } from "./modules/ai/adapters/openai-widget-semantic-verifier.js";
-import { FileCatalogKnowledgeProvider } from "./modules/ai/catalog/file-catalog-knowledge-provider.js";
+import { PostgresAiRunRepository } from "./modules/ai/repositories/postgres-ai-run-repository.js";
 import { PostgresManagerAuthRepository } from "./modules/auth/repositories/postgres-manager-auth-repository.js";
 import { PostgresIntakeRepository } from "./modules/conversations/repositories/postgres-intake-repository.js";
+import { buildConfiguredWidgetAiAssembly } from "./widget-ai-runtime-assembly.js";
 
 setDefaultResultOrder("ipv4first");
 
@@ -17,37 +16,21 @@ const { db } = createOperationsDb(config.databaseUrl, {
   searchPath: process.env.DATABASE_SEARCH_PATH
 });
 const repository = new PostgresIntakeRepository(db);
+const aiRunRepository = new PostgresAiRunRepository(db);
 const managerAuthRepository = new PostgresManagerAuthRepository(db);
-const catalogKnowledge = new FileCatalogKnowledgeProvider();
-const widgetAiProvider = config.widgetAi.openAiApiKey
-  ? new OpenAiWidgetAssistantProvider({
-      apiKey: config.widgetAi.openAiApiKey,
-      model: config.widgetAi.openAiModel,
-      timeoutMs: config.widgetAi.generatorTimeoutMs
-    })
-  : undefined;
-const widgetAiVerifier = config.widgetAi.openAiApiKey
-  ? new OpenAiWidgetSemanticVerifier({
-      apiKey: config.widgetAi.openAiApiKey,
-      model: config.widgetAi.verifierModel,
-      timeoutMs: config.widgetAi.verifierTimeoutMs
-    })
-  : undefined;
+const widgetAi = await buildConfiguredWidgetAiAssembly({
+  config,
+  runRepository: aiRunRepository,
+  onSanitizedFailure(category) {
+    process.stderr.write(
+      `${JSON.stringify({ event: "widget_ai_runtime_failure", category })}\n`
+    );
+  }
+});
 const app = buildApi({
   repository,
   logger: true,
-  widgetAi: {
-    enabled: config.widgetAi.enabled,
-    groundedMode: config.widgetAi.groundedMode,
-    provider: widgetAiProvider,
-    groundedProvider: widgetAiProvider,
-    verifier: widgetAiVerifier,
-    catalog: catalogKnowledge,
-    modelName: config.widgetAi.openAiModel,
-    verifierModelName: config.widgetAi.verifierModel,
-    deadlineMs: config.widgetAi.deadlineMs,
-    jobWorker: config.widgetAi.jobWorker
-  },
+  widgetAi,
   publicIntakeCors: config.publicIntakeCors,
   telegramBot: config.telegramBot,
   managerAuth: config.managerAuth

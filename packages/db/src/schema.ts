@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   index,
   integer,
   jsonb,
@@ -438,21 +439,42 @@ export const aiRuns = pgTable(
   "ai_runs",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    conversationId: uuid("conversation_id")
-      .notNull()
-      .references(() => conversations.id, { onDelete: "cascade" }),
+    traceId: uuid("trace_id").notNull().defaultRandom(),
     leadId: uuid("lead_id")
       .notNull()
       .references(() => leads.id, { onDelete: "cascade" }),
-    inboundPublicMessageId: uuid("inbound_public_message_id").notNull(),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    inboundMessageId: uuid("inbound_message_id").references(() => conversationMessages.id, {
+      onDelete: "no action"
+    }),
+    inboundPublicMessageId: uuid("inbound_public_message_id"),
+    outboundMessageId: uuid("outbound_message_id").references(() => conversationMessages.id, {
+      onDelete: "no action"
+    }),
     outboundPublicMessageId: uuid("outbound_public_message_id"),
-    status: text("status").notNull(),
+    channel: text("channel").notNull().default("site_widget"),
+    runtimeMode: text("runtime_mode").notNull().default("direct_openai"),
+    runtimeRunId: text("runtime_run_id"),
+    decisionProfile: text("decision_profile").notNull().default("legacy_s05"),
+    decisionAction: text("decision_action"),
     action: text("action"),
     intent: text("intent"),
+    idempotencyKey: text("idempotency_key"),
     inputFingerprint: text("input_fingerprint").notNull(),
-    promptVersion: text("prompt_version"),
+    status: text("status").notNull().default("running"),
+    reason: text("reason"),
     policyVersion: text("policy_version"),
+    promptVersion: text("prompt_version"),
+    toolVersion: text("tool_version").notNull().default("legacy"),
     knowledgeVersion: text("knowledge_version"),
+    assetVersion: text("asset_version"),
+    toneVersion: text("tone_version"),
+    factsVersion: text("facts_version"),
+    disclosureVersion: text("disclosure_version").notNull().default("legacy"),
+    configuredModelProvider: text("configured_model_provider").notNull().default("openai"),
+    configuredModelName: text("configured_model_name").notNull().default("legacy"),
     modelName: text("model_name"),
     generatorModelName: text("generator_model_name"),
     verifierModelName: text("verifier_model_name"),
@@ -460,36 +482,331 @@ export const aiRuns = pgTable(
     verifierVerdict: text("verifier_verdict"),
     catalogVersion: text("catalog_version"),
     catalogContentHash: text("catalog_content_hash"),
-    reason: text("reason"),
+    observedModelProvider: text("observed_model_provider"),
+    observedModelName: text("observed_model_name"),
+    reasoningEffort: text("reasoning_effort").notNull().default("none"),
+    modelProfileVersion: text("model_profile_version").notNull().default("legacy_s05"),
+    runtimeVersion: text("runtime_version"),
+    inputTokens: integer("input_tokens"),
+    outputTokens: integer("output_tokens"),
+    totalTokens: integer("total_tokens"),
+    costEstimateMicrounits: integer("cost_estimate_microunits"),
+    costRateVersion: text("cost_rate_version"),
+    sendGateResult: text("send_gate_result").notNull().default("not_checked"),
+    sendGateCheckedAt: timestamp("send_gate_checked_at", { withTimezone: true }),
+    outcomeReason: text("outcome_reason"),
+    failureCode: text("failure_code"),
+    profileValidatorResult: text("profile_validator_result").notNull().default("not_run"),
     metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
-  },
-  (table) => ({
-    inboundIdx: uniqueIndex("ai_runs_inbound_public_message_id_idx").on(
-      table.inboundPublicMessageId
-    ),
-    conversationCreatedIdx: index("ai_runs_conversation_created_idx").on(
-      table.conversationId,
-      table.createdAt
-    )
-  })
-);
-
-export const aiEvalCases = pgTable(
-  "ai_eval_cases",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    caseKey: text("case_key").notNull(),
-    version: text("version").notNull(),
-    category: text("category").notNull(),
-    input: jsonb("input").$type<Record<string, unknown>>().notNull(),
-    expectations: jsonb("expectations").$type<Record<string, unknown>>().notNull(),
-    active: boolean("active").notNull().default(true),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    latencyMs: integer("latency_ms"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
   },
   (table) => ({
-    keyVersionIdx: uniqueIndex("ai_eval_cases_key_version_idx").on(table.caseKey, table.version)
+    traceIdIdx: uniqueIndex("ai_runs_trace_id_idx").on(table.traceId),
+    idempotencyKeyIdx: uniqueIndex("ai_runs_idempotency_key_idx").on(table.idempotencyKey),
+    outboundMessageIdIdx: uniqueIndex("ai_runs_outbound_message_id_idx")
+      .on(table.outboundMessageId)
+      .where(sql`${table.outboundMessageId} IS NOT NULL`),
+    conversationStartedIdx: index("ai_runs_conversation_started_idx").on(
+      table.conversationId,
+      table.startedAt.desc()
+    ),
+    inboundMessageIdIdx: index("ai_runs_inbound_message_id_idx").on(table.inboundMessageId),
+    statusStartedIdx: index("ai_runs_status_started_idx").on(
+      table.status,
+      table.startedAt.desc()
+    ),
+    inputFingerprintIdx: index("ai_runs_input_fingerprint_idx").on(table.inputFingerprint),
+    channelCheck: check("ai_runs_channel_check", sql`${table.channel} IN ('site_widget')`),
+    runtimeModeCheck: check(
+      "ai_runs_runtime_mode_check",
+      sql`${table.runtimeMode} IN ('direct_openai', 'mastra_openai_api')`
+    ),
+    runtimeRunIdCheck: check(
+      "ai_runs_runtime_run_id_check",
+      sql`${table.runtimeRunId} IS NULL OR (char_length(${table.runtimeRunId}) BETWEEN 1 AND 200 AND ${table.runtimeRunId} ~ '^[A-Za-z0-9._:/@+-]+$')`
+    ),
+    runtimeLinkageCheck: check(
+      "ai_runs_runtime_linkage_check",
+      sql`${table.runtimeMode} = 'mastra_openai_api' OR ${table.runtimeRunId} IS NULL`
+    ),
+    decisionProfileCheck: check(
+      "ai_runs_decision_profile_check",
+      sql`${table.decisionProfile} IN ('legacy_s05', 'live_v2')`
+    ),
+    runtimeProfileCheck: check(
+      "ai_runs_runtime_profile_check",
+      sql`(${table.runtimeMode} = 'direct_openai' AND ${table.decisionProfile} = 'legacy_s05')
+        OR (${table.runtimeMode} = 'mastra_openai_api' AND ${table.decisionProfile} = 'live_v2')`
+    ),
+    decisionActionCheck: check(
+      "ai_runs_decision_action_check",
+      sql`${table.decisionAction} IS NULL OR ${table.decisionAction} IN ('answer', 'ask_clarifying_question', 'handoff_to_manager', 'no_reply')`
+    ),
+    idempotencyKeyCheck: check(
+      "ai_runs_idempotency_key_check",
+      sql`char_length(${table.idempotencyKey}) BETWEEN 1 AND 200 AND ${table.idempotencyKey} ~ '^[A-Za-z0-9._:/@+-]+$'`
+    ),
+    inputFingerprintCheck: check(
+      "ai_runs_input_fingerprint_check",
+      sql`char_length(${table.inputFingerprint}) = 64 AND ${table.inputFingerprint} ~ '^[a-f0-9]{64}$'`
+    ),
+    statusCheck: check(
+      "ai_runs_status_check",
+      sql`${table.status} IN ('running', 'persisted', 'handed_off', 'blocked', 'fallback_unavailable', 'failed')`
+    ),
+    versionFieldsCheck: check(
+      "ai_runs_version_fields_check",
+      sql`char_length(${table.policyVersion}) BETWEEN 1 AND 160
+        AND ${table.policyVersion} ~ '^[A-Za-z0-9._:/@+-]+$'
+        AND char_length(${table.promptVersion}) BETWEEN 1 AND 160
+        AND ${table.promptVersion} ~ '^[A-Za-z0-9._:/@+-]+$'
+        AND char_length(${table.toolVersion}) BETWEEN 1 AND 160
+        AND ${table.toolVersion} ~ '^[A-Za-z0-9._:/@+-]+$'
+        AND (${table.assetVersion} IS NULL OR (char_length(${table.assetVersion}) BETWEEN 1 AND 160 AND ${table.assetVersion} ~ '^[A-Za-z0-9._:/@+-]+$'))
+        AND (${table.toneVersion} IS NULL OR (char_length(${table.toneVersion}) BETWEEN 1 AND 160 AND ${table.toneVersion} ~ '^[A-Za-z0-9._:/@+-]+$'))
+        AND (${table.factsVersion} IS NULL OR (char_length(${table.factsVersion}) BETWEEN 1 AND 160 AND ${table.factsVersion} ~ '^[A-Za-z0-9._:/@+-]+$'))
+        AND char_length(${table.disclosureVersion}) BETWEEN 1 AND 160
+        AND ${table.disclosureVersion} ~ '^[A-Za-z0-9._:/@+-]+$'
+        AND char_length(${table.modelProfileVersion}) BETWEEN 1 AND 160
+        AND ${table.modelProfileVersion} ~ '^[A-Za-z0-9._:/@+-]+$'
+        AND (${table.runtimeVersion} IS NULL OR (char_length(${table.runtimeVersion}) BETWEEN 1 AND 160 AND ${table.runtimeVersion} ~ '^[A-Za-z0-9._:/@+-]+$'))`
+    ),
+    configuredModelProviderCheck: check(
+      "ai_runs_configured_model_provider_check",
+      sql`${table.configuredModelProvider} IN ('none', 'openai', 'fake')`
+    ),
+    observedModelProviderCheck: check(
+      "ai_runs_observed_model_provider_check",
+      sql`${table.observedModelProvider} IS NULL OR ${table.observedModelProvider} IN ('none', 'openai', 'policy', 'fake')`
+    ),
+    modelNamesCheck: check(
+      "ai_runs_model_names_check",
+      sql`char_length(${table.configuredModelName}) BETWEEN 1 AND 120
+        AND ${table.configuredModelName} ~ '^[A-Za-z0-9._:/@+-]+$'
+        AND (${table.observedModelName} IS NULL OR (char_length(${table.observedModelName}) BETWEEN 1 AND 120 AND ${table.observedModelName} ~ '^[A-Za-z0-9._:/@+-]+$'))`
+    ),
+    modelObservationStateCheck: check(
+      "ai_runs_model_observation_state_check",
+      sql`(${table.status} = 'running'
+          AND ${table.observedModelProvider} IS NULL
+          AND ${table.observedModelName} IS NULL)
+        OR (${table.status} <> 'running'
+          AND ${table.observedModelProvider} IS NOT NULL
+          AND ((${table.observedModelProvider} = 'none' AND ${table.observedModelName} IS NULL)
+            OR (${table.observedModelProvider} <> 'none' AND ${table.observedModelName} IS NOT NULL)))`
+    ),
+    reasoningEffortCheck: check(
+      "ai_runs_reasoning_effort_check",
+      sql`${table.reasoningEffort} IN ('none', 'low', 'medium', 'high')`
+    ),
+    tokenCountsCheck: check(
+      "ai_runs_token_counts_check",
+      sql`(${table.inputTokens} IS NULL OR ${table.inputTokens} >= 0)
+        AND (${table.outputTokens} IS NULL OR ${table.outputTokens} >= 0)
+        AND (${table.totalTokens} IS NULL OR ${table.totalTokens} >= 0)`
+    ),
+    costEstimateCheck: check(
+      "ai_runs_cost_estimate_check",
+      sql`(${table.costEstimateMicrounits} IS NULL AND ${table.costRateVersion} IS NULL)
+        OR (${table.costEstimateMicrounits} IS NOT NULL
+          AND ${table.costRateVersion} IS NOT NULL
+          AND ${table.costEstimateMicrounits} >= 0
+          AND char_length(${table.costRateVersion}) BETWEEN 1 AND 160
+          AND ${table.costRateVersion} ~ '^[A-Za-z0-9._:/@+-]+$')`
+    ),
+    sendGateResultCheck: check(
+      "ai_runs_send_gate_result_check",
+      sql`${table.sendGateResult} IN ('not_checked', 'allowed', 'blocked')`
+    ),
+    sendGateTimestampCheck: check(
+      "ai_runs_send_gate_timestamp_check",
+      sql`(${table.sendGateResult} = 'not_checked' AND ${table.sendGateCheckedAt} IS NULL)
+        OR (${table.sendGateResult} <> 'not_checked' AND ${table.sendGateCheckedAt} IS NOT NULL)`
+    ),
+    outcomeReasonCheck: check(
+      "ai_runs_outcome_reason_check",
+      sql`${table.outcomeReason} IS NULL OR ${table.outcomeReason} IN (
+        'reply_persisted',
+        'handoff_to_manager',
+        'missing_provider_config',
+        'model_error',
+        'empty_model_response',
+        'unsafe_model_response',
+        'agent_reply_blocked',
+        'ai_persistence_unconfirmed',
+        'execution_context_mismatch',
+        'generator_failed',
+        'candidate_invalid',
+        'no_safe_answer',
+        'missing_approved_fact',
+        'gate_closed',
+        'recorder_failure'
+      )`
+    ),
+    failureCodeCheck: check(
+      "ai_runs_failure_code_check",
+      sql`${table.failureCode} IS NULL OR ${table.failureCode} IN (
+        'provider_unavailable',
+        'model_failure',
+        'policy_violation',
+        'send_gate_blocked',
+        'persistence_failure',
+        'runtime_failure',
+        'recorder_failure',
+        'invalid_candidate',
+        'execution_context_mismatch'
+      )`
+    ),
+    profileValidatorResultCheck: check(
+      "ai_runs_profile_validator_result_check",
+      sql`${table.profileValidatorResult} IN ('not_run', 'passed', 'rejected', 'failed')`
+    ),
+    timingCheck: check(
+      "ai_runs_timing_check",
+      sql`(${table.status} = 'running' AND ${table.completedAt} IS NULL AND ${table.latencyMs} IS NULL)
+        OR (${table.status} <> 'running'
+          AND ${table.completedAt} IS NOT NULL
+          AND ${table.completedAt} >= ${table.startedAt}
+          AND ${table.latencyMs} IS NOT NULL
+          AND ${table.latencyMs} >= 0)`
+    ),
+    outboundLinkageCheck: check(
+      "ai_runs_outbound_linkage_check",
+      sql`(${table.status} IN ('persisted', 'handed_off')
+          AND ${table.outboundMessageId} IS NOT NULL
+          AND ${table.sendGateResult} = 'allowed')
+        OR (${table.status} NOT IN ('persisted', 'handed_off') AND ${table.outboundMessageId} IS NULL)`
+    ),
+    terminalEvidenceCheck: check(
+      "ai_runs_terminal_evidence_check",
+      sql`(${table.status} = 'running'
+          AND ${table.decisionAction} IS NULL
+          AND ${table.outcomeReason} IS NULL
+          AND ${table.failureCode} IS NULL
+          AND ${table.sendGateResult} = 'not_checked')
+        OR (${table.status} IN ('persisted', 'handed_off')
+          AND ${table.decisionAction} IS NOT NULL
+          AND ${table.outcomeReason} IS NOT NULL
+          AND ${table.failureCode} IS NULL)
+        OR (${table.status} = 'fallback_unavailable'
+          AND ${table.decisionAction} = 'no_reply'
+          AND ${table.outcomeReason} IN ('no_safe_answer', 'missing_approved_fact')
+          AND ${table.failureCode} IS NULL)
+        OR (${table.status} IN ('blocked', 'fallback_unavailable', 'failed')
+          AND ${table.decisionAction} IS NOT NULL
+          AND ${table.outcomeReason} IS NOT NULL
+          AND ${table.outcomeReason} NOT IN ('no_safe_answer', 'missing_approved_fact')
+          AND ${table.failureCode} IS NOT NULL)`
+    ),
+    sendGateStateCheck: check(
+      "ai_runs_send_gate_state_check",
+      sql`(${table.sendGateResult} = 'allowed' AND ${table.status} IN ('persisted', 'handed_off'))
+        OR (${table.sendGateResult} = 'blocked' AND ${table.status} = 'blocked')
+        OR ${table.sendGateResult} = 'not_checked'`
+    ),
+    terminalActionCheck: check(
+      "ai_runs_terminal_action_check",
+      sql`${table.status} = 'running'
+        OR (${table.status} = 'persisted'
+          AND ${table.decisionAction} IS NOT NULL
+          AND ${table.decisionAction} IN ('answer', 'ask_clarifying_question'))
+        OR (${table.status} = 'handed_off'
+          AND ${table.decisionAction} IS NOT NULL
+          AND ${table.decisionAction} = 'handoff_to_manager')
+        OR (${table.status} = 'fallback_unavailable'
+          AND ${table.decisionAction} IS NOT NULL
+          AND ${table.decisionAction} = 'no_reply')
+        OR ${table.status} IN ('blocked', 'failed')`
+    )
+  })
+);
+
+export const aiRunSpans = pgTable(
+  "ai_run_spans",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    aiRunId: uuid("ai_run_id")
+      .notNull()
+      .references(() => aiRuns.id, { onDelete: "cascade" }),
+    spanId: text("span_id").notNull(),
+    parentSpanId: text("parent_span_id"),
+    kind: text("kind").notNull(),
+    name: text("name").notNull(),
+    toolVersion: text("tool_version"),
+    status: text("status").notNull(),
+    latencyMs: integer("latency_ms"),
+    errorCode: text("error_code"),
+    usedInFinalAnswer: boolean("used_in_final_answer"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true })
+      .notNull()
+      .default(sql`now() + interval '30 days'`)
+  },
+  (table) => ({
+    runSpanIdIdx: uniqueIndex("ai_run_spans_run_span_id_idx").on(table.aiRunId, table.spanId),
+    runCreatedIdx: index("ai_run_spans_run_created_idx").on(table.aiRunId, table.createdAt),
+    expiresAtIdx: index("ai_run_spans_expires_at_idx").on(table.expiresAt),
+    spanIdCheck: check(
+      "ai_run_spans_span_id_check",
+      sql`char_length(${table.spanId}) BETWEEN 1 AND 160
+        AND ${table.spanId} ~ '^[A-Za-z0-9._:/@+-]+$'
+        AND (${table.parentSpanId} IS NULL
+          OR (char_length(${table.parentSpanId}) BETWEEN 1 AND 160
+            AND ${table.parentSpanId} ~ '^[A-Za-z0-9._:/@+-]+$'))`
+    ),
+    kindCheck: check(
+      "ai_run_spans_kind_check",
+      sql`${table.kind} IN ('runtime', 'model', 'tool', 'validation', 'send_gate')`
+    ),
+    nameCheck: check(
+      "ai_run_spans_name_check",
+      sql`${table.name} IN (
+        'turn_execution',
+        'decision_generation',
+        'candidate_validation',
+        'reply_persistence',
+        'send_gate_check',
+        'runtime_execution',
+        'model_generation',
+        'tool_execution'
+      )`
+    ),
+    toolVersionCheck: check(
+      "ai_run_spans_tool_version_check",
+      sql`${table.toolVersion} IS NULL OR char_length(${table.toolVersion}) BETWEEN 1 AND 160`
+    ),
+    statusCheck: check(
+      "ai_run_spans_status_check",
+      sql`${table.status} IN ('running', 'succeeded', 'failed', 'blocked', 'skipped')`
+    ),
+    latencyCheck: check(
+      "ai_run_spans_latency_check",
+      sql`(${table.status} = 'running' AND ${table.latencyMs} IS NULL)
+        OR (${table.status} <> 'running' AND ${table.latencyMs} IS NOT NULL AND ${table.latencyMs} >= 0)`
+    ),
+    errorCodeCheck: check(
+      "ai_run_spans_error_code_check",
+      sql`${table.errorCode} IS NULL OR ${table.errorCode} IN (
+        'provider_unavailable',
+        'model_error',
+        'empty_model_response',
+        'unsafe_model_response',
+        'validation_failed',
+        'send_gate_blocked',
+        'persistence_failed',
+        'tool_failed',
+        'runtime_failed',
+        'recorder_failed'
+      )`
+    ),
+    expiryCheck: check(
+      "ai_run_spans_expiry_check",
+      sql`${table.expiresAt} > ${table.createdAt}`
+    )
   })
 );
 
@@ -691,15 +1008,59 @@ export const aiQualityEvents = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
   },
   (table) => ({
-    leadOpenCreatedIdx: index("ai_quality_events_lead_open_created_idx").on(
-      table.leadId,
-      table.managerVisible,
-      table.resolutionStatus,
-      table.createdAt
-    ),
+    runCreatedIdx: index("ai_quality_events_run_created_idx").on(table.aiRunId, table.createdAt),
     conversationCreatedIdx: index("ai_quality_events_conversation_created_idx").on(
       table.conversationId,
-      table.createdAt
+      table.createdAt.desc()
+    ),
+    managerOpenIdx: index("ai_quality_events_manager_open_idx")
+      .on(table.managerVisible, table.resolutionStatus, table.createdAt.desc())
+      .where(sql`${table.managerVisible} = true AND ${table.resolutionStatus} = 'open'`),
+    leadCreatedIdx: index("ai_quality_events_lead_created_idx").on(
+      table.leadId,
+      table.createdAt.desc()
+    ),
+    eventTypeCheck: check(
+      "ai_quality_events_event_type_check",
+      sql`${table.eventType} IN ('handoff', 'degradation', 'blocked', 'policy_violation', 'model_failure', 'tool_failure', 'runtime_failure')`
+    ),
+    reasonCodeCheck: check(
+      "ai_quality_events_reason_code_check",
+      sql`${table.reasonCode} IN (
+        'handoff_to_manager',
+        'missing_openai_config',
+        'model_error',
+        'empty_model_response',
+        'unsafe_model_response',
+        'agent_reply_blocked',
+        'ai_persistence_unconfirmed',
+        'execution_context_mismatch',
+        'candidate_invalid',
+        'no_safe_answer',
+        'missing_approved_fact',
+        'gate_closed',
+        'send_gate_blocked',
+        'tool_failed',
+        'runtime_failed',
+        'recorder_failed'
+      )`
+    ),
+    severityCheck: check(
+      "ai_quality_events_severity_check",
+      sql`${table.severity} IN ('info', 'warning', 'error', 'critical')`
+    ),
+    resolutionStatusCheck: check(
+      "ai_quality_events_resolution_status_check",
+      sql`${table.resolutionStatus} IN ('open', 'resolved')`
+    ),
+    resolutionCodeCheck: check(
+      "ai_quality_events_resolution_code_check",
+      sql`${table.resolutionCode} IS NULL OR ${table.resolutionCode} IN ('manager_acknowledged', 'recovered', 'superseded', 'false_positive')`
+    ),
+    resolutionCheck: check(
+      "ai_quality_events_resolution_check",
+      sql`(${table.resolutionStatus} = 'open' AND ${table.resolutionCode} IS NULL AND ${table.resolvedAt} IS NULL)
+        OR (${table.resolutionStatus} = 'resolved' AND ${table.resolutionCode} IS NOT NULL AND ${table.resolvedAt} IS NOT NULL)`
     )
   })
 );

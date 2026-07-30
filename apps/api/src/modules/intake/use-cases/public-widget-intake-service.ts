@@ -49,6 +49,11 @@ import {
   type PublicWidgetAiReplyGenerator,
   type PublicWidgetAiUnavailableReason
 } from "../ports/public-widget-ai-reply-generator.js";
+import type { PublicWidgetAiTurnExecutor } from "../ports/public-widget-ai-turn-executor.js";
+import type {
+  PublicWidgetManagerReviewReason,
+  PublicWidgetManagerReviewRepository
+} from "../ports/public-widget-manager-review-repository.js";
 
 export type PublicWidgetIntakeServiceResult = {
   statusCode: number;
@@ -107,9 +112,12 @@ export type ProcessedSiteWidgetAiJobResult = {
 };
 
 export type PublicWidgetIntakeServiceOptions = {
+  managerReviewRepository?: PublicWidgetManagerReviewRepository;
   ai?: {
     enabled: boolean;
     replyGenerator?: PublicWidgetAiReplyGenerator;
+    turnExecutor?: PublicWidgetAiTurnExecutor;
+    requiresRecordedExecutor?: boolean;
     jobMaxAttempts?: number;
   };
 };
@@ -243,7 +251,9 @@ export class PublicWidgetIntakeService {
     const requestFingerprint = sha256Hex(stableStringify(parsed.data));
     const publicSessionId = parsed.data.public_session_id ?? randomUUID();
     const aiReplyGenerator = this.options.ai?.replyGenerator;
-    const aiCanRun = this.options.ai?.enabled === true && Boolean(aiReplyGenerator);
+    const aiTurnExecutor = this.options.ai?.turnExecutor;
+    const aiCanRun =
+      this.options.ai?.enabled === true && Boolean(aiReplyGenerator ?? aiTurnExecutor);
 
     try {
       const saved = await this.repository.saveAcceptedSiteWidgetMessage({
@@ -270,6 +280,7 @@ export class PublicWidgetIntakeService {
     saved: SaveAcceptedSiteWidgetMessageResult
   ): Promise<PublicWidgetIntakeServiceResult> {
       const aiReplyGenerator = this.options.ai?.replyGenerator;
+      const aiTurnExecutor = this.options.ai?.turnExecutor;
 
       if (saved.aiReply) {
         return aiReplySuccess(
@@ -288,7 +299,15 @@ export class PublicWidgetIntakeService {
         return disabledSuccess(saved.replayed, saved.publicSessionId, saved.publicMessageId);
       }
 
-      if (!aiReplyGenerator) {
+      if (!aiTurnExecutor && !aiReplyGenerator) {
+        if (this.options.ai?.requiresRecordedExecutor && this.options.managerReviewRepository) {
+          return this.transitionToManagerReviewOr503(
+            saved,
+            "ai_executor_unavailable",
+            "missing_openai_config"
+          );
+        }
+
         await recordDegradationIfPossible(this.repository, saved, "missing_openai_config");
         return fallbackSuccess(
           saved.replayed,
@@ -298,7 +317,15 @@ export class PublicWidgetIntakeService {
         );
       }
 
-      if (!saved.agentAllowedToReply) {
+      if (!aiTurnExecutor && this.options.ai?.requiresRecordedExecutor) {
+        return this.transitionToManagerReviewOr503(
+          saved,
+          "ai_executor_unavailable",
+          "ai_persistence_unconfirmed"
+        );
+      }
+
+      if (!saved.agentAllowedToReply && !aiTurnExecutor) {
         return fallbackSuccess(
           saved.replayed,
           saved.publicSessionId,
@@ -310,6 +337,13 @@ export class PublicWidgetIntakeService {
       const aiTurnInput = saved.aiTurnInput;
 
       if (!isReplyCapableSiteWidgetTurn(aiTurnInput)) {
+        if (aiTurnExecutor) {
+          return this.transitionToManagerReviewOr503(
+            saved,
+            "ai_execution_context_invalid",
+            "ai_persistence_unconfirmed"
+          );
+        }
         return fallbackSuccess(
           saved.replayed,
           saved.publicSessionId,
@@ -318,7 +352,7 @@ export class PublicWidgetIntakeService {
         );
       }
 
-      if (!aiTurnInput.conversation.agentAllowedToReply) {
+      if (!aiTurnInput.conversation.agentAllowedToReply && !aiTurnExecutor) {
         return fallbackSuccess(
           saved.replayed,
           saved.publicSessionId,
@@ -335,6 +369,54 @@ export class PublicWidgetIntakeService {
           inputFingerprint: aiInputFingerprint
         }
       };
+
+      if (aiTurnExecutor) {
+        const executionContext = saved.aiTurnExecutionContext;
+
+        if (!executionContext) {
+          return this.transitionToManagerReviewOr503(
+            saved,
+            "ai_execution_context_invalid",
+            "ai_persistence_unconfirmed"
+          );
+        }
+
+        try {
+          const recordedResult = await aiTurnExecutor.execute({
+            executionContext: {
+              ...executionContext,
+              turn: {
+                ...executionContext.turn,
+                inputFingerprint: aiInputFingerprint
+              }
+            },
+            turnInput: aiTurnInputWithFingerprint,
+            outbound: {
+              publicSessionId: saved.publicSessionId,
+              inboundPublicMessageId: saved.publicMessageId,
+              sourcePageUrl: aiTurnInputWithFingerprint.page.url,
+              aiInputFingerprint
+            }
+          });
+
+          return this.toRecordedTurnResponse(saved, recordedResult);
+        } catch {
+          return this.transitionToManagerReviewOr503(
+            saved,
+            "ai_execution_failed",
+            "ai_persistence_unconfirmed"
+          );
+        }
+      }
+
+      if (!aiReplyGenerator) {
+        return this.transitionToManagerReviewOr503(
+          saved,
+          "ai_executor_unavailable",
+          "ai_persistence_unconfirmed"
+        );
+      }
+
       const aiReply = validateAiReplyCandidate(
         await aiReplyGenerator.generateReply(aiTurnInputWithFingerprint),
         aiTurnInputWithFingerprint
@@ -484,6 +566,123 @@ export class PublicWidgetIntakeService {
       }
   }
 
+  private async toRecordedTurnResponse(
+    saved: SaveAcceptedSiteWidgetMessageResult,
+    recordedResult: Awaited<ReturnType<PublicWidgetAiTurnExecutor["execute"]>>
+  ): Promise<PublicWidgetIntakeServiceResult> {
+    if (recordedResult.kind === "running_replay") {
+      return this.transitionToManagerReviewOr503(
+        saved,
+        "ai_run_in_progress",
+        "ai_persistence_unconfirmed",
+        503
+      );
+    }
+
+    if (recordedResult.kind === "terminal_replay") {
+      const reason = publicFallbackReasonForRecordedRun(recordedResult.run);
+      const reviewReason = managerReviewReasonForRecordedRun(recordedResult.run);
+
+      if (reviewReason) {
+        const transition = await this.transitionToManagerReview(saved, reviewReason);
+        if (!transition) {
+          return persistenceUnavailable(SITE_WIDGET_CONTRACT_VERSION);
+        }
+      }
+
+      return recordedFallbackSuccess(
+        true,
+        saved.publicSessionId,
+        saved.publicMessageId,
+        reason
+      );
+    }
+
+    const outcome = recordedResult.outcome;
+
+    if (outcome.result.status === "persisted" && outcome.persistedReply) {
+      return aiReplySuccess(
+        saved.replayed,
+        saved.publicSessionId,
+        saved.publicMessageId,
+        outcome.persistedReply.publicMessageId,
+        outcome.persistedReply.body,
+        "ai_active"
+      );
+    }
+
+    if (outcome.result.status === "handed_off" && outcome.persistedReply) {
+      return aiReplySuccess(
+        saved.replayed,
+        saved.publicSessionId,
+        saved.publicMessageId,
+        outcome.persistedReply.publicMessageId,
+        outcome.persistedReply.body,
+        "manager_pending"
+      );
+    }
+
+    const reason = publicFallbackReasonForRecordedRun(recordedResult.run);
+    const reviewReason = managerReviewReasonForRecordedRun(recordedResult.run);
+
+    if (reviewReason) {
+      const transition = await this.transitionToManagerReview(saved, reviewReason);
+      if (!transition) {
+        return persistenceUnavailable(SITE_WIDGET_CONTRACT_VERSION);
+      }
+    }
+
+    return recordedFallbackSuccess(
+      saved.replayed,
+      saved.publicSessionId,
+      saved.publicMessageId,
+      reason
+    );
+  }
+
+  private async transitionToManagerReviewOr503(
+    saved: SaveAcceptedSiteWidgetMessageResult,
+    reviewReason: PublicWidgetManagerReviewReason,
+    publicReason: PublicWidgetFallbackReason,
+    statusCode: 202 | 503 = 202
+  ): Promise<PublicWidgetIntakeServiceResult> {
+    const transition = await this.transitionToManagerReview(saved, reviewReason);
+
+    if (!transition || statusCode === 503) {
+      return persistenceUnavailable(SITE_WIDGET_CONTRACT_VERSION);
+    }
+
+    return recordedFallbackSuccess(
+      saved.replayed,
+      saved.publicSessionId,
+      saved.publicMessageId,
+      publicReason
+    );
+  }
+
+  private async transitionToManagerReview(
+    saved: SaveAcceptedSiteWidgetMessageResult,
+    reason: PublicWidgetManagerReviewReason
+  ): Promise<boolean> {
+    if (!this.options.managerReviewRepository || !saved.inboundMessageId) {
+      return true;
+    }
+
+    try {
+      await this.options.managerReviewRepository.transitionSiteWidgetConversationToManagerReview({
+        leadId: saved.leadId,
+        conversationId: saved.conversationId,
+        publicConversationId: saved.publicConversationId,
+        inboundMessageId: saved.inboundMessageId,
+        inboundPublicMessageId: saved.publicMessageId,
+        reason
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async processClaimedSiteWidgetAiJob(
     job: ClaimedSiteWidgetAiJob
   ): Promise<ProcessedSiteWidgetAiJobResult> {
@@ -631,6 +830,14 @@ function persistenceFailure(
     );
   }
 
+  return persistenceUnavailable(schemaVersion);
+}
+
+function persistenceUnavailable(
+  schemaVersion:
+    | typeof SITE_WIDGET_CONTRACT_VERSION
+    | typeof SITE_WIDGET_V2_CONTRACT_VERSION
+): PublicWidgetIntakeServiceResult {
   return {
     statusCode: 503,
     body: {
@@ -644,6 +851,83 @@ function persistenceFailure(
       }
     }
   };
+}
+
+function publicFallbackReasonForRecordedRun(run: {
+  status: string;
+  outcomeReason?: string;
+  failureCode?: string;
+}): PublicWidgetFallbackReason {
+  if (
+    run.outcomeReason === "agent_reply_blocked" ||
+    run.outcomeReason === "gate_closed" ||
+    run.failureCode === "send_gate_blocked"
+  ) {
+    return "agent_reply_blocked";
+  }
+
+  if (
+    run.outcomeReason === "ai_persistence_unconfirmed" ||
+    run.outcomeReason === "recorder_failure" ||
+    run.failureCode === "persistence_failure" ||
+    run.failureCode === "recorder_failure"
+  ) {
+    return "ai_persistence_unconfirmed";
+  }
+
+  if (run.outcomeReason === "missing_provider_config") {
+    return "missing_openai_config";
+  }
+
+  if (
+    run.outcomeReason === "generator_failed" ||
+    run.failureCode === "runtime_failure"
+  ) {
+    return "model_error";
+  }
+
+  if (isPublicWidgetAiUnavailableReason(run.outcomeReason)) {
+    return run.outcomeReason;
+  }
+
+  return "unsafe_model_response";
+}
+
+function managerReviewReasonForRecordedRun(run: {
+  status: string;
+  outcomeReason?: string;
+  failureCode?: string;
+}): PublicWidgetManagerReviewReason | undefined {
+  if (
+    run.outcomeReason === "agent_reply_blocked" ||
+    run.outcomeReason === "gate_closed" ||
+    run.failureCode === "send_gate_blocked"
+  ) {
+    return undefined;
+  }
+
+  if (
+    run.outcomeReason === "ai_persistence_unconfirmed" ||
+    run.failureCode === "persistence_failure"
+  ) {
+    return "ai_reply_persistence_unconfirmed";
+  }
+
+  if (
+    run.outcomeReason === "recorder_failure" ||
+    run.failureCode === "recorder_failure"
+  ) {
+    return "ai_execution_failed";
+  }
+
+  if (
+    run.outcomeReason === "execution_context_mismatch" ||
+    run.failureCode === "execution_context_mismatch"
+  ) {
+    return "ai_execution_context_invalid";
+  }
+
+  return "ai_no_reply";
 }
 
 function toProcessedSiteWidgetAiJobResult(
@@ -742,6 +1026,32 @@ function fallbackSuccess(
     };
   }
 
+  return {
+    statusCode: 202,
+    body: {
+      ok: true,
+      schema_version: SITE_WIDGET_CONTRACT_VERSION,
+      status: replayed ? "replayed" : "accepted",
+      public_session_id: publicSessionId,
+      public_message_id: publicMessageId,
+      action: "show_widget_saved",
+      automation: {
+        status: "fallback",
+        next_step: "manager_review",
+        reason
+      },
+      message_to_user:
+        "Сообщение принято. AI-ответ сейчас недоступен, менеджер увидит диалог в панели."
+    }
+  };
+}
+
+function recordedFallbackSuccess(
+  replayed: boolean,
+  publicSessionId: string,
+  publicMessageId: string,
+  reason: PublicWidgetFallbackReason
+): PublicWidgetIntakeServiceResult {
   return {
     statusCode: 202,
     body: {

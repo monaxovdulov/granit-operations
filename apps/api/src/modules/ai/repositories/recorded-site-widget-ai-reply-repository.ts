@@ -1,0 +1,61 @@
+import type {
+  RecordedAiPersistReplyInput,
+  RecordedAiPersistReplyResult,
+  RecordedAiReplyCompletionPlan
+} from "../ports/recorded-ai-turn.js";
+import type { AiTurnAiState } from "../ai-turn.js";
+import type { RunningAiRunRecord } from "./ai-run-repository.js";
+
+export type PersistRecordedSiteWidgetAiReplyInput = {
+  run: RunningAiRunRecord;
+  reply: RecordedAiPersistReplyInput;
+  completionPlan: RecordedAiReplyCompletionPlan;
+  publicMessageId: string;
+  inboundPublicMessageId: string;
+  idempotencyKey: string;
+  requestFingerprint: string;
+  sourcePageUrl: string;
+  metadata: Record<string, unknown>;
+};
+
+/**
+ * Capability implemented only by repositories that can commit the outbound message, send-gate
+ * result and reply-bearing AI run completion as one unit.
+ */
+export interface RecordedSiteWidgetAiReplyRepository {
+  persistRecordedSiteWidgetAiReply(
+    input: PersistRecordedSiteWidgetAiReplyInput
+  ): Promise<RecordedAiPersistReplyResult>;
+}
+
+export interface RecordedSiteWidgetAiGateRepository {
+  readRecordedSiteWidgetAiGate(input: {
+    leadId: string;
+    conversationId: string;
+  }): Promise<{
+    aiState: AiTurnAiState;
+    agentAllowedToReply: boolean;
+  }>;
+}
+
+export function isRecordedSiteWidgetAiReplyRepository(
+  value: unknown
+): value is RecordedSiteWidgetAiReplyRepository {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "persistRecordedSiteWidgetAiReply" in value &&
+    typeof value.persistRecordedSiteWidgetAiReply === "function"
+  );
+}
+
+export function isRecordedSiteWidgetAiGateRepository(
+  value: unknown
+): value is RecordedSiteWidgetAiGateRepository {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "readRecordedSiteWidgetAiGate" in value &&
+    typeof value.readRecordedSiteWidgetAiGate === "function"
+  );
+}

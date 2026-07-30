@@ -52,6 +52,14 @@ body {
   background: #f8faf9;
 }
 
+.globalAiControl {
+  min-width: 190px;
+  padding: 5px 10px;
+  border: 1px solid #dfe7e2;
+  border-radius: 6px;
+  background: #f8faf9;
+}
+
 .telegramBinding {
   max-width: 360px;
   min-width: 0;
@@ -235,6 +243,11 @@ body {
 
   .topbar {
     padding: 0 12px;
+  }
+
+  .globalAiControl {
+    min-width: auto;
+    padding: 5px 8px;
   }
 
   .mainArea {

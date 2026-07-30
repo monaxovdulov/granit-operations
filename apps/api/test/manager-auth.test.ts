@@ -668,6 +668,7 @@ class MemoryIntakeRepository implements IntakeRepository {
       conversationId: saved.conversationId,
       publicConversationId: saved.publicConversationId,
       channelIdentityId: saved.channelIdentityId,
+      inboundMessageId: saved.inboundMessageId,
       publicMessageId: saved.publicMessageId,
       widgetPublicSessionId: saved.publicSessionId,
       agentAllowedToReply: saved.agentAllowedToReply,
@@ -683,6 +684,7 @@ class MemoryIntakeRepository implements IntakeRepository {
     const conversationId = randomUUID();
     const publicConversationId = randomUUID();
     const channelIdentityId = randomUUID();
+    const inboundMessageId = randomUUID();
     const now = new Date().toISOString();
     this.leads.set(leadId, {
       leadId,
@@ -751,6 +753,7 @@ class MemoryIntakeRepository implements IntakeRepository {
       conversationId,
       publicConversationId,
       channelIdentityId,
+      inboundMessageId,
       publicSessionId: input.publicSessionId,
       publicMessageId: input.publicMessageId,
       submittedAt: input.request.submitted_at,

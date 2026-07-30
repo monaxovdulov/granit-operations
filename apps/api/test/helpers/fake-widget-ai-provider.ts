@@ -3,13 +3,10 @@ import type {
   WidgetAiProviderInput,
   WidgetAiProviderResult
 } from "../../src/services/widget-ai-service.js";
-import {
-  AI_TURN_DECISION_VERSION,
-  type AiTurnCandidateDecision
-} from "../../src/modules/ai/ai-dialog-contract.js";
+import type { AiTurnCandidateDecision } from "../../src/modules/ai/ai-dialog-contract.js";
 
 export class FakeWidgetAiProvider implements WidgetAiProvider {
-  private generatedCount = 0;
+  readonly providerKind = "fake" as const;
 
   constructor(
     private readonly options: {
@@ -28,14 +25,10 @@ export class FakeWidgetAiProvider implements WidgetAiProvider {
       throw new Error("fake model failure");
     }
 
-    const sequencedDecision = this.options.decisions?.[this.generatedCount];
-    this.generatedCount += 1;
+    const decision = this.options.decisions?.shift() ?? this.options.decision;
 
     return {
-      decision:
-        sequencedDecision ??
-        this.options.decision ??
-        defaultDecision(this.options.text ?? "Могу помочь собрать детали заявки."),
+      text: this.options.text ?? decision?.replyText ?? "Могу помочь собрать детали заявки.",
       modelProvider: "fake",
       modelName: "fake-widget-ai",
       responseId: "resp_fake",
@@ -43,22 +36,8 @@ export class FakeWidgetAiProvider implements WidgetAiProvider {
         inputTokens: 10,
         outputTokens: 8,
         totalTokens: 18
-      }
+      },
+      decision
     };
   }
-}
-
-function defaultDecision(text: string): AiTurnCandidateDecision {
-  return {
-    version: AI_TURN_DECISION_VERSION,
-    action: "answer",
-    intent: "general_question",
-    replyText: text,
-    extractedSlots: [],
-    requestedSlots: [],
-    riskFlags: [],
-    handoffReason: null,
-    sourceEvidence: [],
-    confidence: 0.9
-  };
 }
