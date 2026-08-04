@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 
 import {
   AnySiteWidgetMessageRequestSchema,
-  SITE_WIDGET_CONTRACT_VERSION,
   SITE_WIDGET_V2_CONTRACT_VERSION,
   SUPPORTED_SITE_WIDGET_VERSIONS,
   type SiteWidgetResponse,
@@ -37,6 +36,7 @@ import {
   AgentReplyBlockedError,
   IdempotencyConflictError
 } from "../../conversations/repositories/lead-conversation-types.js";
+import { buildWidgetAiTurnIdempotencyKey } from "../../conversations/repositories/conversation-message-repository.js";
 import type {
   ClaimedSiteWidgetAiJob,
   PublicIntakeRepository,
@@ -58,6 +58,58 @@ import type {
 export type PublicWidgetIntakeServiceResult = {
   statusCode: number;
   body: SiteWidgetResponse;
+};
+
+const INTERNAL_WIDGET_AI_RESULT_VERSION = "internal_widget_ai.v1" as const;
+
+type InternalWidgetAiSuccessResponse = {
+  ok: true;
+  schema_version: typeof INTERNAL_WIDGET_AI_RESULT_VERSION;
+  status: "accepted" | "replayed";
+  public_session_id: string;
+  public_message_id: string;
+  action: "show_widget_saved";
+  automation:
+    | { status: "disabled"; next_step: "manager_review" }
+    | {
+        status: "fallback";
+        next_step: "manager_review";
+        reason: PublicWidgetFallbackReason;
+      }
+    | {
+        status: "degraded";
+        next_step: "retry_available";
+        conversation_state: "ai_active";
+        reason: PublicWidgetAiUnavailableReason | "ai_persistence_unconfirmed";
+      }
+    | {
+        status: "replied";
+        next_step: "ai_reply_shown";
+        conversation_state: "ai_active" | "manager_pending";
+        disclosure: { shown: true; version: string; text: string };
+        reply: {
+          public_message_id: string;
+          sender_role: "ai_assistant";
+          text: string;
+        };
+      };
+  message_to_user: string;
+};
+
+type InternalWidgetAiServiceResult = {
+  statusCode: number;
+  body:
+    | InternalWidgetAiSuccessResponse
+    | {
+        ok: false;
+        schema_version: typeof INTERNAL_WIDGET_AI_RESULT_VERSION;
+        error: {
+          type: "retryable_backend_failure";
+          code: "persistence_unconfirmed";
+          action: "retry_or_show_fallback";
+          retry_after_seconds: number;
+        };
+      };
 };
 
 export type PublicWidgetHistoryServiceResult = {
@@ -106,7 +158,7 @@ export type PublicWidgetHistoryServiceResult = {
 };
 
 export type ProcessedSiteWidgetAiJobResult = {
-  status: "replied" | "degraded" | "blocked";
+  status: "replied" | "degraded" | "blocked" | "superseded";
   terminalReason?: string;
   outputPublicMessageId?: string;
 };
@@ -119,6 +171,7 @@ export type PublicWidgetIntakeServiceOptions = {
     turnExecutor?: PublicWidgetAiTurnExecutor;
     requiresRecordedExecutor?: boolean;
     jobMaxAttempts?: number;
+    runtimeMode?: "direct_openai" | "mastra_openai_api";
   };
 };
 
@@ -211,7 +264,7 @@ export class PublicWidgetIntakeService {
         [{ path: "schema_version", message: "schema_version is required" }],
         "invalid_request",
         400,
-        SITE_WIDGET_CONTRACT_VERSION
+        SITE_WIDGET_V2_CONTRACT_VERSION
       );
     }
 
@@ -231,9 +284,7 @@ export class PublicWidgetIntakeService {
       };
     }
 
-    const acceptedSchemaVersion = schemaVersion as
-      | typeof SITE_WIDGET_CONTRACT_VERSION
-      | typeof SITE_WIDGET_V2_CONTRACT_VERSION;
+    const acceptedSchemaVersion = SITE_WIDGET_V2_CONTRACT_VERSION;
     const parsed = AnySiteWidgetMessageRequestSchema.safeParse(rawBody);
 
     if (!parsed.success) {
@@ -262,23 +313,21 @@ export class PublicWidgetIntakeService {
         agentAllowedToReply: aiCanRun,
         request: parsed.data,
         requestFingerprint,
-        enqueueAiJob: acceptedSchemaVersion === SITE_WIDGET_V2_CONTRACT_VERSION && aiCanRun,
-        aiJobMaxAttempts: this.options.ai?.jobMaxAttempts ?? 3
+        enqueueAiJob: aiCanRun,
+        aiJobMaxAttempts: this.options.ai?.jobMaxAttempts ?? 3,
+        aiJobRuntimeMode: this.options.ai?.runtimeMode ?? "direct_openai"
       });
 
-      if (acceptedSchemaVersion === SITE_WIDGET_V2_CONTRACT_VERSION) {
-        return v2AcceptedSuccess(saved, aiCanRun);
-      }
-
-      return this.processAcceptedSiteWidgetMessage(saved);
+      return v2AcceptedSuccess(saved, aiCanRun);
     } catch (error) {
       return persistenceFailure(error, acceptedSchemaVersion);
     }
   }
 
   async processAcceptedSiteWidgetMessage(
-    saved: SaveAcceptedSiteWidgetMessageResult
-  ): Promise<PublicWidgetIntakeServiceResult> {
+    saved: SaveAcceptedSiteWidgetMessageResult,
+    signal?: AbortSignal
+  ): Promise<InternalWidgetAiServiceResult> {
       const aiReplyGenerator = this.options.ai?.replyGenerator;
       const aiTurnExecutor = this.options.ai?.turnExecutor;
 
@@ -335,8 +384,9 @@ export class PublicWidgetIntakeService {
       }
 
       const aiTurnInput = saved.aiTurnInput;
+      const turnIdentity = saved.turnIdentity;
 
-      if (!isReplyCapableSiteWidgetTurn(aiTurnInput)) {
+      if (!isReplyCapableSiteWidgetTurn(aiTurnInput) || !turnIdentity) {
         if (aiTurnExecutor) {
           return this.transitionToManagerReviewOr503(
             saved,
@@ -382,6 +432,7 @@ export class PublicWidgetIntakeService {
         }
 
         try {
+          throwIfWidgetAiJobAborted(signal);
           const recordedResult = await aiTurnExecutor.execute({
             executionContext: {
               ...executionContext,
@@ -391,16 +442,68 @@ export class PublicWidgetIntakeService {
               }
             },
             turnInput: aiTurnInputWithFingerprint,
+            signal,
             outbound: {
               publicSessionId: saved.publicSessionId,
               inboundPublicMessageId: saved.publicMessageId,
               sourcePageUrl: aiTurnInputWithFingerprint.page.url,
-              aiInputFingerprint
+              aiInputFingerprint,
+              idempotencyKey: saved.widgetAiJob
+                ? buildWidgetAiTurnIdempotencyKey({
+                    conversationId: saved.conversationId,
+                    expectedGenerationEpoch: turnIdentity.expectedGenerationEpoch,
+                    respondsThroughSequence: turnIdentity.respondsThroughSequence,
+                    runtimeMode: saved.widgetAiJob.runtimeMode ?? "direct_openai"
+                  })
+                : undefined,
+              expectedGenerationEpoch: turnIdentity.expectedGenerationEpoch,
+              respondsThroughSequence: turnIdentity.respondsThroughSequence,
+              runtimeMode: saved.widgetAiJob?.runtimeMode,
+              queueWaitMs: saved.widgetAiJob?.queueWaitMs,
+              jobCommit: saved.widgetAiJob
+                ? {
+                    jobId: saved.widgetAiJob.id,
+                    attemptCount: saved.widgetAiJob.attemptCount
+                  }
+                : undefined
             }
           });
 
+          throwIfWidgetAiJobAborted(signal);
+
           return this.toRecordedTurnResponse(saved, recordedResult);
-        } catch {
+        } catch (error) {
+          throwIfWidgetAiJobAborted(signal);
+
+          if (error instanceof WidgetAiJobExecutionAbortedError) {
+            throw error;
+          }
+
+          if (error instanceof AgentReplyBlockedError) {
+            return fallbackSuccess(
+              saved.replayed,
+              saved.publicSessionId,
+              saved.publicMessageId,
+              "agent_reply_blocked"
+            );
+          }
+
+          if (
+            saved.widgetAiJob &&
+            this.repository.isSiteWidgetAiJobCurrent &&
+            !(await this.repository.isSiteWidgetAiJobCurrent({
+              jobId: saved.widgetAiJob.id,
+              attemptCount: saved.widgetAiJob.attemptCount
+            }))
+          ) {
+            return fallbackSuccess(
+              saved.replayed,
+              saved.publicSessionId,
+              saved.publicMessageId,
+              "agent_reply_blocked"
+            );
+          }
+
           return this.transitionToManagerReviewOr503(
             saved,
             "ai_execution_failed",
@@ -418,24 +521,49 @@ export class PublicWidgetIntakeService {
       }
 
       const aiReply = validateAiReplyCandidate(
-        await aiReplyGenerator.generateReply(aiTurnInputWithFingerprint),
+        await aiReplyGenerator.generateReply(aiTurnInputWithFingerprint, { signal }),
         aiTurnInputWithFingerprint
       );
+      throwIfWidgetAiJobAborted(signal);
 
       if (aiReply.status === "unavailable") {
-        await this.repository.recordSiteWidgetAiDegradation?.({
+        const recordDegradation = this.repository.recordSiteWidgetAiDegradation;
+        if (!recordDegradation && saved.widgetAiJob) {
+          throw new Error("queued AI degradation persistence is unavailable");
+        }
+        await recordDegradation?.call(this.repository, {
           leadId: saved.leadId,
           conversationId: saved.conversationId,
           inboundPublicMessageId: saved.publicMessageId,
           inputFingerprint: aiInputFingerprint,
           reason: aiReply.reason,
+          expectedGenerationEpoch: turnIdentity.expectedGenerationEpoch,
+          respondsThroughSequence: turnIdentity.respondsThroughSequence,
+          runtimeMode: saved.widgetAiJob?.runtimeMode ?? "direct_openai",
+          jobCommit: saved.widgetAiJob
+            ? {
+                jobId: saved.widgetAiJob.id,
+                attemptCount: saved.widgetAiJob.attemptCount
+              }
+            : undefined,
           metadata: {
             prompt_version: WIDGET_AI_PROMPT_VERSION,
             policy_version: WIDGET_AI_POLICY_VERSION,
             knowledge_version: APPROVED_WIDGET_KNOWLEDGE_VERSION,
-            ...aiReply.metadata
+            ...aiReply.metadata,
+            ...(saved.widgetAiJob
+              ? {
+                  queue_wait_ms: saved.widgetAiJob.queueWaitMs,
+                  response_window_epoch: turnIdentity.expectedGenerationEpoch,
+                  responds_through_sequence: turnIdentity.respondsThroughSequence
+                }
+              : {})
           }
-        }).catch(() => undefined);
+        }).catch((error: unknown) => {
+          if (saved.widgetAiJob) {
+            throw error;
+          }
+        });
         return fallbackSuccess(
           saved.replayed,
           saved.publicSessionId,
@@ -450,6 +578,9 @@ export class PublicWidgetIntakeService {
             outbound_kind: "site_widget_ai_reply",
             inbound_public_message_id: saved.publicMessageId,
             public_conversation_id: saved.publicConversationId,
+            expected_generation_epoch: turnIdentity.expectedGenerationEpoch,
+            responds_through_sequence: turnIdentity.respondsThroughSequence,
+            runtime_mode: saved.widgetAiJob?.runtimeMode ?? "direct_openai",
             body: aiReply.text,
             metadata: aiReply.metadata,
             slot_updates: aiReply.slotUpdates,
@@ -461,8 +592,24 @@ export class PublicWidgetIntakeService {
           conversationId: saved.conversationId,
           publicMessageId: randomUUID(),
           inboundPublicMessageId: saved.publicMessageId,
-          idempotencyKey: `ai:${saved.publicMessageId}`,
+          idempotencyKey: saved.widgetAiJob
+            ? buildWidgetAiTurnIdempotencyKey({
+                conversationId: saved.conversationId,
+                expectedGenerationEpoch: turnIdentity.expectedGenerationEpoch,
+                respondsThroughSequence: turnIdentity.respondsThroughSequence,
+                runtimeMode: saved.widgetAiJob.runtimeMode ?? "direct_openai"
+              })
+            : `ai:${saved.publicMessageId}`,
           requestFingerprint: outboundFingerprint,
+          expectedGenerationEpoch: turnIdentity.expectedGenerationEpoch,
+          respondsThroughSequence: turnIdentity.respondsThroughSequence,
+          runtimeMode: saved.widgetAiJob?.runtimeMode ?? "direct_openai",
+          jobCommit: saved.widgetAiJob
+            ? {
+                jobId: saved.widgetAiJob.id,
+                attemptCount: saved.widgetAiJob.attemptCount
+              }
+            : undefined,
           body: aiReply.text,
           sourcePageUrl: aiTurnInputWithFingerprint.page.url,
           agentAllowedToReplyAfterSend: aiReply.agentAllowedToReplyAfterSend,
@@ -524,7 +671,14 @@ export class PublicWidgetIntakeService {
             channel: "site_widget",
             public_session_id: saved.publicSessionId,
             inbound_public_message_id: saved.publicMessageId,
-            ai_input_fingerprint: aiInputFingerprint
+            ai_input_fingerprint: aiInputFingerprint,
+            ...(saved.widgetAiJob
+              ? {
+                  queue_wait_ms: saved.widgetAiJob.queueWaitMs,
+                  response_window_epoch: turnIdentity.expectedGenerationEpoch,
+                  responds_through_sequence: turnIdentity.respondsThroughSequence
+                }
+              : {})
           }
         });
 
@@ -543,18 +697,42 @@ export class PublicWidgetIntakeService {
             : "ai_persistence_unconfirmed";
 
         if (fallbackReason === "ai_persistence_unconfirmed") {
-          await this.repository.recordSiteWidgetAiDegradation?.({
+          const recordDegradation = this.repository.recordSiteWidgetAiDegradation;
+          if (!recordDegradation && saved.widgetAiJob) {
+            throw new Error("queued AI degradation persistence is unavailable");
+          }
+          await recordDegradation?.call(this.repository, {
             leadId: saved.leadId,
             conversationId: saved.conversationId,
             inboundPublicMessageId: saved.publicMessageId,
             inputFingerprint: aiInputFingerprint,
             reason: fallbackReason,
+            expectedGenerationEpoch: turnIdentity.expectedGenerationEpoch,
+            respondsThroughSequence: turnIdentity.respondsThroughSequence,
+            runtimeMode: saved.widgetAiJob?.runtimeMode ?? "direct_openai",
+            jobCommit: saved.widgetAiJob
+              ? {
+                  jobId: saved.widgetAiJob.id,
+                  attemptCount: saved.widgetAiJob.attemptCount
+                }
+              : undefined,
             metadata: {
               prompt_version: WIDGET_AI_PROMPT_VERSION,
               policy_version: WIDGET_AI_POLICY_VERSION,
-              knowledge_version: APPROVED_WIDGET_KNOWLEDGE_VERSION
+              knowledge_version: APPROVED_WIDGET_KNOWLEDGE_VERSION,
+              ...(saved.widgetAiJob
+                ? {
+                    queue_wait_ms: saved.widgetAiJob.queueWaitMs,
+                    response_window_epoch: turnIdentity.expectedGenerationEpoch,
+                    responds_through_sequence: turnIdentity.respondsThroughSequence
+                  }
+                : {})
             }
-          }).catch(() => undefined);
+          }).catch((degradationError: unknown) => {
+            if (saved.widgetAiJob) {
+              throw degradationError;
+            }
+          });
         }
 
         return fallbackSuccess(
@@ -569,7 +747,7 @@ export class PublicWidgetIntakeService {
   private async toRecordedTurnResponse(
     saved: SaveAcceptedSiteWidgetMessageResult,
     recordedResult: Awaited<ReturnType<PublicWidgetAiTurnExecutor["execute"]>>
-  ): Promise<PublicWidgetIntakeServiceResult> {
+  ): Promise<InternalWidgetAiServiceResult> {
     if (recordedResult.kind === "running_replay") {
       return this.transitionToManagerReviewOr503(
         saved,
@@ -583,10 +761,10 @@ export class PublicWidgetIntakeService {
       const reason = publicFallbackReasonForRecordedRun(recordedResult.run);
       const reviewReason = managerReviewReasonForRecordedRun(recordedResult.run);
 
-      if (reviewReason) {
+      if (reviewReason && !saved.widgetAiJob) {
         const transition = await this.transitionToManagerReview(saved, reviewReason);
         if (!transition) {
-          return persistenceUnavailable(SITE_WIDGET_CONTRACT_VERSION);
+          return persistenceUnavailable(INTERNAL_WIDGET_AI_RESULT_VERSION);
         }
       }
 
@@ -625,10 +803,10 @@ export class PublicWidgetIntakeService {
     const reason = publicFallbackReasonForRecordedRun(recordedResult.run);
     const reviewReason = managerReviewReasonForRecordedRun(recordedResult.run);
 
-    if (reviewReason) {
+    if (reviewReason && !saved.widgetAiJob) {
       const transition = await this.transitionToManagerReview(saved, reviewReason);
       if (!transition) {
-        return persistenceUnavailable(SITE_WIDGET_CONTRACT_VERSION);
+        return persistenceUnavailable(INTERNAL_WIDGET_AI_RESULT_VERSION);
       }
     }
 
@@ -645,11 +823,11 @@ export class PublicWidgetIntakeService {
     reviewReason: PublicWidgetManagerReviewReason,
     publicReason: PublicWidgetFallbackReason,
     statusCode: 202 | 503 = 202
-  ): Promise<PublicWidgetIntakeServiceResult> {
+  ): Promise<InternalWidgetAiServiceResult> {
     const transition = await this.transitionToManagerReview(saved, reviewReason);
 
     if (!transition || statusCode === 503) {
-      return persistenceUnavailable(SITE_WIDGET_CONTRACT_VERSION);
+      return persistenceUnavailable(INTERNAL_WIDGET_AI_RESULT_VERSION);
     }
 
     return recordedFallbackSuccess(
@@ -675,7 +853,16 @@ export class PublicWidgetIntakeService {
         publicConversationId: saved.publicConversationId,
         inboundMessageId: saved.inboundMessageId,
         inboundPublicMessageId: saved.publicMessageId,
-        reason
+        reason,
+        expectedGenerationEpoch: saved.turnIdentity?.expectedGenerationEpoch,
+        respondsThroughSequence: saved.turnIdentity?.respondsThroughSequence,
+        runtimeMode: saved.widgetAiJob?.runtimeMode,
+        jobCommit: saved.widgetAiJob
+          ? {
+              jobId: saved.widgetAiJob.id,
+              attemptCount: saved.widgetAiJob.attemptCount
+            }
+          : undefined
       });
       return true;
     } catch {
@@ -684,7 +871,8 @@ export class PublicWidgetIntakeService {
   }
 
   async processClaimedSiteWidgetAiJob(
-    job: ClaimedSiteWidgetAiJob
+    job: ClaimedSiteWidgetAiJob,
+    signal?: AbortSignal
   ): Promise<ProcessedSiteWidgetAiJobResult> {
     const existingReply = await this.repository.findSiteWidgetAiReply?.(
       job.inboundPublicMessageId
@@ -697,22 +885,57 @@ export class PublicWidgetIntakeService {
       };
     }
 
-    const result = await this.processAcceptedSiteWidgetMessage({
-      leadId: job.leadId,
-      conversationId: job.conversationId,
-      publicConversationId: job.publicConversationId,
-      channelIdentityId: "",
-      publicSessionId: job.publicSessionId,
-      publicMessageId: job.inboundPublicMessageId,
-      submittedAt: job.aiTurnInput.inboundMessage.submittedAt,
-      agentAllowedToReply: job.aiTurnInput.gateSnapshot.agentAllowedToReply,
-      aiState: job.aiTurnInput.gateSnapshot.aiState,
-      replayed: false,
-      aiTurnInput: job.aiTurnInput,
-      widgetAiJob: job
-    });
+    try {
+      const result = await this.processAcceptedSiteWidgetMessage(
+        {
+          leadId: job.leadId,
+          conversationId: job.conversationId,
+          publicConversationId: job.publicConversationId,
+          channelIdentityId: "",
+          publicSessionId: job.publicSessionId,
+          publicMessageId: job.inboundPublicMessageId,
+          submittedAt: job.aiTurnInput.inboundMessage.submittedAt,
+          agentAllowedToReply: job.aiTurnInput.gateSnapshot.agentAllowedToReply,
+          aiState: job.aiTurnInput.gateSnapshot.aiState,
+          replayed: false,
+          aiTurnInput: job.aiTurnInput,
+          aiTurnExecutionContext: job.aiTurnExecutionContext,
+          turnIdentity: {
+            expectedGenerationEpoch: job.expectedGenerationEpoch,
+            respondsThroughSequence: job.respondsThroughSequence
+          },
+          widgetAiJob: job
+        },
+        signal
+      );
+      const processed = toProcessedSiteWidgetAiJobResult(result);
 
-    return toProcessedSiteWidgetAiJobResult(result);
+      return processed.status === "blocked" && processed.terminalReason === "agent_reply_blocked"
+        ? { status: "superseded", terminalReason: "turn_not_current" }
+        : processed;
+    } catch (error) {
+      if (
+        (error instanceof WidgetAiJobExecutionAbortedError && error.reason === "job_not_current") ||
+        (signal?.aborted && signal.reason === "job_not_current")
+      ) {
+        return { status: "superseded", terminalReason: "turn_not_current" };
+      }
+
+      throw error;
+    }
+  }
+}
+
+class WidgetAiJobExecutionAbortedError extends Error {
+  constructor(readonly reason: unknown) {
+    super("widget AI job execution aborted");
+    this.name = "WidgetAiJobExecutionAbortedError";
+  }
+}
+
+function throwIfWidgetAiJobAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) {
+    throw new WidgetAiJobExecutionAbortedError(signal.reason);
   }
 }
 
@@ -729,13 +952,7 @@ function v2AcceptedSuccess(
         next_step: "history_available" as const,
         conversation_state: managerPending ? ("manager_pending" as const) : ("ai_active" as const)
       }
-    : !aiCanRun || !saved.agentAllowedToReply
-      ? {
-          status: "disabled" as const,
-          next_step: "manager_review" as const,
-          conversation_state: "manager_pending" as const
-        }
-      : job?.status === "replied"
+    : job?.status === "replied"
         ? {
             status: "replied" as const,
             next_step: "history_available" as const,
@@ -757,14 +974,22 @@ function v2AcceptedSuccess(
                 conversation_state: "ai_active" as const,
                 reason: toV2DegradedReason(job.terminalReason)
               }
-            : job
+            : job?.status === "pending" ||
+                job?.status === "processing" ||
+                job?.status === "retrying"
               ? {
                   status: "processing" as const,
                   next_step: "poll_history" as const,
                   conversation_state: "ai_active" as const,
                   poll_after_ms: 700
                 }
-              : {
+              : !aiCanRun || !saved.agentAllowedToReply || job?.status === "superseded"
+                ? {
+                    status: "disabled" as const,
+                    next_step: "manager_review" as const,
+                    conversation_state: "manager_pending" as const
+                  }
+                : {
                   status: "degraded" as const,
                   next_step: "retry_or_manager" as const,
                   conversation_state: "ai_active" as const,
@@ -812,9 +1037,7 @@ function toV2DegradedReason(
 
 function persistenceFailure(
   error: unknown,
-  schemaVersion:
-    | typeof SITE_WIDGET_CONTRACT_VERSION
-    | typeof SITE_WIDGET_V2_CONTRACT_VERSION
+  schemaVersion: typeof SITE_WIDGET_V2_CONTRACT_VERSION
 ): PublicWidgetIntakeServiceResult {
   if (error instanceof IdempotencyConflictError) {
     return validationError(
@@ -834,15 +1057,37 @@ function persistenceFailure(
 }
 
 function persistenceUnavailable(
+  schemaVersion: typeof INTERNAL_WIDGET_AI_RESULT_VERSION
+): InternalWidgetAiServiceResult;
+function persistenceUnavailable(
+  schemaVersion: typeof SITE_WIDGET_V2_CONTRACT_VERSION
+): PublicWidgetIntakeServiceResult;
+function persistenceUnavailable(
   schemaVersion:
-    | typeof SITE_WIDGET_CONTRACT_VERSION
+    | typeof INTERNAL_WIDGET_AI_RESULT_VERSION
     | typeof SITE_WIDGET_V2_CONTRACT_VERSION
-): PublicWidgetIntakeServiceResult {
+): InternalWidgetAiServiceResult | PublicWidgetIntakeServiceResult {
+  if (schemaVersion === INTERNAL_WIDGET_AI_RESULT_VERSION) {
+    return {
+      statusCode: 503,
+      body: {
+        ok: false,
+        schema_version: INTERNAL_WIDGET_AI_RESULT_VERSION,
+        error: {
+          type: "retryable_backend_failure",
+          code: "persistence_unconfirmed",
+          action: "retry_or_show_fallback",
+          retry_after_seconds: 30
+        }
+      }
+    };
+  }
+
   return {
     statusCode: 503,
     body: {
       ok: false,
-      schema_version: schemaVersion,
+      schema_version: SITE_WIDGET_V2_CONTRACT_VERSION,
       error: {
         type: "retryable_backend_failure",
         code: "persistence_unconfirmed",
@@ -931,13 +1176,13 @@ function managerReviewReasonForRecordedRun(run: {
 }
 
 function toProcessedSiteWidgetAiJobResult(
-  result: PublicWidgetIntakeServiceResult
+  result: InternalWidgetAiServiceResult
 ): ProcessedSiteWidgetAiJobResult {
   if (!result.body.ok) {
     throw new Error(`widget AI job failed with HTTP ${result.statusCode}`);
   }
 
-  if (result.body.schema_version !== SITE_WIDGET_CONTRACT_VERSION) {
+  if (result.body.schema_version !== INTERNAL_WIDGET_AI_RESULT_VERSION) {
     throw new Error("widget AI job returned an unexpected contract version");
   }
 
@@ -979,12 +1224,12 @@ function disabledSuccess(
   replayed: boolean,
   publicSessionId: string,
   publicMessageId: string
-): PublicWidgetIntakeServiceResult {
+): InternalWidgetAiServiceResult {
   return {
     statusCode: 202,
     body: {
       ok: true,
-      schema_version: SITE_WIDGET_CONTRACT_VERSION,
+      schema_version: INTERNAL_WIDGET_AI_RESULT_VERSION,
       status: replayed ? "replayed" : "accepted",
       public_session_id: publicSessionId,
       public_message_id: publicMessageId,
@@ -1003,13 +1248,13 @@ function fallbackSuccess(
   publicSessionId: string,
   publicMessageId: string,
   reason: PublicWidgetFallbackReason
-): PublicWidgetIntakeServiceResult {
+): InternalWidgetAiServiceResult {
   if (reason !== "agent_reply_blocked") {
     return {
       statusCode: 202,
       body: {
         ok: true,
-        schema_version: SITE_WIDGET_CONTRACT_VERSION,
+        schema_version: INTERNAL_WIDGET_AI_RESULT_VERSION,
         status: replayed ? "replayed" : "accepted",
         public_session_id: publicSessionId,
         public_message_id: publicMessageId,
@@ -1030,7 +1275,7 @@ function fallbackSuccess(
     statusCode: 202,
     body: {
       ok: true,
-      schema_version: SITE_WIDGET_CONTRACT_VERSION,
+      schema_version: INTERNAL_WIDGET_AI_RESULT_VERSION,
       status: replayed ? "replayed" : "accepted",
       public_session_id: publicSessionId,
       public_message_id: publicMessageId,
@@ -1051,12 +1296,12 @@ function recordedFallbackSuccess(
   publicSessionId: string,
   publicMessageId: string,
   reason: PublicWidgetFallbackReason
-): PublicWidgetIntakeServiceResult {
+): InternalWidgetAiServiceResult {
   return {
     statusCode: 202,
     body: {
       ok: true,
-      schema_version: SITE_WIDGET_CONTRACT_VERSION,
+      schema_version: INTERNAL_WIDGET_AI_RESULT_VERSION,
       status: replayed ? "replayed" : "accepted",
       public_session_id: publicSessionId,
       public_message_id: publicMessageId,
@@ -1102,12 +1347,12 @@ function aiReplySuccess(
   publicReplyMessageId: string,
   replyText: string,
   conversationState: "ai_active" | "manager_pending"
-): PublicWidgetIntakeServiceResult {
+): InternalWidgetAiServiceResult {
   return {
     statusCode: 202,
     body: {
       ok: true,
-      schema_version: SITE_WIDGET_CONTRACT_VERSION,
+      schema_version: INTERNAL_WIDGET_AI_RESULT_VERSION,
       status: replayed ? "replayed" : "accepted",
       public_session_id: publicSessionId,
       public_message_id: publicMessageId,
@@ -1136,9 +1381,7 @@ function validationError(
   fields: SiteWidgetValidationIssue[],
   code: "invalid_request" | "idempotency_conflict" = "invalid_request",
   statusCode = 400,
-  schemaVersion:
-    | typeof SITE_WIDGET_CONTRACT_VERSION
-    | typeof SITE_WIDGET_V2_CONTRACT_VERSION = SITE_WIDGET_CONTRACT_VERSION
+  schemaVersion: typeof SITE_WIDGET_V2_CONTRACT_VERSION = SITE_WIDGET_V2_CONTRACT_VERSION
 ): PublicWidgetIntakeServiceResult {
   return {
     statusCode,

@@ -1,6 +1,6 @@
 import {
-  SITE_WIDGET_CONTRACT_VERSION,
   SITE_WIDGET_MESSAGE_EVENT_TYPE,
+  SITE_WIDGET_V2_CONTRACT_VERSION,
   type SiteWidgetMessageRequest
 } from "@granit/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -50,6 +50,10 @@ describe("M2 app-owned live_v2 local/fake runtime", () => {
       url: "/public/intake/site-widget/messages",
       payload
     });
+    const firstHistory = await waitForTerminalHistory(
+      app,
+      first.json().public_session_id
+    );
     const replay = await app.inject({
       method: "POST",
       url: "/public/intake/site-widget/messages",
@@ -57,17 +61,32 @@ describe("M2 app-owned live_v2 local/fake runtime", () => {
     });
 
     expect(first.statusCode).toBe(202);
-    expect(first.json()).toMatchObject({ automation: { status: "replied" } });
+    expect(first.json()).toMatchObject({ automation: { status: "processing" } });
+    expect(firstHistory.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sender_role: "visitor",
+          automation: expect.objectContaining({ status: "replied" })
+        }),
+        expect.objectContaining({ sender_role: "ai_assistant" })
+      ])
+    );
     expect(replay.json()).toMatchObject({
       status: "replayed",
-      automation: {
-        status: "replied",
-        reply: { public_message_id: first.json().automation.reply.public_message_id }
-      }
+      automation: { status: "replied", next_step: "history_available" }
     });
     expect(generate).toHaveBeenCalledTimes(1);
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(repository.aiRunCount).toBe(1);
+    expect(repository.lastAiSaveInput).toMatchObject({
+      runtimeMode: "mastra_openai_api",
+      idempotencyKey: expect.stringMatching(/:mastra_openai_api$/),
+      metadata: {
+        queue_wait_ms: expect.any(Number),
+        response_window_epoch: 1,
+        responds_through_sequence: 1
+      }
+    });
     const [run] = repository.listAiRuns();
     if (!run) {
       throw new Error("expected one M2 local/fake run");
@@ -107,6 +126,8 @@ describe("M2 app-owned live_v2 local/fake runtime", () => {
     expect(JSON.stringify(repository.onlyLead().timeline)).not.toContain("RAW_M2");
     expect(JSON.stringify(first.json())).not.toContain("runtime");
     expect(JSON.stringify(first.json())).not.toContain("trace");
+    expect(JSON.stringify(firstHistory)).not.toContain("runtime");
+    expect(JSON.stringify(firstHistory)).not.toContain("trace");
   });
 
   it.each([
@@ -139,8 +160,17 @@ describe("M2 app-owned live_v2 local/fake runtime", () => {
       url: "/public/intake/site-widget/messages",
       payload: widgetRequest(`m2-live-${fixture.name}-0001`)
     });
+    const history = await waitForTerminalHistory(
+      app,
+      response.json().public_session_id
+    );
 
-    expect(response.json()).toMatchObject({ automation: { status: "replied" } });
+    expect(response.json()).toMatchObject({ automation: { status: "processing" } });
+    expect(history.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ sender_role: "ai_assistant" })
+      ])
+    );
     expect(generate).toHaveBeenCalledTimes(1);
     expect(repository.listAiRuns()[0]).toMatchObject({
       status: fixture.expectedStatus,
@@ -185,18 +215,23 @@ describe("M2 app-owned live_v2 local/fake runtime", () => {
       url: "/public/intake/site-widget/messages",
       payload
     });
+    const firstHistory = await waitForTerminalHistory(
+      app,
+      first.json().public_session_id
+    );
     const replay = await app.inject({
       method: "POST",
       url: "/public/intake/site-widget/messages",
       payload
     });
 
-    expect(first.json()).toMatchObject({
-      automation: { status: "fallback", reason: fixture.expectedPublicReason }
+    expect(first.json()).toMatchObject({ automation: { status: "processing" } });
+    expect(firstHistory.messages[0]).toMatchObject({
+      automation: { status: "blocked", reason: fixture.expectedPublicReason }
     });
     expect(replay.json()).toMatchObject({
       status: "replayed",
-      automation: { status: "fallback", reason: fixture.expectedPublicReason }
+      automation: { status: "manager_pending", reason: "agent_reply_blocked" }
     });
     expect(generate).toHaveBeenCalledTimes(1);
     const [run] = repository.listAiRuns();
@@ -226,16 +261,23 @@ describe("M2 app-owned live_v2 local/fake runtime", () => {
       url: "/public/intake/site-widget/messages",
       payload
     });
+    const firstHistory = await waitForTerminalHistory(
+      app,
+      first.json().public_session_id
+    );
     const replay = await app.inject({
       method: "POST",
       url: "/public/intake/site-widget/messages",
       payload
     });
 
-    expect(first.json()).toMatchObject({ automation: { status: "fallback", reason: "model_error" } });
+    expect(first.json()).toMatchObject({ automation: { status: "processing" } });
+    expect(firstHistory.messages[0]).toMatchObject({
+      automation: { status: "blocked", reason: "model_error" }
+    });
     expect(replay.json()).toMatchObject({
       status: "replayed",
-      automation: { status: "fallback", reason: "model_error" }
+      automation: { status: "manager_pending", reason: "agent_reply_blocked" }
     });
     expect(generate).toHaveBeenCalledTimes(1);
     expect(repository.listAiRuns()[0]).toMatchObject({
@@ -262,9 +304,14 @@ describe("M2 app-owned live_v2 local/fake runtime", () => {
       url: "/public/intake/site-widget/messages",
       payload: widgetRequest("m2-live-model-mismatch-0001")
     });
+    const history = await waitForTerminalHistory(
+      app,
+      response.json().public_session_id
+    );
 
-    expect(response.json()).toMatchObject({
-      automation: { status: "fallback", reason: "model_error" }
+    expect(response.json()).toMatchObject({ automation: { status: "processing" } });
+    expect(history.messages[0]).toMatchObject({
+      automation: { status: "blocked", reason: "model_error" }
     });
     expect(repository.listAiRuns()[0]).toMatchObject({
       status: "fallback_unavailable",
@@ -297,16 +344,17 @@ describe("M2 app-owned live_v2 local/fake runtime", () => {
       url: "/public/intake/site-widget/messages",
       payload: widgetRequest("m2-live-takeover-0001")
     });
+    const history = await waitForTerminalHistory(
+      app,
+      response.json().public_session_id
+    );
 
-    expect(response.json()).toMatchObject({
-      automation: { status: "fallback", reason: "agent_reply_blocked" }
+    expect(response.json()).toMatchObject({ automation: { status: "processing" } });
+    expect(history.messages[0]).toMatchObject({
+      automation: { status: "superseded", reason: "turn_not_current" }
     });
     expect(generate).toHaveBeenCalledTimes(1);
-    expect(repository.listAiRuns()[0]).toMatchObject({
-      status: "blocked",
-      outcomeReason: "gate_closed",
-      sendGateResult: "blocked"
-    });
+    expect(repository.listAiRuns()).toMatchObject([{ status: "running" }]);
     expect(repository.aiSaveCalls).toBe(0);
     expect(repository.onlyLead().conversations[0]?.messages).toHaveLength(1);
     expect(repository.onlyLead().conversations[0]).toMatchObject({
@@ -359,17 +407,18 @@ describe("M2 app-owned live_v2 local/fake runtime", () => {
       url: "/public/intake/site-widget/messages",
       payload: widgetRequest("m2-live-post-read-race-0001")
     });
+    const history = await waitForTerminalHistory(
+      app,
+      response.json().public_session_id
+    );
 
-    expect(response.json()).toMatchObject({
-      automation: { status: "fallback", reason: "agent_reply_blocked" }
+    expect(response.json()).toMatchObject({ automation: { status: "processing" } });
+    expect(history.messages[0]).toMatchObject({
+      automation: { status: "superseded", reason: "turn_not_current" }
     });
     expect(freshGateRead).toBe(true);
     expect(generate).toHaveBeenCalledTimes(1);
-    expect(target.listAiRuns()[0]).toMatchObject({
-      status: "blocked",
-      outcomeReason: "agent_reply_blocked",
-      sendGateResult: "blocked"
-    });
+    expect(target.listAiRuns()).toMatchObject([{ status: "running" }]);
     expect(target.aiSaveCalls).toBe(1);
     expect(target.onlyLead().conversations[0]?.messages).toHaveLength(1);
   });
@@ -398,9 +447,14 @@ describe("M2 app-owned live_v2 local/fake runtime", () => {
       url: "/public/intake/site-widget/messages",
       payload: widgetRequest("m2-live-gate-failure-0001")
     });
+    const history = await waitForTerminalHistory(
+      app,
+      response.json().public_session_id
+    );
 
-    expect(response.json()).toMatchObject({
-      automation: { status: "fallback", reason: "ai_persistence_unconfirmed" }
+    expect(response.json()).toMatchObject({ automation: { status: "processing" } });
+    expect(history.messages[0]).toMatchObject({
+      automation: { status: "blocked", reason: "ai_persistence_unconfirmed" }
     });
     expect(generate).toHaveBeenCalledTimes(1);
     expect(target.listAiRuns()[0]).toMatchObject({
@@ -444,15 +498,120 @@ describe("M2 app-owned live_v2 local/fake runtime", () => {
     });
     releaseGeneration();
     const first = await firstPromise;
+    const history = await waitForTerminalHistory(
+      app,
+      first.json().public_session_id
+    );
 
-    expect(concurrent.statusCode).toBe(503);
-    expect(first.json()).toMatchObject({
-      automation: { status: "fallback", reason: "agent_reply_blocked" }
+    expect(concurrent.statusCode).toBe(202);
+    expect(concurrent.json()).toMatchObject({
+      status: "replayed",
+      automation: { status: "processing" }
     });
+    expect(first.json()).toMatchObject({ automation: { status: "processing" } });
+    expect(history.messages).toEqual(
+      expect.arrayContaining([expect.objectContaining({ sender_role: "ai_assistant" })])
+    );
     expect(generate).toHaveBeenCalledTimes(1);
     expect(repository.aiRunCount).toBe(1);
-    expect(repository.aiSaveCalls).toBe(0);
-    expect(repository.onlyLead().conversations[0]?.messages).toHaveLength(1);
+    expect(repository.onlyLead().conversations[0]?.messages).toHaveLength(2);
+  });
+
+  it("cancels an in-flight recorded provider after a newer inbound", async () => {
+    const repository = new MemoryIntakeRepository();
+    let markFirstStarted!: () => void;
+    const firstStarted = new Promise<void>((resolve) => {
+      markFirstStarted = resolve;
+    });
+    let markFirstAborted!: () => void;
+    const firstAborted = new Promise<void>((resolve) => {
+      markFirstAborted = resolve;
+    });
+    let firstSignal: AbortSignal | undefined;
+    let calls = 0;
+    const generate = vi.fn<MastraLiveV2AgentPort["generate"]>(async (_messages, options) => {
+      calls += 1;
+      if (calls === 1) {
+        firstSignal = options.abortSignal;
+        markFirstStarted();
+        return new Promise((_resolve, reject) => {
+          options.abortSignal.addEventListener(
+            "abort",
+            () => {
+              markFirstAborted();
+              reject(Object.assign(new Error("cancelled stale turn"), { name: "AbortError" }));
+            },
+            { once: true }
+          );
+        });
+      }
+
+      return fakeResult(answerCandidate(), "runtime-newer-inbound");
+    });
+    const app = track(buildLocalFakeApi(repository, { generate }));
+    const first = await app.inject({
+      method: "POST",
+      url: "/public/intake/site-widget/messages",
+      payload: widgetRequest("m2-live-cancel-stale-0001")
+    });
+    await firstStarted;
+    const nextPayload = widgetRequest("m2-live-cancel-stale-0002");
+    nextPayload.public_session_id = first.json().public_session_id;
+
+    await app.inject({
+      method: "POST",
+      url: "/public/intake/site-widget/messages",
+      payload: nextPayload
+    });
+    await firstAborted;
+    await waitForMemoryMessageCount(repository, 3);
+
+    expect(firstSignal?.aborted).toBe(true);
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(repository.listAiRuns()).toMatchObject([
+      { status: "running" },
+      { status: "persisted", outcomeReason: "reply_persisted" }
+    ]);
+  });
+
+  it("aborts an in-flight recorded provider during app shutdown", async () => {
+    const repository = new MemoryIntakeRepository();
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    let markAborted!: () => void;
+    const aborted = new Promise<void>((resolve) => {
+      markAborted = resolve;
+    });
+    let providerSignal: AbortSignal | undefined;
+    const generate = vi.fn<MastraLiveV2AgentPort["generate"]>(async (_messages, options) => {
+      providerSignal = options.abortSignal;
+      markStarted();
+      return new Promise((_resolve, reject) => {
+        options.abortSignal.addEventListener(
+          "abort",
+          () => {
+            markAborted();
+            reject(Object.assign(new Error("shutdown"), { name: "AbortError" }));
+          },
+          { once: true }
+        );
+      });
+    });
+    const app = track(buildLocalFakeApi(repository, { generate }));
+    await app.inject({
+      method: "POST",
+      url: "/public/intake/site-widget/messages",
+      payload: widgetRequest("m2-live-shutdown-cancel-0001")
+    });
+    await started;
+
+    await app.close();
+    await aborted;
+
+    expect(providerSignal?.aborted).toBe(true);
+    expect(repository.listAiRuns()).toMatchObject([{ status: "running" }]);
   });
 
   it("keeps direct rollback on frozen legacy_s05 with no live_v2 fallback", async () => {
@@ -469,7 +628,8 @@ describe("M2 app-owned live_v2 local/fake runtime", () => {
           enabled: true,
           runtimeMode: "direct_openai",
           modelName: "direct-local-fixture-v1",
-          replyGenerator: { generateReply }
+          replyGenerator: { generateReply },
+          jobWorker: testJobWorkerOptions()
         }
       })
     );
@@ -479,8 +639,15 @@ describe("M2 app-owned live_v2 local/fake runtime", () => {
       url: "/public/intake/site-widget/messages",
       payload: widgetRequest("m2-direct-rollback-0001")
     });
+    const history = await waitForTerminalHistory(
+      app,
+      response.json().public_session_id
+    );
 
-    expect(response.json()).toMatchObject({ automation: { status: "replied" } });
+    expect(response.json()).toMatchObject({ automation: { status: "processing" } });
+    expect(history.messages).toEqual(
+      expect.arrayContaining([expect.objectContaining({ sender_role: "ai_assistant" })])
+    );
     expect(generateReply).toHaveBeenCalledTimes(1);
     expect(repository.listAiRuns()[0]).toMatchObject({
       runtimeMode: "direct_openai",
@@ -534,6 +701,7 @@ function buildLocalFakeApi(
     widgetAi: {
       enabled: true,
       runtimeMode: "mastra_openai_api",
+      jobWorker: testJobWorkerOptions(),
       localFake: {
         agent,
         modelName: LOCAL_MODEL,
@@ -541,6 +709,38 @@ function buildLocalFakeApi(
       }
     }
   });
+}
+
+function testJobWorkerOptions() {
+  return {
+    enabled: true,
+    pollIntervalMs: 10,
+    leaseMs: 5_000,
+    retryBackoffMs: 10,
+    maxAttempts: 3
+  };
+}
+
+async function waitForTerminalHistory(
+  app: ReturnType<typeof buildApi>,
+  publicSessionId: string
+) {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const response = await app.inject({
+      method: "GET",
+      url: `/public/intake/site-widget/sessions/${publicSessionId}/history?schema_version=site_widget.history.v2`
+    });
+    const body = response.json();
+    const status = body.messages?.[0]?.automation?.status;
+
+    if (status && !["pending", "processing", "retrying"].includes(status)) {
+      return body;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  throw new Error("timed out waiting for terminal site_widget.v2 history");
 }
 
 function fakeResult(candidate: unknown, runtimeRunId: string) {
@@ -553,9 +753,23 @@ function fakeResult(candidate: unknown, runtimeRunId: string) {
   };
 }
 
+async function waitForMemoryMessageCount(
+  repository: MemoryIntakeRepository,
+  expected: number
+): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (repository.onlyLead().conversations[0]?.messages.length === expected) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  throw new Error(`timed out waiting for ${expected} memory messages`);
+}
+
 function widgetRequest(idempotencyKey: string): SiteWidgetMessageRequest {
   return {
-    schema_version: SITE_WIDGET_CONTRACT_VERSION,
+    schema_version: SITE_WIDGET_V2_CONTRACT_VERSION,
     event_type: SITE_WIDGET_MESSAGE_EVENT_TYPE,
     idempotency_key: idempotencyKey,
     submitted_at: "2026-07-14T20:00:00.000Z",

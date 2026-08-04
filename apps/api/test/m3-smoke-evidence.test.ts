@@ -36,7 +36,7 @@ describe("M3 sanitized smoke evidence", () => {
     expect(isSuccessfulM3Smoke({ ...successEvidence(), usageLinked: false })).toBe(true);
   });
 
-  it("counts only automation.reply as the persisted public reply", () => {
+  it("counts a persisted reply only from inline automation or v2 history", () => {
     expect(
       summarizeM3PublicResult({
         ok: true,
@@ -60,6 +60,28 @@ describe("M3 sanitized smoke evidence", () => {
         persisted_reply: { text: "wrong root must not count" }
       }).replyPresent
     ).toBe(false);
+
+    expect(
+      summarizeM3PublicResult(
+        {
+          ok: true,
+          status: "accepted",
+          automation: { status: "processing", next_step: "poll_history" }
+        },
+        {
+          messages: [
+            { sender_role: "visitor", automation: { status: "replied" } },
+            { sender_role: "ai_assistant", text: "Готовый ответ" }
+          ]
+        }
+      )
+    ).toEqual({
+      ok: true,
+      fresh: true,
+      replayed: false,
+      automationReplied: true,
+      replyPresent: true
+    });
   });
 });
 

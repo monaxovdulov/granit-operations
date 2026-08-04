@@ -104,11 +104,20 @@ export class GroundedWidgetAiService implements PublicWidgetAiReplyGenerator {
     this.catalog = options.catalog ?? new EmptyCatalogKnowledgeProvider();
   }
 
-  async generateReply(input: AiTurnInput): Promise<AiReplyCandidateDecision> {
+  async generateReply(
+    input: AiTurnInput,
+    options?: { signal?: AbortSignal }
+  ): Promise<AiReplyCandidateDecision> {
     const deadlineMs = this.options.deadlineMs ?? 18000;
     const startedAt = Date.now();
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), deadlineMs);
+    const abortFromParent = () => controller.abort(options?.signal?.reason);
+    options?.signal?.addEventListener("abort", abortFromParent, { once: true });
+
+    if (options?.signal?.aborted) {
+      abortFromParent();
+    }
 
     try {
       const policyReply = buildWidgetAiDialogueControlReply(input);
@@ -191,6 +200,7 @@ export class GroundedWidgetAiService implements PublicWidgetAiReplyGenerator {
       );
     } finally {
       clearTimeout(timeout);
+      options?.signal?.removeEventListener("abort", abortFromParent);
     }
   }
 

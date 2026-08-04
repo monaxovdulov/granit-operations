@@ -1,3 +1,6 @@
+-- Non-executable provenance archive.
+-- Original path: packages/db/migrations/0010_ai_run_quality_observability.sql
+-- Archived by AI-REF-PR0B A2; superseded by migrations/0017_ai_schema_reconciliation.sql.
 CREATE TABLE ai_runs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   trace_id uuid NOT NULL,

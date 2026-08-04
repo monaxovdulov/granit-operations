@@ -9,7 +9,8 @@ import type { AiState } from "./lead-conversation-types.js";
 import type {
   SaveSiteWidgetAiMessageInput,
   SaveSiteWidgetAiMessageResult,
-  SiteWidgetStoredAiReply
+  SiteWidgetStoredAiReply,
+  WidgetAiTurnIdentity
 } from "./conversation-message-repository.js";
 
 export type SaveAcceptedSiteFormSubmissionInput = {
@@ -32,6 +33,7 @@ export type SaveAcceptedSiteWidgetMessageInput = {
   requestFingerprint: string;
   enqueueAiJob?: boolean;
   aiJobMaxAttempts?: number;
+  aiJobRuntimeMode?: "direct_openai" | "mastra_openai_api";
 };
 
 export type SaveAcceptedSiteWidgetMessageResult = {
@@ -49,6 +51,7 @@ export type SaveAcceptedSiteWidgetMessageResult = {
   aiReply?: SiteWidgetStoredAiReply;
   aiTurnInput?: AiTurnInput;
   aiTurnExecutionContext?: AiTurnExecutionContext;
+  turnIdentity?: WidgetAiTurnIdentity;
   widgetAiJob?: SiteWidgetAiJobSummary;
 };
 
@@ -59,13 +62,16 @@ export type SiteWidgetAiJobStatus =
   | "replied"
   | "degraded"
   | "blocked"
-  | "failed";
+  | "failed"
+  | "superseded";
 
-export type SiteWidgetAiJobSummary = {
+export type SiteWidgetAiJobSummary = WidgetAiTurnIdentity & {
   id: string;
   status: SiteWidgetAiJobStatus;
   attemptCount: number;
   terminalReason?: string;
+  runtimeMode?: "direct_openai" | "mastra_openai_api";
+  queueWaitMs?: number;
 };
 
 export type ClaimedSiteWidgetAiJob = SiteWidgetAiJobSummary & {
@@ -75,13 +81,16 @@ export type ClaimedSiteWidgetAiJob = SiteWidgetAiJobSummary & {
   publicSessionId: string;
   inboundPublicMessageId: string;
   maxAttempts: number;
+  runtimeMode: "direct_openai" | "mastra_openai_api";
+  queueWaitMs: number;
   aiTurnInput: AiTurnInput;
+  aiTurnExecutionContext: AiTurnExecutionContext;
 };
 
 export type FinishSiteWidgetAiJobInput = {
   jobId: string;
   attemptCount: number;
-  status: "replied" | "degraded" | "blocked" | "failed" | "retrying";
+  status: "replied" | "degraded" | "blocked" | "failed" | "retrying" | "superseded";
   terminalReason?: string;
   outputPublicMessageId?: string;
   lastError?: string;
@@ -96,6 +105,13 @@ export type RecordSiteWidgetAiDegradationInput = {
   inputFingerprint: string;
   reason: string;
   metadata: Record<string, unknown>;
+  expectedGenerationEpoch?: number;
+  respondsThroughSequence?: number;
+  runtimeMode?: "direct_openai" | "mastra_openai_api";
+  jobCommit?: {
+    jobId: string;
+    attemptCount: number;
+  };
 };
 
 export type RecordSiteWidgetAiShadowComparisonInput = {
@@ -151,5 +167,9 @@ export interface PublicIntakeRepository {
     leaseMs: number;
     now: Date;
   }): Promise<ClaimedSiteWidgetAiJob | null>;
+  isSiteWidgetAiJobCurrent?(input: {
+    jobId: string;
+    attemptCount: number;
+  }): Promise<boolean>;
   finishSiteWidgetAiJob?(input: FinishSiteWidgetAiJobInput): Promise<void>;
 }

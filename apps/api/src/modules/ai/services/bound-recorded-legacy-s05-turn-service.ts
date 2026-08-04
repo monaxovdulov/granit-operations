@@ -18,6 +18,7 @@ export class BoundRecordedLegacyS05TurnService implements RecordedAiTurnService 
     return this.service.execute({
       executionContext: input.executionContext,
       turnInput: input.turnInput,
+      signal: input.signal,
       generator: this.generator,
       replyApplier: {
         persistReplyAndCompleteRun: ({ run, reply, completionPlan }) =>
@@ -34,7 +35,8 @@ export class BoundRecordedLegacyS05TurnService implements RecordedAiTurnService 
             },
             completionPlan
           })
-      }
+      },
+      noReplyApplier: input.noReplyApplier
     });
   }
 }

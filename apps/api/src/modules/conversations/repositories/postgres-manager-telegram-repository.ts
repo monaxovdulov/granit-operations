@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 
-import { and, eq, or } from "drizzle-orm";
+import { and, eq, or, sql } from "drizzle-orm";
 import { sha256Hex } from "@granit/shared";
 
 import {
@@ -373,7 +373,8 @@ export class PostgresManagerTelegramRepository implements ManagerTelegramReposit
           })
           .from(conversations)
           .where(eq(conversations.id, context.conversationId))
-          .limit(1);
+          .limit(1)
+          .for("update");
 
         if (!conversation || conversation.leadId !== context.leadId) {
           throw new ManagerTelegramReplyContextMissingError();
@@ -387,6 +388,20 @@ export class PostgresManagerTelegramRepository implements ManagerTelegramReposit
           throw new ManagerTelegramReplyRequiresTakeoverError();
         }
 
+        const [turnIdentity] = await tx
+          .update(conversations)
+          .set({
+            lastMessageSequence: sql`${conversations.lastMessageSequence} + 1`,
+            generationEpoch: sql`${conversations.generationEpoch} + 1`,
+            updatedAt: now
+          })
+          .where(eq(conversations.id, conversation.id))
+          .returning({ messageSequence: conversations.lastMessageSequence });
+
+        if (!turnIdentity) {
+          throw new Error("manager reply turn identity update returned no row");
+        }
+
         const [message] = await tx
           .insert(conversationMessages)
           .values({
@@ -396,6 +411,7 @@ export class PostgresManagerTelegramRepository implements ManagerTelegramReposit
             channelIdentityId: conversation.channelIdentityId ?? null,
             direction: "outbound",
             senderRole: "manager",
+            messageSequence: turnIdentity.messageSequence,
             body: input.body,
             idempotencyKey: input.idempotencyKey,
             requestFingerprint: input.requestFingerprint,

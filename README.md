@@ -49,7 +49,7 @@ PublicWidgetIntakeService
 - AI для website widget по умолчанию выключен: `AI_WIDGET_ENABLED=false` или env отсутствует.
 - Когда `AI_WIDGET_ENABLED=true`, режим задаёт `AI_WIDGET_GROUNDED_MODE`.
 - Допустимые режимы: `off`, `shadow`, `enforce`.
-- Неизвестный или пустой `AI_WIDGET_GROUNDED_MODE` трактуется как `enforce`, поэтому rollback должен быть явным: `AI_WIDGET_GROUNDED_MODE=off` или `AI_WIDGET_ENABLED=false`.
+- Отсутствующий, пустой или неизвестный `AI_WIDGET_GROUNDED_MODE` трактуется как `off`; неизвестное значение также пишет sanitized startup error без самого env value. Для customer-visible grounded AI режим `shadow` или `enforce` должен быть задан явно.
 - OpenAI ключ — только server-side: `OPENAI_API_KEY`; он не должен попасть в лендинг, frontend, docs или логи.
 - Primary runtime не Mastra. Mastra/Studio-like observability допустима только позже как optional sink/export layer, см. [ADR-010](docs/adr/ADR-010-AI_OBSERVABILITY_RUNTIME_BOUNDARY_RU.md).
 

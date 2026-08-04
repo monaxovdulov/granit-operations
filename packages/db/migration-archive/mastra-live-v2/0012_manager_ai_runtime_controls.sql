@@ -1,3 +1,6 @@
+-- Non-executable provenance archive.
+-- Original path: packages/db/migrations/0012_manager_ai_runtime_controls.sql
+-- Archived by AI-REF-PR0B A2; active equivalent remains migrations/0014_manager_ai_runtime_controls.sql.
 CREATE TABLE ai_runtime_controls (
   scope text PRIMARY KEY,
   enabled boolean NOT NULL DEFAULT true,

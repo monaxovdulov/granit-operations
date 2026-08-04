@@ -7,7 +7,7 @@ import {
 import { validateLegacyS05Candidate } from "./legacy-s05-validator.js";
 
 export interface LegacyS05DecisionGenerator {
-  generateReply(input: AiTurnInput): Promise<unknown>;
+  generateReply(input: AiTurnInput, options?: { signal?: AbortSignal }): Promise<unknown>;
 }
 
 export type LegacyS05PersistReplyInput = {

@@ -120,6 +120,8 @@ describe("bounded AI turn context", () => {
       inboundPublicMessageId: first.publicMessageId,
       idempotencyKey: `ai:${first.publicMessageId}`,
       requestFingerprint: "first-outbound-fingerprint",
+      expectedGenerationEpoch: first.turnIdentity!.expectedGenerationEpoch,
+      respondsThroughSequence: first.turnIdentity!.respondsThroughSequence,
       body: "Какой формат памятника вы рассматриваете?",
       sourcePageUrl: "https://granit.example/catalog",
       metadata: {}
@@ -212,7 +214,7 @@ function widgetRequest(input: {
   text: string;
 }): SiteWidgetMessageRequest {
   return {
-    schema_version: "site_widget.v1",
+    schema_version: "site_widget.v2",
     event_type: "site_widget.message_submitted",
     idempotency_key: input.idempotencyKey,
     submitted_at: input.submittedAt,

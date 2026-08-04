@@ -13,5 +13,5 @@ export type PublicWidgetAiUnavailableReason = AiUnavailableReason;
 export type PublicWidgetAiReplyResult = AiReplyCandidateDecision;
 
 export interface PublicWidgetAiReplyGenerator {
-  generateReply(input: AiTurnInput): Promise<unknown>;
+  generateReply(input: AiTurnInput, options?: { signal?: AbortSignal }): Promise<unknown>;
 }

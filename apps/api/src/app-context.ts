@@ -58,6 +58,15 @@ export type AppContextOptions = {
   telegramBot?: TelegramBotServiceOptions;
 };
 
+type WidgetAiJobWorkerAssemblyOptions = {
+  enabled: boolean;
+  pollIntervalMs: number;
+  leaseMs: number;
+  retryBackoffMs: number;
+  maxAttempts: number;
+  globalConcurrency?: number;
+};
+
 type DirectWidgetAiAssemblyOptions = {
   enabled: boolean;
   runtimeMode?: "direct_openai";
@@ -72,19 +81,14 @@ type DirectWidgetAiAssemblyOptions = {
   shadowObservationSink?: WidgetAiShadowObservationSink;
   replyGenerator?: PublicWidgetAiReplyGenerator;
   runRepository?: AiRunRepository;
-  jobWorker?: {
-    enabled: boolean;
-    pollIntervalMs: number;
-    leaseMs: number;
-    retryBackoffMs: number;
-    maxAttempts: number;
-  };
+  jobWorker?: WidgetAiJobWorkerAssemblyOptions;
 };
 
 type MastraLocalFakeWidgetAiAssemblyOptions = {
   enabled: boolean;
   runtimeMode: "mastra_openai_api";
   runRepository?: AiRunRepository;
+  jobWorker?: WidgetAiJobWorkerAssemblyOptions;
   localFake: {
     agent: MastraLiveV2AgentPort;
     modelName: string;
@@ -96,6 +100,7 @@ type MastraStagingOpenAiWidgetAiAssemblyOptions = {
   enabled: boolean;
   runtimeMode: "mastra_openai_api";
   runRepository?: AiRunRepository;
+  jobWorker?: never;
   stagingOpenAi: {
     generator: ObservedLiveV2DecisionGenerator;
     modelName: typeof MASTRA_OPENAI_MODEL;
@@ -133,10 +138,8 @@ export function buildAppContext(options: AppContextOptions) {
             replyGenerator: widgetAiReplyGenerator,
             turnExecutor: widgetAiTurnExecutor,
             requiresRecordedExecutor: widgetAiRequiresRecordedExecutor(options.widgetAi),
-            jobMaxAttempts:
-              options.widgetAi.runtimeMode === "mastra_openai_api"
-                ? undefined
-                : options.widgetAi.jobWorker?.maxAttempts
+            jobMaxAttempts: options.widgetAi.jobWorker?.maxAttempts,
+            runtimeMode: options.widgetAi.runtimeMode ?? "direct_openai"
           }
         : undefined
     })

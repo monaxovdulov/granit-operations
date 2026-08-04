@@ -12,6 +12,7 @@ import type {
   RecordedLegacyS05ReplyApplier,
   RecordedLegacyS05TurnResult
 } from "../ports/recorded-legacy-s05-turn.js";
+import type { RecordedAiNoReplyApplier } from "../ports/recorded-ai-turn.js";
 import type {
   AiRunModelConfig,
   BeginAiRunResult,
@@ -72,8 +73,10 @@ export class RecordedLegacyS05TurnService {
   async execute(input: {
     executionContext: AiTurnExecutionContext;
     turnInput: AiTurnInput;
+    signal?: AbortSignal;
     generator: LegacyS05DecisionGenerator;
     replyApplier: RecordedLegacyS05ReplyApplier;
+    noReplyApplier?: RecordedAiNoReplyApplier;
   }): Promise<RecordedLegacyS05TurnResult> {
     const inputFingerprint = input.executionContext.turn.inputFingerprint;
 
@@ -106,6 +109,8 @@ export class RecordedLegacyS05TurnService {
     } catch {
       throw new AiRunRecorderUnavailableError();
     }
+
+    throwIfRecordedTurnAborted(input.signal);
 
     if (beginResult.kind === "terminal_replay") {
       return { kind: "terminal_replay", run: beginResult.run };
@@ -140,7 +145,11 @@ export class RecordedLegacyS05TurnService {
             generatorStartedAt = this.clock();
 
             try {
-              const candidate = await input.generator.generateReply(turnInput);
+              throwIfRecordedTurnAborted(input.signal);
+              const candidate = await input.generator.generateReply(turnInput, {
+                signal: input.signal
+              });
+              throwIfRecordedTurnAborted(input.signal);
               providerObservation = readTrustedWidgetAiProviderObservation(candidate) ?? {
                 observedModelProvider: "none"
               };
@@ -163,6 +172,7 @@ export class RecordedLegacyS05TurnService {
         },
         applier: {
           persistReply: async (reply) => {
+            throwIfRecordedTurnAborted(input.signal);
             const beforeApply = this.clock();
             replyApplyStartedAt = beforeApply;
             const descriptor = legacyS05GeneratorSpanDescriptor(
@@ -300,6 +310,7 @@ export class RecordedLegacyS05TurnService {
         )
       );
 
+      throwIfRecordedTurnAborted(input.signal);
       const completed = await this.completeWithoutReply(
         run,
         this.completion(
@@ -309,11 +320,16 @@ export class RecordedLegacyS05TurnService {
           providerObservation.usage,
           providerObservation,
           false
-        )
+        ),
+        input.noReplyApplier
       );
       return { kind: "executed", run: completed, outcome };
     } catch (error) {
       if (error instanceof AiRunRecorderUnavailableError) {
+        throw error;
+      }
+
+      if (input.signal?.aborted) {
         throw error;
       }
 
@@ -359,7 +375,8 @@ export class RecordedLegacyS05TurnService {
           replyInProgress?.providerObservation.usage,
           replyInProgress?.providerObservation ?? { observedModelProvider: "none" },
           false
-        )
+        ),
+        input.noReplyApplier
       );
       throw new RecordedLegacyS05ExecutionError();
     }
@@ -367,8 +384,13 @@ export class RecordedLegacyS05TurnService {
 
   private async completeWithoutReply(
     run: RunningAiRunRecord,
-    completion: AiRunTerminalCompletion
+    completion: AiRunTerminalCompletion,
+    applier?: RecordedAiNoReplyApplier
   ): Promise<TerminalAiRunRecord> {
+    if (applier) {
+      return applier.completeWithoutReply({ run, completion });
+    }
+
     try {
       return await this.options.repository.completeWithoutReply({ run, completion });
     } catch {
@@ -418,6 +440,12 @@ export class RecordedLegacyS05TurnService {
       latencyMs,
       ...(errorCode ? { errorCode } : {})
     };
+  }
+}
+
+function throwIfRecordedTurnAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) {
+    throw new RecordedLegacyS05ExecutionError();
   }
 }
 

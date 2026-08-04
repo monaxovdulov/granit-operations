@@ -4,6 +4,7 @@ import {
   desc,
   eq,
   gt,
+  inArray,
   isNotNull,
   lt,
   lte,
@@ -45,7 +46,6 @@ import {
 } from "@granit/contracts";
 
 import {
-  AI_TURN_INPUT_VERSION,
   buildSiteWidgetAiTurnExecutionContext,
   buildStageASiteWidgetAiTurnInput,
   type AiTurnInput,
@@ -94,6 +94,7 @@ import type {
   SiteWidgetAiMessageLookupResult,
   SiteWidgetStoredAiReply
 } from "./conversation-message-repository.js";
+import { buildWidgetAiTurnIdempotencyKey } from "./conversation-message-repository.js";
 import type { IntakeRepository } from "./intake-repository.js";
 import { AI_REVIEW_LABELS } from "./manager-lead-repository.js";
 import { AiControlVersionConflictError } from "./manager-lead-repository.js";
@@ -116,6 +117,7 @@ import type {
   TakeoverConversationInput,
   TakeoverSiteWidgetConversationInput
 } from "./manager-lead-repository.js";
+
 import type {
   BindManagerTelegramChatInput,
   BindManagerTelegramChatResult,
@@ -144,6 +146,8 @@ import type {
   SiteWidgetAiJobStatus,
   SiteWidgetAiJobSummary
 } from "./public-intake-repository.js";
+
+const WIDGET_AI_MIN_DEBOUNCE_MS = 600;
 
 export class PostgresIntakeRepository implements IntakeRepository {
   private readonly managerTelegramRepository: PostgresManagerTelegramRepository;
@@ -265,7 +269,8 @@ export class PostgresIntakeRepository implements IntakeRepository {
           })
           .from(conversations)
           .where(eq(conversations.channelIdentityId, identity.id))
-          .limit(1);
+          .limit(1)
+          .for("update");
 
         if (!conversation) {
           const [lead] = await tx
@@ -393,6 +398,23 @@ export class PostgresIntakeRepository implements IntakeRepository {
           return this.replayExistingInboundMessage(providerReplay, input.requestFingerprint);
         }
 
+        const [turnIdentity] = await tx
+          .update(conversations)
+          .set({
+            lastMessageSequence: sql`${conversations.lastMessageSequence} + 1`,
+            generationEpoch: sql`${conversations.generationEpoch} + 1`,
+            updatedAt: now
+          })
+          .where(eq(conversations.id, conversation.id))
+          .returning({
+            expectedGenerationEpoch: conversations.generationEpoch,
+            respondsThroughSequence: conversations.lastMessageSequence
+          });
+
+        if (!turnIdentity) {
+          throw new Error("conversation turn identity update returned no row");
+        }
+
         const [message] = await tx
           .insert(conversationMessages)
           .values({
@@ -405,6 +427,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
             providerSentAt: input.providerSentAt ? new Date(input.providerSentAt) : null,
             direction: "inbound",
             senderRole: "visitor",
+            messageSequence: turnIdentity.respondsThroughSequence,
             body: messageBody(input, contentType),
             idempotencyKey: input.idempotencyKey,
             requestFingerprint: input.requestFingerprint,
@@ -479,7 +502,8 @@ export class PostgresIntakeRepository implements IntakeRepository {
                     contentType: conversationMessages.contentType,
                     submittedAt: conversationMessages.submittedAt,
                     body: conversationMessages.body,
-                    createdAt: conversationMessages.createdAt
+                    createdAt: conversationMessages.createdAt,
+                    messageSequence: conversationMessages.messageSequence
                   })
                   .from(conversationMessages)
                   .where(eq(conversationMessages.conversationId, conversation.id))
@@ -552,33 +576,68 @@ export class PostgresIntakeRepository implements IntakeRepository {
           persistedSlots: toAiKnownSlots(slotRows),
           persistedRequirements: toAiKnownRequirements(requirementRows)
         });
-        const [widgetAiJob] =
+        let widgetAiJob:
+          | {
+              id: string;
+              status: string;
+              attemptCount: number;
+              terminalReason: string | null;
+              expectedGenerationEpoch: number;
+              respondsThroughSequence: number;
+            }
+          | undefined;
+
+        if (
           input.enqueueWidgetAiJob &&
           input.channel === "site_widget" &&
           effectiveAgentAllowedToReply &&
           aiTurnInput
-            ? await tx
-                .insert(widgetAiJobs)
-                .values({
-                  inboundMessageId: message.id,
-                  inboundPublicMessageId: message.publicMessageId,
-                  conversationId: conversation.id,
-                  leadId: conversation.leadId,
-                  status: "pending",
-                  inputPayload: aiTurnInput,
-                  maxAttempts: Math.max(1, Math.min(input.widgetAiJobMaxAttempts ?? 3, 10)),
-                  availableAt: now,
-                  createdAt: now,
-                  updatedAt: now
-                })
-                .onConflictDoNothing({ target: widgetAiJobs.inboundMessageId })
-                .returning({
-                  id: widgetAiJobs.id,
-                  status: widgetAiJobs.status,
-                  attemptCount: widgetAiJobs.attemptCount,
-                  terminalReason: widgetAiJobs.terminalReason
-                })
-            : [];
+        ) {
+          await tx
+            .update(widgetAiJobs)
+            .set({
+              status: "superseded",
+              terminalReason: "newer_inbound",
+              leaseExpiresAt: null,
+              completedAt: now,
+              updatedAt: now
+            })
+            .where(
+              and(
+                eq(widgetAiJobs.conversationId, conversation.id),
+                or(
+                  eq(widgetAiJobs.status, "pending"),
+                  eq(widgetAiJobs.status, "retrying")
+                )
+              )
+            );
+
+          [widgetAiJob] = await tx
+            .insert(widgetAiJobs)
+            .values({
+              inboundMessageId: message.id,
+              inboundPublicMessageId: message.publicMessageId,
+              conversationId: conversation.id,
+              leadId: conversation.leadId,
+              status: "pending",
+              expectedGenerationEpoch: turnIdentity.expectedGenerationEpoch,
+              respondsThroughSequence: turnIdentity.respondsThroughSequence,
+              runtimeMode: input.widgetAiRuntimeMode ?? "direct_openai",
+              maxAttempts: Math.max(1, Math.min(input.widgetAiJobMaxAttempts ?? 3, 10)),
+              availableAt: new Date(now.getTime() + WIDGET_AI_MIN_DEBOUNCE_MS),
+              createdAt: now,
+              updatedAt: now
+            })
+            .onConflictDoNothing({ target: widgetAiJobs.inboundMessageId })
+            .returning({
+              id: widgetAiJobs.id,
+              status: widgetAiJobs.status,
+              attemptCount: widgetAiJobs.attemptCount,
+              terminalReason: widgetAiJobs.terminalReason,
+              expectedGenerationEpoch: widgetAiJobs.expectedGenerationEpoch,
+              respondsThroughSequence: widgetAiJobs.respondsThroughSequence
+            });
+        }
 
         return {
           leadId: conversation.leadId,
@@ -603,6 +662,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
                 requestFingerprint: input.requestFingerprint
               })
             : undefined,
+          turnIdentity,
           widgetAiJob: widgetAiJob ? toSiteWidgetAiJobSummary(widgetAiJob) : undefined
         };
       });
@@ -654,6 +714,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
         input.request.schema_version === SITE_WIDGET_V2_CONTRACT_VERSION,
       enqueueWidgetAiJob: input.enqueueAiJob,
       widgetAiJobMaxAttempts: input.aiJobMaxAttempts,
+      widgetAiRuntimeMode: input.aiJobRuntimeMode,
       metadata: {
         schema_version: input.request.schema_version,
         event_type: input.request.event_type
@@ -675,6 +736,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
       aiReply: result.existingAiReply,
       aiTurnInput: result.aiTurnInput,
       aiTurnExecutionContext: result.aiTurnExecutionContext,
+      turnIdentity: result.turnIdentity,
       widgetAiJob: result.widgetAiJob
     };
   }
@@ -698,18 +760,41 @@ export class PostgresIntakeRepository implements IntakeRepository {
         const sanitizedMetadata = sanitizeAiObservabilityMetadata(input.metadata);
         const nextAiState =
           input.agentAllowedToReplyAfterSend === false ? "needs_manager" : "ai_collecting_info";
+        const preserveWatching = input.agentAllowedToReplyAfterSend !== false;
         const [sendGate] = await tx
           .update(conversations)
           .set({
-            agentAllowedToReply: input.agentAllowedToReplyAfterSend ?? true,
-            aiState: nextAiState,
+            agentAllowedToReply: preserveWatching
+              ? sql<boolean>`CASE
+                  WHEN ${conversations.aiState} = 'watching'
+                  THEN ${conversations.agentAllowedToReply}
+                  ELSE ${input.agentAllowedToReplyAfterSend ?? true}
+                END`
+              : false,
+            aiState: preserveWatching
+              ? sql<string>`CASE
+                  WHEN ${conversations.aiState} = 'watching'
+                  THEN ${conversations.aiState}
+                  ELSE ${nextAiState}
+                END`
+              : nextAiState,
+            lastMessageSequence: sql`${conversations.lastMessageSequence} + 1`,
             updatedAt: now
           })
           .where(
             and(
               eq(conversations.id, input.conversationId),
               eq(conversations.leadId, input.leadId),
+              eq(conversations.status, "open"),
               eq(conversations.agentAllowedToReply, true),
+              eq(conversations.generationEpoch, input.expectedGenerationEpoch),
+              sql`(
+                SELECT max(visitor_message.message_sequence)
+                FROM conversation_messages visitor_message
+                WHERE visitor_message.conversation_id = ${conversations.id}
+                  AND visitor_message.direction = 'inbound'
+                  AND visitor_message.sender_role = 'visitor'
+              ) = ${input.respondsThroughSequence}`,
               sql`EXISTS (
                 SELECT 1 FROM ${aiRuntimeControls}
                 WHERE ${aiRuntimeControls.scope} = 'site_widget'
@@ -721,7 +806,8 @@ export class PostgresIntakeRepository implements IntakeRepository {
             id: conversations.id,
             leadId: conversations.leadId,
             publicConversationId: conversations.publicConversationId,
-            channelIdentityId: conversations.channelIdentityId
+            channelIdentityId: conversations.channelIdentityId,
+            messageSequence: conversations.lastMessageSequence
           });
 
         if (!sendGate) {
@@ -747,6 +833,29 @@ export class PostgresIntakeRepository implements IntakeRepository {
           throw new AgentReplyBlockedError();
         }
 
+        const inboundMessages = await tx
+          .select({ id: conversationMessages.id })
+          .from(conversationMessages)
+          .where(
+            and(
+              eq(conversationMessages.publicMessageId, input.inboundPublicMessageId),
+              eq(conversationMessages.conversationId, input.conversationId),
+              eq(conversationMessages.leadId, input.leadId),
+              eq(conversationMessages.direction, "inbound")
+            )
+          )
+          .limit(2);
+
+        if (inboundMessages.length !== 1) {
+          throw new Error("AI run inbound message linkage is not unique");
+        }
+
+        const inboundMessage = inboundMessages[0];
+
+        if (!inboundMessage) {
+          throw new Error("AI run inbound message linkage is missing");
+        }
+
         const [message] = await tx
           .insert(conversationMessages)
           .values({
@@ -756,6 +865,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
             channelIdentityId: sendGate.channelIdentityId ?? null,
             direction: "outbound",
             senderRole: "ai_assistant",
+            messageSequence: sendGate.messageSequence,
             body: input.body,
             idempotencyKey: input.idempotencyKey,
             requestFingerprint: input.requestFingerprint,
@@ -888,12 +998,21 @@ export class PostgresIntakeRepository implements IntakeRepository {
         }
 
         if (input.aiRun) {
+          const modelEvidence = toGroundedModelEvidence(sanitizedMetadata, input.aiRun.modelVersion);
           await tx.insert(aiRuns).values({
+            recordingContract: "native_grounded",
             conversationId: input.conversationId,
             leadId: input.leadId,
+            inboundMessageId: inboundMessage.id,
             inboundPublicMessageId: input.inboundPublicMessageId,
+            outboundMessageId: message.id,
             outboundPublicMessageId: message.publicMessageId,
-            status: input.handoff ? "handoff" : "replied",
+            channel: "site_widget",
+            runtimeMode: "direct_openai",
+            decisionProfile: "grounded_v1",
+            decisionAction: toCanonicalAiRunAction(input.aiRun.action),
+            idempotencyKey: input.idempotencyKey,
+            status: input.handoff ? "handed_off" : "persisted",
             action: input.aiRun.action,
             intent: input.aiRun.intent,
             inputFingerprint: input.aiRun.inputFingerprint,
@@ -908,9 +1027,19 @@ export class PostgresIntakeRepository implements IntakeRepository {
             verifierVerdict: input.aiRun.verifierVerdict ?? null,
             catalogVersion: input.aiRun.catalogVersion ?? null,
             catalogContentHash: input.aiRun.catalogContentHash ?? null,
+            configuredModelProvider: modelEvidence.configuredProvider,
+            configuredModelName: modelEvidence.modelName,
+            observedModelProvider: modelEvidence.observedProvider,
+            observedModelName: modelEvidence.observedModelName,
+            sendGateResult: "allowed",
+            sendGateCheckedAt: now,
+            outcomeReason: input.handoff ? "handoff_to_manager" : "reply_persisted",
+            profileValidatorResult: toProfileValidatorResult(input.aiRun.verifierVerdict),
             reason: input.handoff?.reason ?? null,
             metadata: sanitizedMetadata,
-            createdAt: now
+            completedAt: now,
+            createdAt: now,
+            updatedAt: now
           });
         }
 
@@ -974,6 +1103,37 @@ export class PostgresIntakeRepository implements IntakeRepository {
           })
         );
 
+        if (input.jobCommit) {
+          const [completedJob] = await tx
+            .update(widgetAiJobs)
+            .set({
+              status: "replied",
+              terminalReason: input.handoff ? "handoff" : null,
+              outputPublicMessageId: message.publicMessageId,
+              leaseExpiresAt: null,
+              completedAt: now,
+              updatedAt: now
+            })
+            .where(
+              and(
+                eq(widgetAiJobs.id, input.jobCommit.jobId),
+                eq(widgetAiJobs.status, "processing"),
+                eq(widgetAiJobs.attemptCount, input.jobCommit.attemptCount),
+                isNotNull(widgetAiJobs.leaseExpiresAt),
+                gt(widgetAiJobs.leaseExpiresAt, now),
+                eq(widgetAiJobs.conversationId, input.conversationId),
+                eq(widgetAiJobs.expectedGenerationEpoch, input.expectedGenerationEpoch),
+                eq(widgetAiJobs.respondsThroughSequence, input.respondsThroughSequence),
+                eq(widgetAiJobs.runtimeMode, input.runtimeMode ?? "direct_openai")
+              )
+            )
+            .returning({ id: widgetAiJobs.id });
+
+          if (!completedJob) {
+            throw new AgentReplyBlockedError();
+          }
+        }
+
         return {
           publicMessageId: message.publicMessageId,
           body: message.body,
@@ -1010,6 +1170,14 @@ export class PostgresIntakeRepository implements IntakeRepository {
   async recordSiteWidgetAiDegradation(
     input: RecordSiteWidgetAiDegradationInput
   ): Promise<void> {
+    if (
+      input.jobCommit &&
+      (input.expectedGenerationEpoch === undefined ||
+        input.respondsThroughSequence === undefined)
+    ) {
+      throw new Error("queued AI degradation requires response-window identity");
+    }
+
     await this.db.transaction(async (tx) => {
       const now = new Date();
       const sanitizedMetadata = sanitizeAiObservabilityMetadata(input.metadata);
@@ -1021,7 +1189,28 @@ export class PostgresIntakeRepository implements IntakeRepository {
         .where(
           and(
             eq(conversations.id, input.conversationId),
-            eq(conversations.leadId, input.leadId)
+            eq(conversations.leadId, input.leadId),
+            input.jobCommit ? eq(conversations.status, "open") : undefined,
+            input.jobCommit ? eq(conversations.agentAllowedToReply, true) : undefined,
+            input.jobCommit
+              ? eq(conversations.generationEpoch, input.expectedGenerationEpoch!)
+              : undefined,
+            input.jobCommit
+              ? sql`(
+                  SELECT max(visitor_message.message_sequence)
+                  FROM conversation_messages visitor_message
+                  WHERE visitor_message.conversation_id = ${conversations.id}
+                    AND visitor_message.direction = 'inbound'
+                    AND visitor_message.sender_role = 'visitor'
+                ) = ${input.respondsThroughSequence!}`
+              : undefined,
+            input.jobCommit
+              ? sql`EXISTS (
+                  SELECT 1 FROM ${aiRuntimeControls}
+                  WHERE ${aiRuntimeControls.scope} = 'site_widget'
+                    AND ${aiRuntimeControls.enabled} = true
+                )`
+              : undefined
           )
         )
         .returning({ publicConversationId: conversations.publicConversationId });
@@ -1030,13 +1219,42 @@ export class PostgresIntakeRepository implements IntakeRepository {
         throw new Error("conversation not found for AI degradation");
       }
 
+      const inboundMessages = await tx
+        .select({ id: conversationMessages.id })
+        .from(conversationMessages)
+        .where(
+          and(
+            eq(conversationMessages.publicMessageId, input.inboundPublicMessageId),
+            eq(conversationMessages.conversationId, input.conversationId),
+            eq(conversationMessages.leadId, input.leadId),
+            eq(conversationMessages.direction, "inbound")
+          )
+        )
+        .limit(2);
+
+      if (inboundMessages.length !== 1 || !inboundMessages[0]) {
+        throw new Error("AI degradation inbound message linkage is not unique");
+      }
+
+      const inboundMessage = inboundMessages[0];
+      const modelVersion = readOptionalString(sanitizedMetadata, "model_name");
+      const modelEvidence = toGroundedModelEvidence(sanitizedMetadata, modelVersion);
+      const degradationEvidence = toCanonicalDegradationEvidence(input.reason);
       const [run] = await tx
         .insert(aiRuns)
         .values({
+          recordingContract: "native_grounded",
           conversationId: input.conversationId,
           leadId: input.leadId,
+          inboundMessageId: inboundMessage.id,
           inboundPublicMessageId: input.inboundPublicMessageId,
-          status: "degraded",
+          channel: "site_widget",
+          runtimeMode: input.runtimeMode ?? "direct_openai",
+          decisionProfile: "grounded_v1",
+          decisionAction: "no_reply",
+          action: "fallback",
+          idempotencyKey: `ai-degradation:${input.inboundPublicMessageId}`,
+          status: "fallback_unavailable",
           inputFingerprint: input.inputFingerprint,
           promptVersion: readOptionalString(sanitizedMetadata, "prompt_version") ?? null,
           policyVersion: readOptionalString(sanitizedMetadata, "policy_version") ?? null,
@@ -1044,8 +1262,8 @@ export class PostgresIntakeRepository implements IntakeRepository {
             readOptionalString(sanitizedMetadata, "catalog_version") ??
             readOptionalString(sanitizedMetadata, "knowledge_version") ??
             null,
-          modelName: readOptionalString(sanitizedMetadata, "model_name") ?? null,
-          generatorModelName: readOptionalString(sanitizedMetadata, "model_name") ?? null,
+          modelName: modelVersion ?? null,
+          generatorModelName: modelVersion ?? null,
           verifierModelName:
             readOptionalString(sanitizedMetadata, "verifier_model_name") ?? null,
           verifierVersion: readOptionalString(sanitizedMetadata, "verifier_version") ?? null,
@@ -1053,29 +1271,69 @@ export class PostgresIntakeRepository implements IntakeRepository {
           catalogVersion: readOptionalString(sanitizedMetadata, "catalog_version") ?? null,
           catalogContentHash:
             readOptionalString(sanitizedMetadata, "catalog_content_hash") ?? null,
+          configuredModelProvider: modelEvidence.configuredProvider,
+          configuredModelName: modelEvidence.modelName,
+          observedModelProvider: modelEvidence.observedProvider,
+          observedModelName: modelEvidence.observedModelName,
+          sendGateResult: "not_checked",
+          outcomeReason: degradationEvidence.outcomeReason,
+          failureCode: degradationEvidence.failureCode,
+          profileValidatorResult: toProfileValidatorResult(
+            readOptionalString(sanitizedMetadata, "verifier_verdict")
+          ),
           reason: input.reason,
           metadata: sanitizedMetadata,
-          createdAt: now
+          completedAt: now,
+          createdAt: now,
+          updatedAt: now
         })
         .onConflictDoNothing({ target: aiRuns.inboundPublicMessageId })
         .returning({ id: aiRuns.id });
 
       if (!run) {
+        if (input.jobCommit) {
+          throw new AgentReplyBlockedError();
+        }
         return;
       }
 
-      const [inboundMessage] = await tx
-        .select({ id: conversationMessages.id })
-        .from(conversationMessages)
-        .where(eq(conversationMessages.publicMessageId, input.inboundPublicMessageId))
-        .limit(1);
+      if (input.jobCommit) {
+        const [completedJob] = await tx
+          .update(widgetAiJobs)
+          .set({
+            status: "degraded",
+            terminalReason: input.reason,
+            leaseExpiresAt: null,
+            completedAt: now,
+            updatedAt: now
+          })
+          .where(
+            and(
+              eq(widgetAiJobs.id, input.jobCommit.jobId),
+              eq(widgetAiJobs.status, "processing"),
+              eq(widgetAiJobs.attemptCount, input.jobCommit.attemptCount),
+              isNotNull(widgetAiJobs.leaseExpiresAt),
+              gt(widgetAiJobs.leaseExpiresAt, now),
+              eq(widgetAiJobs.conversationId, input.conversationId),
+              eq(widgetAiJobs.expectedGenerationEpoch, input.expectedGenerationEpoch!),
+              eq(widgetAiJobs.respondsThroughSequence, input.respondsThroughSequence!),
+              eq(widgetAiJobs.runtimeMode, input.runtimeMode ?? "direct_openai")
+            )
+          )
+          .returning({ id: widgetAiJobs.id });
+
+        if (!completedJob) {
+          throw new AgentReplyBlockedError();
+        }
+      }
+
       const qualityEvent = toAiQualityEvent(input.reason);
 
       await tx.insert(aiQualityEvents).values({
         aiRunId: run.id,
         leadId: input.leadId,
         conversationId: input.conversationId,
-        messageId: inboundMessage?.id ?? null,
+        messageId: inboundMessage.id,
         eventType: qualityEvent.eventType,
         reasonCode: qualityEvent.reasonCode,
         severity: qualityEvent.severity,
@@ -1097,17 +1355,15 @@ export class PostgresIntakeRepository implements IntakeRepository {
         createdAt: now
       });
 
-      if (inboundMessage) {
-        await enqueueAiDegradationManagerNotifications(tx, {
-          leadId: input.leadId,
-          conversationId: input.conversationId,
-          conversationMessageId: inboundMessage.id,
-          publicConversationId: conversation.publicConversationId,
-          publicMessageId: input.inboundPublicMessageId,
-          reason: input.reason,
-          createdAt: now
-        });
-      }
+      await enqueueAiDegradationManagerNotifications(tx, {
+        leadId: input.leadId,
+        conversationId: input.conversationId,
+        conversationMessageId: inboundMessage.id,
+        publicConversationId: conversation.publicConversationId,
+        publicMessageId: input.inboundPublicMessageId,
+        reason: input.reason,
+        createdAt: now
+      });
     });
   }
 
@@ -1138,7 +1394,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
   }): Promise<ClaimedSiteWidgetAiJob | null> {
     const leaseMs = Math.max(5_000, Math.min(input.leaseMs, 120_000));
 
-    return this.db.transaction(async (tx) => {
+    const claimed = await this.db.transaction(async (tx) => {
       await tx
         .update(widgetAiJobs)
         .set({
@@ -1158,6 +1414,31 @@ export class PostgresIntakeRepository implements IntakeRepository {
           )
         );
 
+      await tx
+        .update(widgetAiJobs)
+        .set({
+          status: "superseded",
+          terminalReason: "turn_not_current",
+          leaseExpiresAt: null,
+          updatedAt: input.now,
+          completedAt: input.now
+        })
+        .where(
+          and(
+            or(eq(widgetAiJobs.status, "pending"), eq(widgetAiJobs.status, "retrying")),
+            sql`EXISTS (
+              SELECT 1
+              FROM conversations current_conversation
+              WHERE current_conversation.id = ${widgetAiJobs.conversationId}
+                AND (
+                  current_conversation.generation_epoch <> ${widgetAiJobs.expectedGenerationEpoch}
+                  OR current_conversation.status <> 'open'
+                  OR current_conversation.agent_allowed_to_reply <> true
+                )
+            )`
+          )
+        );
+
       const [row] = await tx
         .select({
           id: widgetAiJobs.id,
@@ -1170,7 +1451,10 @@ export class PostgresIntakeRepository implements IntakeRepository {
           publicConversationId: conversations.publicConversationId,
           publicSessionId: widgetSessions.publicSessionId,
           inboundPublicMessageId: widgetAiJobs.inboundPublicMessageId,
-          inputPayload: widgetAiJobs.inputPayload
+          expectedGenerationEpoch: widgetAiJobs.expectedGenerationEpoch,
+          respondsThroughSequence: widgetAiJobs.respondsThroughSequence,
+          runtimeMode: widgetAiJobs.runtimeMode,
+          createdAt: widgetAiJobs.createdAt
         })
         .from(widgetAiJobs)
         .innerJoin(conversations, eq(widgetAiJobs.conversationId, conversations.id))
@@ -1178,19 +1462,28 @@ export class PostgresIntakeRepository implements IntakeRepository {
         .where(
           and(
             sql`${widgetAiJobs.attemptCount} < ${widgetAiJobs.maxAttempts}`,
+            eq(conversations.status, "open"),
+            eq(conversations.agentAllowedToReply, true),
+            sql`EXISTS (
+              SELECT 1 FROM ${aiRuntimeControls}
+              WHERE ${aiRuntimeControls.scope} = 'site_widget'
+                AND ${aiRuntimeControls.enabled} = true
+            )`,
+            sql`${conversations.generationEpoch} = ${widgetAiJobs.expectedGenerationEpoch}`,
+            sql`(
+              SELECT max(visitor_message.message_sequence)
+              FROM conversation_messages visitor_message
+              WHERE visitor_message.conversation_id = ${widgetAiJobs.conversationId}
+                AND visitor_message.direction = 'inbound'
+                AND visitor_message.sender_role = 'visitor'
+            ) = ${widgetAiJobs.respondsThroughSequence}`,
             sql`NOT EXISTS (
               SELECT 1
-              FROM widget_ai_jobs older_widget_ai_jobs
-              WHERE older_widget_ai_jobs.conversation_id = ${widgetAiJobs.conversationId}
-                AND older_widget_ai_jobs.id <> ${widgetAiJobs.id}
-                AND older_widget_ai_jobs.status IN ('pending', 'processing', 'retrying')
-                AND (
-                  older_widget_ai_jobs.created_at < ${widgetAiJobs.createdAt}
-                  OR (
-                    older_widget_ai_jobs.created_at = ${widgetAiJobs.createdAt}
-                    AND older_widget_ai_jobs.id::text < ${widgetAiJobs.id}::text
-                  )
-                )
+              FROM widget_ai_jobs active_widget_ai_job
+              WHERE active_widget_ai_job.conversation_id = ${widgetAiJobs.conversationId}
+                AND active_widget_ai_job.id <> ${widgetAiJobs.id}
+                AND active_widget_ai_job.status = 'processing'
+                AND active_widget_ai_job.lease_expires_at > ${input.now.toISOString()}::timestamptz
             )`,
             or(
               and(
@@ -1216,21 +1509,6 @@ export class PostgresIntakeRepository implements IntakeRepository {
         return null;
       }
 
-      if (!isPersistedAiTurnInput(row.inputPayload)) {
-        await tx
-          .update(widgetAiJobs)
-          .set({
-            status: "failed",
-            terminalReason: "invalid_job_payload",
-            lastError: "Persisted AI turn payload failed validation",
-            leaseExpiresAt: null,
-            updatedAt: input.now,
-            completedAt: input.now
-          })
-          .where(eq(widgetAiJobs.id, row.id));
-        return null;
-      }
-
       const attemptCount = row.attemptCount + 1;
       await tx
         .update(widgetAiJobs)
@@ -1245,7 +1523,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
 
       return {
         id: row.id,
-        status: "processing",
+        status: "processing" as const,
         attemptCount,
         maxAttempts: row.maxAttempts,
         terminalReason: row.terminalReason ?? undefined,
@@ -1254,9 +1532,73 @@ export class PostgresIntakeRepository implements IntakeRepository {
         publicConversationId: row.publicConversationId,
         publicSessionId: row.publicSessionId,
         inboundPublicMessageId: row.inboundPublicMessageId,
-        aiTurnInput: row.inputPayload
+        expectedGenerationEpoch: row.expectedGenerationEpoch,
+        respondsThroughSequence: row.respondsThroughSequence,
+        runtimeMode: toWidgetAiRuntimeMode(row.runtimeMode),
+        queueWaitMs: Math.max(0, input.now.getTime() - row.createdAt.getTime())
       };
     });
+
+    if (!claimed) {
+      return null;
+    }
+
+    const freshTurn = await this.loadFreshClaimedSiteWidgetAiTurn(claimed);
+
+    if (!freshTurn) {
+      await this.finishSiteWidgetAiJob({
+        jobId: claimed.id,
+        attemptCount: claimed.attemptCount,
+        status: "failed",
+        terminalReason: "fresh_context_unavailable",
+        lastError: "Authoritative AI turn context could not be assembled",
+        completedAt: input.now
+      });
+      return null;
+    }
+
+    return {
+      ...claimed,
+      aiTurnInput: freshTurn.aiTurnInput,
+      aiTurnExecutionContext: freshTurn.aiTurnExecutionContext
+    };
+  }
+
+  async isSiteWidgetAiJobCurrent(input: {
+    jobId: string;
+    attemptCount: number;
+  }): Promise<boolean> {
+    const [row] = await this.db
+      .select({ id: widgetAiJobs.id })
+      .from(widgetAiJobs)
+      .innerJoin(conversations, eq(widgetAiJobs.conversationId, conversations.id))
+      .where(
+        and(
+          eq(widgetAiJobs.id, input.jobId),
+          eq(widgetAiJobs.status, "processing"),
+          eq(widgetAiJobs.attemptCount, input.attemptCount),
+          isNotNull(widgetAiJobs.leaseExpiresAt),
+          gt(widgetAiJobs.leaseExpiresAt, new Date()),
+          eq(conversations.status, "open"),
+          eq(conversations.agentAllowedToReply, true),
+          sql`EXISTS (
+            SELECT 1 FROM ${aiRuntimeControls}
+            WHERE ${aiRuntimeControls.scope} = 'site_widget'
+              AND ${aiRuntimeControls.enabled} = true
+          )`,
+          sql`${conversations.generationEpoch} = ${widgetAiJobs.expectedGenerationEpoch}`,
+          sql`(
+            SELECT max(visitor_message.message_sequence)
+            FROM conversation_messages visitor_message
+            WHERE visitor_message.conversation_id = ${widgetAiJobs.conversationId}
+              AND visitor_message.direction = 'inbound'
+              AND visitor_message.sender_role = 'visitor'
+          ) = ${widgetAiJobs.respondsThroughSequence}`
+        )
+      )
+      .limit(1);
+
+    return Boolean(row);
   }
 
   async finishSiteWidgetAiJob(input: FinishSiteWidgetAiJobInput): Promise<void> {
@@ -1278,7 +1620,9 @@ export class PostgresIntakeRepository implements IntakeRepository {
         and(
           eq(widgetAiJobs.id, input.jobId),
           eq(widgetAiJobs.status, "processing"),
-          eq(widgetAiJobs.attemptCount, input.attemptCount)
+          eq(widgetAiJobs.attemptCount, input.attemptCount),
+          isNotNull(widgetAiJobs.leaseExpiresAt),
+          gt(widgetAiJobs.leaseExpiresAt, input.completedAt)
         )
       );
   }
@@ -1286,7 +1630,33 @@ export class PostgresIntakeRepository implements IntakeRepository {
   async findSiteWidgetAiReply(
     inboundPublicMessageId: string
   ): Promise<SiteWidgetStoredAiReply | null> {
-    const existing = await this.findExistingAiMessageByIdempotencyKey(
+    const [job] = await this.db
+      .select({
+        conversationId: widgetAiJobs.conversationId,
+        expectedGenerationEpoch: widgetAiJobs.expectedGenerationEpoch,
+        respondsThroughSequence: widgetAiJobs.respondsThroughSequence,
+        runtimeMode: widgetAiJobs.runtimeMode,
+        outputPublicMessageId: widgetAiJobs.outputPublicMessageId
+      })
+      .from(widgetAiJobs)
+      .where(eq(widgetAiJobs.inboundPublicMessageId, inboundPublicMessageId))
+      .limit(1);
+    let existing = job?.outputPublicMessageId
+      ? await this.findExistingAiMessageByPublicMessageId(job.outputPublicMessageId)
+      : null;
+
+    if (!existing && job) {
+      existing = await this.findExistingAiMessageByIdempotencyKey(
+        buildWidgetAiTurnIdempotencyKey({
+          conversationId: job.conversationId,
+          expectedGenerationEpoch: job.expectedGenerationEpoch,
+          respondsThroughSequence: job.respondsThroughSequence,
+          runtimeMode: toWidgetAiRuntimeMode(job.runtimeMode)
+        })
+      );
+    }
+
+    existing ??= await this.findExistingAiMessageByIdempotencyKey(
       `ai:${inboundPublicMessageId}`
     );
 
@@ -1328,7 +1698,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
       })
       .from(conversationMessages)
       .where(eq(conversationMessages.conversationId, session.conversationId))
-      .orderBy(conversationMessages.createdAt)
+      .orderBy(desc(conversationMessages.messageSequence))
       .limit(100);
     const jobRows = await this.db
       .select({
@@ -1346,7 +1716,8 @@ export class PostgresIntakeRepository implements IntakeRepository {
       publicSessionId: session.publicSessionId,
       publicConversationId: session.publicConversationId,
       state: toPublicWidgetConversationState(session.aiState, session.status),
-      messages: rows
+      messages: [...rows]
+        .reverse()
         .filter(
           (row) =>
             row.contentType === "text" &&
@@ -1510,38 +1881,70 @@ export class PostgresIntakeRepository implements IntakeRepository {
   }
 
   async setManagerAiControl(input: SetManagerAiControlInput): Promise<ManagerAiControl> {
-    const [control] = await this.db
-      .update(aiRuntimeControls)
-      .set({
-        enabled: input.enabled,
-        version: sql`${aiRuntimeControls.version} + 1`,
-        changedByManagerId: input.changedByManagerId,
-        changedByManagerEmail: input.changedByManagerEmail,
-        changedAt: new Date()
-      })
-      .where(
-        and(
-          eq(aiRuntimeControls.scope, "site_widget"),
-          eq(aiRuntimeControls.version, input.expectedVersion)
+    return this.db.transaction(async (tx) => {
+      const [previous] = await tx
+        .select({
+          enabled: aiRuntimeControls.enabled,
+          version: aiRuntimeControls.version
+        })
+        .from(aiRuntimeControls)
+        .where(
+          and(
+            eq(aiRuntimeControls.scope, "site_widget"),
+            eq(aiRuntimeControls.version, input.expectedVersion)
+          )
         )
-      )
-      .returning({
-        enabled: aiRuntimeControls.enabled,
-        version: aiRuntimeControls.version,
-        changedByManagerEmail: aiRuntimeControls.changedByManagerEmail,
-        changedAt: aiRuntimeControls.changedAt
-      });
+        .limit(1)
+        .for("update");
 
-    if (!control) {
-      throw new AiControlVersionConflictError();
-    }
+      if (!previous) {
+        throw new AiControlVersionConflictError();
+      }
 
-    return {
-      enabled: control.enabled,
-      version: control.version,
-      changedByManagerEmail: control.changedByManagerEmail ?? undefined,
-      changedAt: control.changedAt.toISOString()
-    };
+      const changedAt = new Date();
+      const [control] = await tx
+        .update(aiRuntimeControls)
+        .set({
+          enabled: input.enabled,
+          version: sql`${aiRuntimeControls.version} + 1`,
+          changedByManagerId: input.changedByManagerId,
+          changedByManagerEmail: input.changedByManagerEmail,
+          changedAt
+        })
+        .where(
+          and(
+            eq(aiRuntimeControls.scope, "site_widget"),
+            eq(aiRuntimeControls.version, input.expectedVersion)
+          )
+        )
+        .returning({
+          enabled: aiRuntimeControls.enabled,
+          version: aiRuntimeControls.version,
+          changedByManagerEmail: aiRuntimeControls.changedByManagerEmail,
+          changedAt: aiRuntimeControls.changedAt
+        });
+
+      if (!control) {
+        throw new AiControlVersionConflictError();
+      }
+
+      if (previous.enabled !== input.enabled) {
+        await tx
+          .update(conversations)
+          .set({
+            generationEpoch: sql`${conversations.generationEpoch} + 1`,
+            updatedAt: changedAt
+          })
+          .where(eq(conversations.channel, "site_widget"));
+      }
+
+      return {
+        enabled: control.enabled,
+        version: control.version,
+        changedByManagerEmail: control.changedByManagerEmail ?? undefined,
+        changedAt: control.changedAt.toISOString()
+      };
+    });
   }
 
   async setConversationAiControl(
@@ -1564,7 +1967,8 @@ export class PostgresIntakeRepository implements IntakeRepository {
             eq(conversations.publicConversationId, input.publicConversationId)
           )
         )
-        .limit(1);
+        .limit(1)
+        .for("update");
 
       if (!conversation || conversation.channel !== "site_widget") {
         return;
@@ -1587,6 +1991,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
         .set({
           agentAllowedToReply: input.enabled,
           aiState: nextAiState,
+          generationEpoch: sql`${conversations.generationEpoch} + 1`,
           updatedAt: changedAt
         })
         .where(eq(conversations.id, conversation.id));
@@ -1770,7 +2175,8 @@ export class PostgresIntakeRepository implements IntakeRepository {
             eq(conversations.publicConversationId, input.publicConversationId)
           )
         )
-        .limit(1);
+        .limit(1)
+        .for("update");
 
       if (!conversation) {
         return;
@@ -1789,6 +2195,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
         .set({
           agentAllowedToReply: false,
           aiState: "manager_active",
+          generationEpoch: sql`${conversations.generationEpoch} + 1`,
           updatedAt: changedAt
         })
         .where(eq(conversations.id, conversation.id));
@@ -1935,6 +2342,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
         channel: conversations.channel,
         agentAllowedToReply: conversations.agentAllowedToReply,
         aiState: conversations.aiState,
+        generationEpoch: conversations.generationEpoch,
         messageChannelIdentityId: conversationMessages.channelIdentityId,
         conversationChannelIdentityId: conversations.channelIdentityId,
         inboundMessageId: conversationMessages.id,
@@ -1945,6 +2353,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
         pageTitle: widgetSessions.pageTitle,
         visitorContext: widgetSessions.visitorContext,
         publicMessageId: conversationMessages.publicMessageId,
+        messageSequence: conversationMessages.messageSequence,
         messageBody: conversationMessages.body,
         sourcePageUrl: conversationMessages.sourcePageUrl,
         conversationSourcePageUrl: conversations.sourcePageUrl,
@@ -1996,6 +2405,36 @@ export class PostgresIntakeRepository implements IntakeRepository {
       : null;
   }
 
+  private async findExistingAiMessageByPublicMessageId(
+    publicMessageId: string
+  ): Promise<SiteWidgetAiMessageLookupResult | null> {
+    const [existing] = await this.db
+      .select({
+        publicMessageId: conversationMessages.publicMessageId,
+        body: conversationMessages.body,
+        createdAt: conversationMessages.createdAt,
+        requestFingerprint: conversationMessages.requestFingerprint
+      })
+      .from(conversationMessages)
+      .where(
+        and(
+          eq(conversationMessages.publicMessageId, publicMessageId),
+          eq(conversationMessages.direction, "outbound"),
+          eq(conversationMessages.senderRole, "ai_assistant")
+        )
+      )
+      .limit(1);
+
+    return existing
+      ? {
+          publicMessageId: existing.publicMessageId,
+          body: existing.body,
+          createdAt: existing.createdAt.toISOString(),
+          requestFingerprint: existing.requestFingerprint
+        }
+      : null;
+  }
+
   private async findSiteWidgetAiJobSummary(
     inboundPublicMessageId: string
   ): Promise<SiteWidgetAiJobSummary | undefined> {
@@ -2004,7 +2443,9 @@ export class PostgresIntakeRepository implements IntakeRepository {
         id: widgetAiJobs.id,
         status: widgetAiJobs.status,
         attemptCount: widgetAiJobs.attemptCount,
-        terminalReason: widgetAiJobs.terminalReason
+        terminalReason: widgetAiJobs.terminalReason,
+        expectedGenerationEpoch: widgetAiJobs.expectedGenerationEpoch,
+        respondsThroughSequence: widgetAiJobs.respondsThroughSequence
       })
       .from(widgetAiJobs)
       .where(eq(widgetAiJobs.inboundPublicMessageId, inboundPublicMessageId))
@@ -2227,7 +2668,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
           createdAt: aiRuns.createdAt
         })
         .from(aiRuns)
-        .where(eq(aiRuns.leadId, leadId))
+        .where(and(eq(aiRuns.leadId, leadId), ne(aiRuns.status, "running")))
         .orderBy(desc(aiRuns.createdAt))
         .limit(1),
       this.db
@@ -2380,6 +2821,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
       channel: string;
       agentAllowedToReply: boolean;
       aiState: string;
+      generationEpoch: number;
       messageChannelIdentityId: string | null;
       conversationChannelIdentityId: string | null;
       inboundMessageId: string;
@@ -2390,6 +2832,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
       pageTitle: string | null;
       visitorContext: Record<string, unknown> | null;
       publicMessageId: string;
+      messageSequence: number;
       messageBody: string;
       sourcePageUrl: string | null;
       conversationSourcePageUrl: string | null;
@@ -2455,6 +2898,10 @@ export class PostgresIntakeRepository implements IntakeRepository {
               requestFingerprint: existing.requestFingerprint
             })
           : undefined,
+      // Only the durable job preserves the acceptance-time epoch across replay.
+      // Legacy synchronous retries without a persisted reply fail closed instead
+      // of treating the conversation's current epoch as the original turn epoch.
+      turnIdentity: widgetAiJob,
       widgetAiJob
     };
   }
@@ -2469,7 +2916,96 @@ export class PostgresIntakeRepository implements IntakeRepository {
     return runtimeControl?.enabled === true;
   }
 
-  private async loadAiDialogContext(conversationId: string, currentPublicMessageId: string) {
+  private async loadFreshClaimedSiteWidgetAiTurn(input: {
+    id: string;
+    attemptCount: number;
+    conversationId: string;
+    respondsThroughSequence: number;
+  }): Promise<
+    | {
+        aiTurnInput: AiTurnInput;
+        aiTurnExecutionContext: ReturnType<typeof buildSiteWidgetAiTurnExecutionContext>;
+      }
+    | undefined
+  > {
+    const [fresh] = await this.db
+      .select({
+        leadId: widgetAiJobs.leadId,
+        conversationId: widgetAiJobs.conversationId,
+        channel: conversations.channel,
+        publicConversationId: conversations.publicConversationId,
+        agentAllowedToReply: conversations.agentAllowedToReply,
+        aiState: conversations.aiState,
+        publicSessionId: widgetSessions.publicSessionId,
+        publicMessageId: conversationMessages.publicMessageId,
+        inboundMessageId: conversationMessages.id,
+        messageBody: conversationMessages.body,
+        sourcePageUrl: conversationMessages.sourcePageUrl,
+        conversationSourcePageUrl: conversations.sourcePageUrl,
+        submittedAt: conversationMessages.submittedAt,
+        widgetInstanceId: conversations.widgetInstanceId,
+        sessionWidgetInstanceId: widgetSessions.widgetInstanceId,
+        referrerUrl: widgetSessions.referrerUrl,
+        pageTitle: widgetSessions.pageTitle,
+        visitorContext: widgetSessions.visitorContext,
+        contactName: leads.contactName,
+        contactPhone: leads.contactPhone,
+        contactEmail: leads.contactEmail,
+        contactPreferred: leads.contactPreferred,
+        contactCity: leads.contactCity,
+        requestFingerprint: conversationMessages.requestFingerprint
+      })
+      .from(widgetAiJobs)
+      .innerJoin(conversations, eq(widgetAiJobs.conversationId, conversations.id))
+      .innerJoin(leads, eq(widgetAiJobs.leadId, leads.id))
+      .innerJoin(conversationMessages, eq(widgetAiJobs.inboundMessageId, conversationMessages.id))
+      .innerJoin(widgetSessions, eq(conversations.widgetSessionId, widgetSessions.id))
+      .where(
+        and(
+          eq(widgetAiJobs.id, input.id),
+          eq(widgetAiJobs.status, "processing"),
+          eq(widgetAiJobs.attemptCount, input.attemptCount),
+          eq(widgetAiJobs.conversationId, input.conversationId),
+          eq(conversationMessages.messageSequence, input.respondsThroughSequence),
+          eq(conversationMessages.direction, "inbound"),
+          eq(conversationMessages.senderRole, "visitor")
+        )
+      )
+      .limit(1);
+
+    if (!fresh) {
+      return undefined;
+    }
+
+    const context = await this.loadAiDialogContext(
+      fresh.conversationId,
+      fresh.publicMessageId,
+      input.respondsThroughSequence
+    );
+    const aiTurnInput = buildPersistedSiteWidgetAiTurnInput(fresh, context);
+
+    if (!aiTurnInput) {
+      return undefined;
+    }
+
+    return {
+      aiTurnInput,
+      aiTurnExecutionContext: buildSiteWidgetAiTurnExecutionContext({
+        leadId: fresh.leadId,
+        conversationId: fresh.conversationId,
+        inboundMessageId: fresh.inboundMessageId,
+        publicConversationId: fresh.publicConversationId,
+        publicInboundMessageId: fresh.publicMessageId,
+        requestFingerprint: fresh.requestFingerprint
+      })
+    };
+  }
+
+  private async loadAiDialogContext(
+    conversationId: string,
+    currentPublicMessageId: string,
+    respondsThroughSequence?: number
+  ) {
     const [recentMessageRows, slotRows, requirementRows, memoryRows] = await Promise.all([
       this.db
         .select({
@@ -2479,12 +3015,25 @@ export class PostgresIntakeRepository implements IntakeRepository {
           contentType: conversationMessages.contentType,
           submittedAt: conversationMessages.submittedAt,
           body: conversationMessages.body,
-          createdAt: conversationMessages.createdAt
+          createdAt: conversationMessages.createdAt,
+          messageSequence: conversationMessages.messageSequence
         })
         .from(conversationMessages)
-        .where(eq(conversationMessages.conversationId, conversationId))
-        .orderBy(desc(conversationMessages.createdAt))
-        .limit(13),
+        .where(
+          and(
+            eq(conversationMessages.conversationId, conversationId),
+            ne(conversationMessages.publicMessageId, currentPublicMessageId),
+            eq(conversationMessages.contentType, "text"),
+            inArray(conversationMessages.direction, ["inbound", "outbound"]),
+            inArray(conversationMessages.senderRole, ["visitor", "ai_assistant"]),
+            sql`btrim(${conversationMessages.body}) <> ''`,
+            respondsThroughSequence === undefined
+              ? undefined
+              : lte(conversationMessages.messageSequence, respondsThroughSequence)
+          )
+        )
+        .orderBy(desc(conversationMessages.messageSequence))
+        .limit(12),
       this.db
         .select({
           name: conversationSlots.name,
@@ -2565,7 +3114,8 @@ function toSiteWidgetAiJobStatus(value: string): SiteWidgetAiJobStatus {
     value === "replied" ||
     value === "degraded" ||
     value === "blocked" ||
-    value === "failed"
+    value === "failed" ||
+    value === "superseded"
   ) {
     return value;
   }
@@ -2573,17 +3123,29 @@ function toSiteWidgetAiJobStatus(value: string): SiteWidgetAiJobStatus {
   throw new Error(`invalid site widget AI job status ${value}`);
 }
 
+function toWidgetAiRuntimeMode(value: string): "direct_openai" | "mastra_openai_api" {
+  if (value === "direct_openai" || value === "mastra_openai_api") {
+    return value;
+  }
+
+  throw new Error(`invalid site widget AI runtime mode ${value}`);
+}
+
 function toSiteWidgetAiJobSummary(row: {
   id: string;
   status: string;
   attemptCount: number;
   terminalReason: string | null;
+  expectedGenerationEpoch: number;
+  respondsThroughSequence: number;
 }): SiteWidgetAiJobSummary {
   return {
     id: row.id,
     status: toSiteWidgetAiJobStatus(row.status),
     attemptCount: row.attemptCount,
-    terminalReason: row.terminalReason ?? undefined
+    terminalReason: row.terminalReason ?? undefined,
+    expectedGenerationEpoch: row.expectedGenerationEpoch,
+    respondsThroughSequence: row.respondsThroughSequence
   };
 }
 
@@ -2630,39 +3192,6 @@ function readWidgetCatalogReferences(
   });
 }
 
-function isPersistedAiTurnInput(value: unknown): value is AiTurnInput {
-  if (!isRecord(value)) {
-    return false;
-  }
-
-  return (
-    value.version === AI_TURN_INPUT_VERSION &&
-    value.channel === "site_widget" &&
-    value.replyCapability === "site_widget_sync_reply" &&
-    isRecord(value.turn) &&
-    typeof value.turn.idempotencyKey === "string" &&
-    typeof value.turn.acceptedRequestFingerprint === "string" &&
-    isRecord(value.conversation) &&
-    typeof value.conversation.publicConversationId === "string" &&
-    isRecord(value.gateSnapshot) &&
-    isRecord(value.inboundMessage) &&
-    typeof value.inboundMessage.publicMessageId === "string" &&
-    typeof value.inboundMessage.text === "string" &&
-    isRecord(value.page) &&
-    typeof value.page.url === "string" &&
-    typeof value.page.widgetInstanceId === "string" &&
-    isRecord(value.customer) &&
-    isRecord(value.visitor) &&
-    isRecord(value.compactContext) &&
-    Array.isArray(value.compactContext.messages) &&
-    isRecord(value.knownSlots) &&
-    Array.isArray(value.knownRequirements) &&
-    isRecord(value.boundaryConfig) &&
-    isRecord(value.approvedSources) &&
-    isRecord(value.evidence)
-  );
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -2704,7 +3233,8 @@ async function advanceAiRollingSummary(
       contentType: conversationMessages.contentType,
       submittedAt: conversationMessages.submittedAt,
       body: conversationMessages.body,
-      createdAt: conversationMessages.createdAt
+      createdAt: conversationMessages.createdAt,
+      messageSequence: conversationMessages.messageSequence
     })
     .from(conversationMessages)
     .where(
@@ -2965,6 +3495,7 @@ type AiContextMessageRow = {
   submittedAt: Date;
   body: string;
   createdAt: Date;
+  messageSequence: number;
 };
 
 function toAiRecentMessages(
@@ -3646,6 +4177,7 @@ async function findExistingProviderInbound(
       channel: conversations.channel,
       agentAllowedToReply: conversations.agentAllowedToReply,
       aiState: conversations.aiState,
+      generationEpoch: conversations.generationEpoch,
       messageChannelIdentityId: conversationMessages.channelIdentityId,
       conversationChannelIdentityId: conversations.channelIdentityId,
       inboundMessageId: conversationMessages.id,
@@ -3656,6 +4188,7 @@ async function findExistingProviderInbound(
       pageTitle: widgetSessions.pageTitle,
       visitorContext: widgetSessions.visitorContext,
       publicMessageId: conversationMessages.publicMessageId,
+      messageSequence: conversationMessages.messageSequence,
       messageBody: conversationMessages.body,
       sourcePageUrl: conversationMessages.sourcePageUrl,
       conversationSourcePageUrl: conversations.sourcePageUrl,
@@ -3865,6 +4398,16 @@ function toManagerAiRunStatus(
     return value;
   }
 
+  if (value === "persisted") return "replied";
+  if (value === "handed_off") return "handoff";
+  if (
+    value === "blocked" ||
+    value === "fallback_unavailable" ||
+    value === "failed"
+  ) {
+    return "degraded";
+  }
+
   throw new Error(`invalid AI run status ${value}`);
 }
 
@@ -3902,6 +4445,7 @@ function toManagerAiQualityEventType(value: string): ManagerAiQualitySummary["ev
     value === "blocked" ||
     value === "policy_violation" ||
     value === "model_failure" ||
+    value === "tool_failure" ||
     value === "runtime_failure"
   ) {
     return value;
@@ -3944,6 +4488,88 @@ function toManagerAiQualitySeverity(value: string): ManagerAiQualitySummary["sev
   }
 
   throw new Error(`invalid AI quality severity ${value}`);
+}
+
+function toCanonicalAiRunAction(value: string) {
+  if (value === "answer") return "answer";
+  if (value === "clarify") return "ask_clarifying_question";
+  if (value === "handoff") return "handoff_to_manager";
+  return "no_reply";
+}
+
+function toProfileValidatorResult(value: string | undefined) {
+  if (value === "pass") return "passed";
+  if (value === "repair" || value === "handoff" || value === "block") return "rejected";
+  return "not_run";
+}
+
+function toGroundedModelEvidence(
+  metadata: Record<string, unknown>,
+  modelName: string | undefined
+) {
+  const provider = readOptionalString(metadata, "model_provider");
+  const observedProvider =
+    provider === "openai" ||
+    provider === "fake" ||
+    provider === "policy" ||
+    provider === "none"
+      ? provider
+      : null;
+  const configuredProvider =
+    observedProvider === "openai" || observedProvider === "fake"
+      ? observedProvider
+      : observedProvider === "policy" || observedProvider === "none"
+        ? "none"
+        : null;
+
+  return {
+    configuredProvider,
+    modelName: modelName ?? null,
+    observedProvider,
+    observedModelName: observedProvider && observedProvider !== "none" ? modelName ?? null : null
+  };
+}
+
+function toCanonicalDegradationEvidence(reason: string) {
+  const outcomeReason =
+    reason === "missing_openai_config"
+      ? "missing_provider_config"
+      : reason === "model_error" ||
+          reason === "semantic_verifier_error" ||
+          reason === "turn_timeout" ||
+          reason === "empty_model_response" ||
+          reason === "unsafe_model_response" ||
+          reason === "grounding_validation_failed" ||
+          reason === "agent_reply_blocked" ||
+          reason === "ai_persistence_unconfirmed" ||
+          reason === "execution_context_mismatch" ||
+          reason === "candidate_invalid" ||
+          reason === "no_safe_answer" ||
+          reason === "missing_approved_fact" ||
+          reason === "gate_closed"
+        ? reason
+        : null;
+  const failureCode =
+    reason === "missing_openai_config"
+      ? "provider_unavailable"
+      : reason === "model_error" ||
+          reason === "semantic_verifier_error" ||
+          reason === "turn_timeout" ||
+          reason === "empty_model_response"
+        ? "model_failure"
+        : reason === "unsafe_model_response" || reason === "grounding_validation_failed"
+          ? "policy_violation"
+          : reason === "agent_reply_blocked"
+            ? "send_gate_blocked"
+            : reason === "ai_persistence_unconfirmed"
+              ? "persistence_failure"
+              : reason === "execution_context_mismatch"
+                ? "execution_context_mismatch"
+                : reason === "candidate_invalid"
+                  ? "invalid_candidate"
+                  : "runtime_failure";
+
+  return { outcomeReason, failureCode };
 }
 
 function toAiQualityEvent(reason: string): Pick<

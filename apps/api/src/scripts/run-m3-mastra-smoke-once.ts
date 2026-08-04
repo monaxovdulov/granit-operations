@@ -9,13 +9,14 @@ import {
   createOperationsDb
 } from "@granit/db";
 import {
-  SITE_WIDGET_CONTRACT_VERSION,
+  SITE_WIDGET_V2_CONTRACT_VERSION,
   SITE_WIDGET_MESSAGE_EVENT_TYPE
 } from "@granit/contracts";
 
 import { buildApi } from "../app.js";
 import { loadConfig } from "../config.js";
 import { PostgresAiRunRepository } from "../modules/ai/repositories/postgres-ai-run-repository.js";
+import { isRecordedSiteWidgetAiReplyRepository } from "../modules/ai/repositories/recorded-site-widget-ai-reply-repository.js";
 import type { LiveV2RuntimeFailureCategory } from "../modules/ai/adapters/mastra-live-v2-decision-generator.js";
 import { PostgresIntakeRepository } from "../modules/conversations/repositories/postgres-intake-repository.js";
 import { buildConfiguredWidgetAiAssembly } from "../widget-ai-runtime-assembly.js";
@@ -53,6 +54,9 @@ try {
   const database = createOperationsDb(config.databaseUrl);
   client = database.client;
   const repository = new PostgresIntakeRepository(database.db);
+  if (!isRecordedSiteWidgetAiReplyRepository(repository)) {
+    throw new Error("M3 v2 smoke requires durable recorded reply persistence");
+  }
   const runRepository = new PostgresAiRunRepository(database.db);
   const [existing] = await database.db
     .select({ id: conversationMessages.id })
@@ -76,7 +80,7 @@ try {
     method: "POST",
     url: "/public/intake/site-widget/messages",
     payload: {
-      schema_version: SITE_WIDGET_CONTRACT_VERSION,
+      schema_version: SITE_WIDGET_V2_CONTRACT_VERSION,
       event_type: SITE_WIDGET_MESSAGE_EVENT_TYPE,
       idempotency_key: SMOKE_IDEMPOTENCY_KEY,
       submitted_at: "2026-07-15T19:30:00.000Z",
@@ -93,45 +97,66 @@ try {
     }
   });
   const publicResult: unknown = response.json();
-  const [run] = await database.db
-    .select({
-      runtimeMode: aiRuns.runtimeMode,
-      decisionProfile: aiRuns.decisionProfile,
-      status: aiRuns.status,
-      decisionAction: aiRuns.decisionAction,
-      outcomeReason: aiRuns.outcomeReason,
-      failureCode: aiRuns.failureCode,
-      validatorResult: aiRuns.profileValidatorResult,
-      configuredModelProvider: aiRuns.configuredModelProvider,
-      configuredModelName: aiRuns.configuredModelName,
-      observedModelProvider: aiRuns.observedModelProvider,
-      observedModelName: aiRuns.observedModelName,
-      inputTokens: aiRuns.inputTokens,
-      outputTokens: aiRuns.outputTokens,
-      totalTokens: aiRuns.totalTokens,
-      sendGateResult: aiRuns.sendGateResult,
-      latencyMs: aiRuns.latencyMs,
-      outboundMessageId: aiRuns.outboundMessageId,
-      runtimeRunId: aiRuns.runtimeRunId,
-      conversationId: aiRuns.conversationId,
-      runId: aiRuns.id
-    })
-    .from(aiRuns)
-    .innerJoin(
-      conversationMessages,
-      eq(aiRuns.inboundMessageId, conversationMessages.id)
-    )
-    .where(
-      and(
-        eq(conversationMessages.idempotencyKey, SMOKE_IDEMPOTENCY_KEY),
-        eq(aiRuns.runtimeMode, "mastra_openai_api")
+  const findRun = () =>
+    database.db
+      .select({
+        runtimeMode: aiRuns.runtimeMode,
+        decisionProfile: aiRuns.decisionProfile,
+        status: aiRuns.status,
+        decisionAction: aiRuns.decisionAction,
+        outcomeReason: aiRuns.outcomeReason,
+        failureCode: aiRuns.failureCode,
+        validatorResult: aiRuns.profileValidatorResult,
+        configuredModelProvider: aiRuns.configuredModelProvider,
+        configuredModelName: aiRuns.configuredModelName,
+        observedModelProvider: aiRuns.observedModelProvider,
+        observedModelName: aiRuns.observedModelName,
+        inputTokens: aiRuns.inputTokens,
+        outputTokens: aiRuns.outputTokens,
+        totalTokens: aiRuns.totalTokens,
+        sendGateResult: aiRuns.sendGateResult,
+        latencyMs: aiRuns.latencyMs,
+        outboundMessageId: aiRuns.outboundMessageId,
+        runtimeRunId: aiRuns.runtimeRunId,
+        conversationId: aiRuns.conversationId,
+        runId: aiRuns.id
+      })
+      .from(aiRuns)
+      .innerJoin(
+        conversationMessages,
+        eq(aiRuns.inboundMessageId, conversationMessages.id)
       )
-    )
-    .limit(1);
+      .where(
+        and(
+          eq(conversationMessages.idempotencyKey, SMOKE_IDEMPOTENCY_KEY),
+          eq(aiRuns.runtimeMode, "mastra_openai_api")
+        )
+      )
+      .limit(1);
+  let [run] = await findRun();
+
+  for (let attempt = 0; !run && attempt < 1_200; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    [run] = await findRun();
+  }
 
   if (!run) {
     throw new Error("M3 smoke did not create an app-owned run");
   }
+
+  const publicSessionId =
+    typeof publicResult === "object" && publicResult !== null &&
+    typeof (publicResult as { public_session_id?: unknown }).public_session_id === "string"
+      ? (publicResult as { public_session_id: string }).public_session_id
+      : undefined;
+  if (!publicSessionId) {
+    throw new Error("M3 smoke did not return a public session id");
+  }
+  const historyResponse = await app.inject({
+    method: "GET",
+    url: `/public/intake/site-widget/sessions/${publicSessionId}/history?schema_version=site_widget.history.v2`
+  });
+  const publicHistory: unknown = historyResponse.json();
 
   const spans = await database.db
     .select({ status: aiRunSpans.status })
@@ -155,7 +180,7 @@ try {
   }
 
   const implementationSha = process.env.M3_MASTRA_SMOKE_IMPLEMENTATION_SHA!;
-  const publicSummary = summarizeM3PublicResult(publicResult);
+  const publicSummary = summarizeM3PublicResult(publicResult, publicHistory);
   const failedSpanCount = spans.filter((span) => span.status === "failed").length;
   const openManagerQualityEventCount = qualityEvents.filter(
     (event) => event.managerVisible && event.resolutionStatus === "open"
@@ -190,8 +215,8 @@ try {
     qualityEventCount: qualityEvents.length,
     openManagerQualityEventCount,
     managerReviewRequired,
-    configuredProvider: run.configuredModelProvider,
-    configuredModel: run.configuredModelName,
+    configuredProvider: run.configuredModelProvider ?? "",
+    configuredModel: run.configuredModelName ?? "",
     observedProvider: run.observedModelProvider,
     observedModel: run.observedModelName
   });

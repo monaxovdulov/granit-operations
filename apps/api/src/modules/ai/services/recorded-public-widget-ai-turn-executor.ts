@@ -21,9 +21,22 @@ export class RecordedPublicWidgetAiTurnExecutor implements PublicWidgetAiTurnExe
   ) {}
 
   execute(input: PublicWidgetAiTurnExecutionInput) {
+    const attemptIdempotencyKey = input.outbound.jobCommit
+      ? `${input.executionContext.turn.idempotencyKey}:attempt:${input.outbound.jobCommit.attemptCount}`
+      : input.executionContext.turn.idempotencyKey;
+    const executionContext = {
+      ...input.executionContext,
+      turn: { ...input.executionContext.turn, idempotencyKey: attemptIdempotencyKey }
+    };
+    const turnInput = {
+      ...input.turnInput,
+      turn: { ...input.turnInput.turn, idempotencyKey: attemptIdempotencyKey }
+    };
+
     return this.turnService.execute({
-      executionContext: input.executionContext,
-      turnInput: input.turnInput,
+      executionContext,
+      turnInput,
+      signal: input.signal,
       replyApplier: {
         persistReplyAndCompleteRun: async ({ run, reply, completionPlan }) => {
           const publicMessageId = this.idGenerator();
@@ -34,7 +47,10 @@ export class RecordedPublicWidgetAiTurnExecutor implements PublicWidgetAiTurnExe
             completion: completionPlan.allowed,
             publicSessionId: input.outbound.publicSessionId,
             inboundPublicMessageId: input.outbound.inboundPublicMessageId,
-            aiInputFingerprint: input.outbound.aiInputFingerprint
+            aiInputFingerprint: input.outbound.aiInputFingerprint,
+            queueWaitMs: input.outbound.queueWaitMs,
+            expectedGenerationEpoch: input.outbound.expectedGenerationEpoch,
+            respondsThroughSequence: input.outbound.respondsThroughSequence
           });
           const persistedReply = {
             ...reply,
@@ -45,6 +61,9 @@ export class RecordedPublicWidgetAiTurnExecutor implements PublicWidgetAiTurnExe
               outbound_kind: "site_widget_ai_reply",
               inbound_public_message_id: input.outbound.inboundPublicMessageId,
               public_conversation_id: input.turnInput.conversation.publicConversationId,
+              expected_generation_epoch: input.outbound.expectedGenerationEpoch,
+              responds_through_sequence: input.outbound.respondsThroughSequence,
+              runtime_mode: input.outbound.runtimeMode,
               body: reply.replyDraft,
               metadata
             })
@@ -56,12 +75,30 @@ export class RecordedPublicWidgetAiTurnExecutor implements PublicWidgetAiTurnExe
             completionPlan,
             publicMessageId,
             inboundPublicMessageId: input.outbound.inboundPublicMessageId,
-            idempotencyKey: `ai:${input.outbound.inboundPublicMessageId}`,
+            idempotencyKey:
+              input.outbound.idempotencyKey ?? `ai:${input.outbound.inboundPublicMessageId}`,
             requestFingerprint,
             sourcePageUrl: input.outbound.sourcePageUrl,
-            metadata
+            metadata,
+            expectedGenerationEpoch: input.outbound.expectedGenerationEpoch,
+            respondsThroughSequence: input.outbound.respondsThroughSequence,
+            runtimeMode: input.outbound.runtimeMode,
+            jobCommit: input.outbound.jobCommit
           });
         }
+      },
+      noReplyApplier: {
+        completeWithoutReply: ({ run, completion }) =>
+          this.replyRepository.completeRecordedSiteWidgetAiNoReply({
+            run,
+            completion,
+            publicConversationId: input.turnInput.conversation.publicConversationId,
+            inboundPublicMessageId: input.outbound.inboundPublicMessageId,
+            expectedGenerationEpoch: input.outbound.expectedGenerationEpoch,
+            respondsThroughSequence: input.outbound.respondsThroughSequence,
+            runtimeMode: input.outbound.runtimeMode,
+            jobCommit: input.outbound.jobCommit
+          })
       }
     });
   }
@@ -83,6 +120,9 @@ function recordedReplyMetadata(input: {
   publicSessionId: string;
   inboundPublicMessageId: string;
   aiInputFingerprint: string;
+  queueWaitMs?: number;
+  expectedGenerationEpoch?: number;
+  respondsThroughSequence?: number;
 }): Record<string, unknown> {
   const handoffReason = input.candidateMetadata.handoff_reason;
   const usage = input.completion.usage;
@@ -94,6 +134,13 @@ function recordedReplyMetadata(input: {
     public_session_id: input.publicSessionId,
     inbound_public_message_id: input.inboundPublicMessageId,
     ai_input_fingerprint: input.aiInputFingerprint,
+    ...(input.queueWaitMs === undefined ? {} : { queue_wait_ms: input.queueWaitMs }),
+    ...(input.expectedGenerationEpoch === undefined
+      ? {}
+      : { response_window_epoch: input.expectedGenerationEpoch }),
+    ...(input.respondsThroughSequence === undefined
+      ? {}
+      : { responds_through_sequence: input.respondsThroughSequence }),
     policy_version: input.run.versions.policyVersion,
     prompt_version: input.run.versions.promptVersion,
     tool_version: input.run.versions.toolVersion,

@@ -1,4 +1,4 @@
-import { SITE_WIDGET_CONTRACT_VERSION } from "@granit/contracts";
+import { SITE_WIDGET_V2_CONTRACT_VERSION } from "@granit/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { buildApi } from "../src/app.js";
@@ -45,7 +45,7 @@ describe("M3 widget AI runtime assembly", () => {
     expect(createMastraGenerator).not.toHaveBeenCalled();
   });
 
-  it("assembles the trusted staging generator and records configured/observed OpenAI truth", async () => {
+  it("assembles the trusted staging generator without bypassing the durable worker gate", async () => {
     const unrelatedSecretCanary = "must-not-cross-mastra-boundary";
     const repository = new MemoryIntakeRepository();
     const generateDecision = vi.fn(async () => ({
@@ -88,7 +88,7 @@ describe("M3 widget AI runtime assembly", () => {
       method: "POST",
       url: "/public/intake/site-widget/messages",
       payload: {
-        schema_version: SITE_WIDGET_CONTRACT_VERSION,
+        schema_version: SITE_WIDGET_V2_CONTRACT_VERSION,
         event_type: "site_widget.message_submitted",
         idempotency_key: "m3-runtime-assembly-0001",
         submitted_at: "2026-07-15T00:00:00.000Z",
@@ -103,7 +103,7 @@ describe("M3 widget AI runtime assembly", () => {
     });
 
     expect(response.statusCode).toBe(202);
-    expect(response.json()).toMatchObject({ automation: { status: "replied" } });
+    expect(response.json()).toMatchObject({ automation: { status: "processing" } });
     expect(selectLiveV2Assets).toHaveBeenCalledTimes(1);
     expect(createMastraGenerator).toHaveBeenCalledWith({
       config: {
@@ -115,20 +115,8 @@ describe("M3 widget AI runtime assembly", () => {
     expect(JSON.stringify(createMastraGenerator.mock.calls[0])).not.toContain(
       unrelatedSecretCanary
     );
-    expect(generateDecision).toHaveBeenCalledTimes(1);
-    expect(repository.listAiRuns()).toHaveLength(1);
-    expect(repository.listAiRuns()[0]).toMatchObject({
-      runtimeMode: "mastra_openai_api",
-      decisionProfile: "live_v2",
-      model: {
-        modelProvider: "openai",
-        requestedModelName: "gpt-5.6-sol",
-        reasoningEffort: "medium"
-      },
-      observedModelProvider: "openai",
-      observedModelName: "gpt-5.6-sol",
-      runtimeRunId: "m3-test-runtime-001"
-    });
+    expect(generateDecision).not.toHaveBeenCalled();
+    expect(repository.listAiRuns()).toHaveLength(0);
   });
 
   it("date-validates approved assets before constructing the real generator", async () => {

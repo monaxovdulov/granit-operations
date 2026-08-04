@@ -4,7 +4,11 @@ import type {
   RecordedAiReplyCompletionPlan
 } from "../ports/recorded-ai-turn.js";
 import type { AiTurnAiState } from "../ai-turn.js";
-import type { RunningAiRunRecord } from "./ai-run-repository.js";
+import type {
+  AiRunTerminalCompletion,
+  RunningAiRunRecord,
+  TerminalAiRunRecord
+} from "./ai-run-repository.js";
 
 export type PersistRecordedSiteWidgetAiReplyInput = {
   run: RunningAiRunRecord;
@@ -16,6 +20,27 @@ export type PersistRecordedSiteWidgetAiReplyInput = {
   requestFingerprint: string;
   sourcePageUrl: string;
   metadata: Record<string, unknown>;
+  expectedGenerationEpoch?: number;
+  respondsThroughSequence?: number;
+  runtimeMode?: "direct_openai" | "mastra_openai_api";
+  jobCommit?: {
+    jobId: string;
+    attemptCount: number;
+  };
+};
+
+export type CompleteRecordedSiteWidgetAiNoReplyInput = {
+  run: RunningAiRunRecord;
+  completion: AiRunTerminalCompletion;
+  publicConversationId: string;
+  inboundPublicMessageId: string;
+  expectedGenerationEpoch?: number;
+  respondsThroughSequence?: number;
+  runtimeMode?: "direct_openai" | "mastra_openai_api";
+  jobCommit?: {
+    jobId: string;
+    attemptCount: number;
+  };
 };
 
 /**
@@ -26,6 +51,9 @@ export interface RecordedSiteWidgetAiReplyRepository {
   persistRecordedSiteWidgetAiReply(
     input: PersistRecordedSiteWidgetAiReplyInput
   ): Promise<RecordedAiPersistReplyResult>;
+  completeRecordedSiteWidgetAiNoReply(
+    input: CompleteRecordedSiteWidgetAiNoReplyInput
+  ): Promise<TerminalAiRunRecord>;
 }
 
 export interface RecordedSiteWidgetAiGateRepository {
@@ -45,7 +73,9 @@ export function isRecordedSiteWidgetAiReplyRepository(
     typeof value === "object" &&
     value !== null &&
     "persistRecordedSiteWidgetAiReply" in value &&
-    typeof value.persistRecordedSiteWidgetAiReply === "function"
+    typeof value.persistRecordedSiteWidgetAiReply === "function" &&
+    "completeRecordedSiteWidgetAiNoReply" in value &&
+    typeof value.completeRecordedSiteWidgetAiNoReply === "function"
   );
 }
 

@@ -5,6 +5,7 @@ export type WidgetAiJobWorkerOptions = {
   pollIntervalMs: number;
   leaseMs: number;
   retryBackoffMs: number;
+  globalConcurrency?: number;
   onError?: (error: unknown) => void;
 };
 
@@ -15,7 +16,7 @@ export class WidgetAiJobWorker {
     private readonly options: WidgetAiJobWorkerOptions
   ) {}
 
-  async runOnce(now = new Date()): Promise<boolean> {
+  async runOnce(now = new Date(), parentSignal?: AbortSignal): Promise<boolean> {
     if (!this.repository.claimSiteWidgetAiJob || !this.repository.finishSiteWidgetAiJob) {
       return false;
     }
@@ -29,8 +30,41 @@ export class WidgetAiJobWorker {
       return false;
     }
 
+    const controller = new AbortController();
+    const abortForShutdown = () => controller.abort("worker_shutdown");
+    parentSignal?.addEventListener("abort", abortForShutdown, { once: true });
+
+    if (parentSignal?.aborted) {
+      abortForShutdown();
+    }
+
+    let checkingCurrent = false;
+    const currentCheck = this.repository.isSiteWidgetAiJobCurrent
+      ? setInterval(() => {
+          if (checkingCurrent || controller.signal.aborted) {
+            return;
+          }
+
+          checkingCurrent = true;
+          void this.repository
+            .isSiteWidgetAiJobCurrent!({
+              jobId: job.id,
+              attemptCount: job.attemptCount
+            })
+            .then((current) => {
+              if (!current) {
+                controller.abort("job_not_current");
+              }
+            })
+            .catch((error: unknown) => this.options.onError?.(error))
+            .finally(() => {
+              checkingCurrent = false;
+            });
+        }, 250)
+      : undefined;
+
     try {
-      const result = await this.service.processClaimedSiteWidgetAiJob(job);
+      const result = await this.service.processClaimedSiteWidgetAiJob(job, controller.signal);
       await this.repository.finishSiteWidgetAiJob({
         jobId: job.id,
         attemptCount: job.attemptCount,
@@ -53,15 +87,27 @@ export class WidgetAiJobWorker {
           : undefined,
         completedAt
       });
+    } finally {
+      if (currentCheck) {
+        clearInterval(currentCheck);
+      }
+      parentSignal?.removeEventListener("abort", abortForShutdown);
     }
 
     return true;
   }
 
   async run(signal: AbortSignal): Promise<void> {
+    const globalConcurrency = Math.max(1, Math.min(this.options.globalConcurrency ?? 4, 16));
+    await Promise.all(
+      Array.from({ length: globalConcurrency }, () => this.runLane(signal))
+    );
+  }
+
+  private async runLane(signal: AbortSignal): Promise<void> {
     while (!signal.aborted) {
       try {
-        const processed = await this.runOnce();
+        const processed = await this.runOnce(new Date(), signal);
 
         if (processed) {
           continue;

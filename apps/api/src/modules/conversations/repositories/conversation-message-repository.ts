@@ -23,6 +23,31 @@ export type SiteWidgetStoredAiReply = {
   createdAt: string;
 };
 
+export type WidgetAiTurnIdentity = {
+  expectedGenerationEpoch: number;
+  respondsThroughSequence: number;
+};
+
+export type WidgetAiJobCommitIdentity = {
+  jobId: string;
+  attemptCount: number;
+};
+
+export function buildWidgetAiTurnIdempotencyKey(input: {
+  conversationId: string;
+  expectedGenerationEpoch: number;
+  respondsThroughSequence: number;
+  runtimeMode: "direct_openai" | "mastra_openai_api";
+}): string {
+  return [
+    "ai-window",
+    input.conversationId,
+    input.expectedGenerationEpoch,
+    input.respondsThroughSequence,
+    input.runtimeMode
+  ].join(":");
+}
+
 export type AcceptInboundMessageInput = {
   publicMessageId: string;
   channel: CustomerChannel;
@@ -69,6 +94,7 @@ export type AcceptInboundMessageInput = {
   serverTimestamped?: boolean;
   enqueueWidgetAiJob?: boolean;
   widgetAiJobMaxAttempts?: number;
+  widgetAiRuntimeMode?: "direct_openai" | "mastra_openai_api";
   needsManagerReason?: NeedsManagerReason;
   managerPanelBaseUrl?: string;
   metadata: Record<string, unknown>;
@@ -89,9 +115,18 @@ export type AcceptInboundMessageResult = {
   existingAiReply?: SiteWidgetStoredAiReply;
   aiTurnInput?: AiTurnInput;
   aiTurnExecutionContext?: AiTurnExecutionContext;
-  widgetAiJob?: {
+  turnIdentity?: WidgetAiTurnIdentity;
+  widgetAiJob?: WidgetAiTurnIdentity & {
     id: string;
-    status: "pending" | "processing" | "retrying" | "replied" | "degraded" | "blocked" | "failed";
+    status:
+      | "pending"
+      | "processing"
+      | "retrying"
+      | "replied"
+      | "degraded"
+      | "blocked"
+      | "failed"
+      | "superseded";
     attemptCount: number;
     terminalReason?: string;
   };
@@ -107,6 +142,10 @@ export type PersistAiReplyWithSendGateInput = {
   inboundPublicMessageId: string;
   idempotencyKey: string;
   requestFingerprint: string;
+  expectedGenerationEpoch: number;
+  respondsThroughSequence: number;
+  runtimeMode?: "direct_openai" | "mastra_openai_api";
+  jobCommit?: WidgetAiJobCommitIdentity;
   body: string;
   sourcePageUrl?: string;
   metadata: Record<string, unknown>;

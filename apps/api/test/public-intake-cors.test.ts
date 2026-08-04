@@ -1,6 +1,6 @@
 import {
-  SITE_WIDGET_CONTRACT_VERSION,
   SITE_WIDGET_MESSAGE_EVENT_TYPE,
+  SITE_WIDGET_V2_CONTRACT_VERSION,
   type SiteWidgetMessageRequest
 } from "@granit/contracts";
 import { afterEach, describe, expect, it } from "vitest";
@@ -120,7 +120,7 @@ describe("public intake CORS", () => {
 
 function validWidgetRequest(): SiteWidgetMessageRequest {
   return {
-    schema_version: SITE_WIDGET_CONTRACT_VERSION,
+    schema_version: SITE_WIDGET_V2_CONTRACT_VERSION,
     event_type: SITE_WIDGET_MESSAGE_EVENT_TYPE,
     idempotency_key: "widget-cors-test-0001",
     submitted_at: "2026-07-13T10:00:00.000Z",

@@ -49,7 +49,7 @@ export type WidgetAiProviderResult = {
 export interface WidgetAiProvider {
   /** App-owned adapter identity used only for configured-provider truth. */
   readonly providerKind: "openai" | "fake";
-  generateReply(input: WidgetAiProviderInput): Promise<WidgetAiProviderResult>;
+  generateReply(input: WidgetAiProviderInput, signal?: AbortSignal): Promise<WidgetAiProviderResult>;
 }
 
 export type TrustedWidgetAiProviderObservation = {
@@ -82,7 +82,10 @@ export type WidgetAiServiceOptions = {
 export class WidgetAiService implements PublicWidgetAiReplyGenerator {
   constructor(private readonly options: WidgetAiServiceOptions = {}) {}
 
-  async generateReply(input: AiTurnInput): Promise<WidgetAiReplyResult> {
+  async generateReply(
+    input: AiTurnInput,
+    options?: { signal?: AbortSignal }
+  ): Promise<WidgetAiReplyResult> {
     const baseMetadata = {
       prompt_version: WIDGET_AI_PROMPT_VERSION,
       policy_version: WIDGET_AI_POLICY_VERSION,
@@ -135,11 +138,14 @@ export class WidgetAiService implements PublicWidgetAiReplyGenerator {
     }
 
     try {
-      const providerResult = await this.options.provider.generateReply({
-        turn: input,
-        instructions: buildWidgetAiInstructions(),
-        userInput: buildWidgetAiUserInput(input)
-      });
+      const providerResult = await this.options.provider.generateReply(
+        {
+          turn: input,
+          instructions: buildWidgetAiInstructions(),
+          userInput: buildWidgetAiUserInput(input)
+        },
+        options?.signal
+      );
       const observation = trustedObservation(
         providerResult,
         this.options.provider.providerKind

@@ -137,6 +137,41 @@ describe("M1 disabled Mastra live_v2 adapter", () => {
     expect(JSON.stringify(result.observation)).not.toContain("RAW_USAGE");
   });
 
+  it("combines caller cancellation with the bounded provider timeout", async () => {
+    const caller = new AbortController();
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    let observedSignal: AbortSignal | undefined;
+    const generate = vi.fn<MastraLiveV2AgentPort["generate"]>(async (_messages, options) => {
+      observedSignal = options.abortSignal;
+      markStarted();
+      return new Promise((_resolve, reject) => {
+        options.abortSignal.addEventListener(
+          "abort",
+          () => reject(Object.assign(new Error("cancelled"), { name: "AbortError" })),
+          { once: true }
+        );
+      });
+    });
+    const generator = new MastraLiveV2DecisionGenerator(
+      { generate },
+      "fake",
+      "mastra-local-fixture-v1"
+    );
+    const generation = generator.generateDecision(generatorInput(), {
+      appTraceId: "00000000-0000-4000-8000-000000000124",
+      signal: caller.signal
+    });
+    await started;
+
+    caller.abort("job_not_current");
+
+    await expect(generation).rejects.toBeInstanceOf(MastraLiveV2GenerationError);
+    expect(observedSignal?.aborted).toBe(true);
+  });
+
   it("fails closed on a mismatched trusted provider or unsafe observed model", async () => {
     const input = generatorInput();
 

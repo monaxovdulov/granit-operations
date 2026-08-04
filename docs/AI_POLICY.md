@@ -2,7 +2,7 @@
 
 Status: grounded website consultant and reviewed catalog provider implemented; customer traffic remains controlled by runtime flags
 
-Website AI remains disabled unless `AI_WIDGET_ENABLED=true`. Once enabled, the grounded pipeline is the default; `AI_WIDGET_GROUNDED_MODE=off` is an explicit legacy rollback switch. Production enablement still requires separate owner approval.
+Website AI remains disabled unless `AI_WIDGET_ENABLED=true`. Enabling that flag alone does not select the grounded pipeline: `AI_WIDGET_GROUNDED_MODE` must explicitly be `shadow` or `enforce`; missing, empty, or unknown values fail closed to `off`. Production enablement still requires separate owner approval.
 
 ## Grounded send path
 

@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  bigint,
   boolean,
   check,
   index,
@@ -167,6 +168,10 @@ export const conversations = pgTable(
     status: text("status").notNull().default("open"),
     aiState: text("ai_state").notNull().default("ai_collecting_info"),
     agentAllowedToReply: boolean("agent_allowed_to_reply").notNull().default(false),
+    lastMessageSequence: bigint("last_message_sequence", { mode: "number" })
+      .notNull()
+      .default(0),
+    generationEpoch: bigint("generation_epoch", { mode: "number" }).notNull().default(0),
     sourcePageUrl: text("source_page_url"),
     widgetInstanceId: text("widget_instance_id"),
     metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
@@ -199,6 +204,7 @@ export const conversationMessages = pgTable(
       .references(() => leads.id, { onDelete: "cascade" }),
     direction: text("direction").notNull(),
     senderRole: text("sender_role").notNull(),
+    messageSequence: bigint("message_sequence", { mode: "number" }).notNull(),
     body: text("body").notNull(),
     idempotencyKey: text("idempotency_key").notNull(),
     requestFingerprint: text("request_fingerprint").notNull(),
@@ -239,6 +245,9 @@ export const conversationMessages = pgTable(
       table.conversationId,
       table.createdAt
     ),
+    conversationSequenceIdx: uniqueIndex(
+      "conversation_messages_conversation_sequence_idx"
+    ).on(table.conversationId, table.messageSequence),
     leadCreatedIdx: index("conversation_messages_lead_created_idx").on(table.leadId, table.createdAt)
   })
 );
@@ -258,7 +267,9 @@ export const widgetAiJobs = pgTable(
       .notNull()
       .references(() => leads.id, { onDelete: "cascade" }),
     status: text("status").notNull().default("pending"),
-    inputPayload: jsonb("input_payload").$type<Record<string, unknown>>().notNull(),
+    expectedGenerationEpoch: bigint("expected_generation_epoch", { mode: "number" }).notNull(),
+    respondsThroughSequence: bigint("responds_through_sequence", { mode: "number" }).notNull(),
+    runtimeMode: text("runtime_mode").notNull().default("direct_openai"),
     attemptCount: integer("attempt_count").notNull().default(0),
     maxAttempts: integer("max_attempts").notNull().default(3),
     availableAt: timestamp("available_at", { withTimezone: true }).notNull().defaultNow(),
@@ -285,6 +296,20 @@ export const widgetAiJobs = pgTable(
     conversationCreatedIdx: index("widget_ai_jobs_conversation_created_idx").on(
       table.conversationId,
       table.createdAt
+    ),
+    responseWindowIdx: uniqueIndex("widget_ai_jobs_response_window_idx").on(
+      table.conversationId,
+      table.expectedGenerationEpoch,
+      table.respondsThroughSequence,
+      table.runtimeMode
+    ),
+    statusCheck: check(
+      "widget_ai_jobs_status_check",
+      sql`${table.status} IN ('pending', 'processing', 'retrying', 'replied', 'degraded', 'blocked', 'failed', 'superseded')`
+    ),
+    runtimeModeCheck: check(
+      "widget_ai_jobs_runtime_mode_check",
+      sql`${table.runtimeMode} IN ('direct_openai', 'mastra_openai_api')`
     )
   })
 );
@@ -439,17 +464,22 @@ export const aiRuns = pgTable(
   "ai_runs",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    traceId: uuid("trace_id").notNull().defaultRandom(),
+    recordingContract: text("recording_contract").notNull().default("native_recorded"),
+    traceId: uuid("trace_id"),
     leadId: uuid("lead_id")
       .notNull()
       .references(() => leads.id, { onDelete: "cascade" }),
     conversationId: uuid("conversation_id")
       .notNull()
       .references(() => conversations.id, { onDelete: "cascade" }),
-    inboundMessageId: uuid("inbound_message_id").references(() => conversationMessages.id, {
-      onDelete: "no action"
-    }),
-    inboundPublicMessageId: uuid("inbound_public_message_id"),
+    inboundMessageId: uuid("inbound_message_id")
+      .notNull()
+      .references(() => conversationMessages.id, { onDelete: "no action" }),
+    inboundPublicMessageId: uuid("inbound_public_message_id")
+      .notNull()
+      .$defaultFn(() => {
+        throw new Error("ai_runs.inbound_public_message_id requires explicit canonical linkage");
+      }),
     outboundMessageId: uuid("outbound_message_id").references(() => conversationMessages.id, {
       onDelete: "no action"
     }),
@@ -467,14 +497,14 @@ export const aiRuns = pgTable(
     reason: text("reason"),
     policyVersion: text("policy_version"),
     promptVersion: text("prompt_version"),
-    toolVersion: text("tool_version").notNull().default("legacy"),
+    toolVersion: text("tool_version"),
     knowledgeVersion: text("knowledge_version"),
     assetVersion: text("asset_version"),
     toneVersion: text("tone_version"),
     factsVersion: text("facts_version"),
-    disclosureVersion: text("disclosure_version").notNull().default("legacy"),
-    configuredModelProvider: text("configured_model_provider").notNull().default("openai"),
-    configuredModelName: text("configured_model_name").notNull().default("legacy"),
+    disclosureVersion: text("disclosure_version"),
+    configuredModelProvider: text("configured_model_provider"),
+    configuredModelName: text("configured_model_name"),
     modelName: text("model_name"),
     generatorModelName: text("generator_model_name"),
     verifierModelName: text("verifier_model_name"),
@@ -484,8 +514,8 @@ export const aiRuns = pgTable(
     catalogContentHash: text("catalog_content_hash"),
     observedModelProvider: text("observed_model_provider"),
     observedModelName: text("observed_model_name"),
-    reasoningEffort: text("reasoning_effort").notNull().default("none"),
-    modelProfileVersion: text("model_profile_version").notNull().default("legacy_s05"),
+    reasoningEffort: text("reasoning_effort"),
+    modelProfileVersion: text("model_profile_version"),
     runtimeVersion: text("runtime_version"),
     inputTokens: integer("input_tokens"),
     outputTokens: integer("output_tokens"),
@@ -498,7 +528,7 @@ export const aiRuns = pgTable(
     failureCode: text("failure_code"),
     profileValidatorResult: text("profile_validator_result").notNull().default("not_run"),
     metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
-    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
     completedAt: timestamp("completed_at", { withTimezone: true }),
     latencyMs: integer("latency_ms"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -507,6 +537,9 @@ export const aiRuns = pgTable(
   (table) => ({
     traceIdIdx: uniqueIndex("ai_runs_trace_id_idx").on(table.traceId),
     idempotencyKeyIdx: uniqueIndex("ai_runs_idempotency_key_idx").on(table.idempotencyKey),
+    inboundPublicMessageIdIdx: uniqueIndex("ai_runs_inbound_public_message_id_idx").on(
+      table.inboundPublicMessageId
+    ),
     outboundMessageIdIdx: uniqueIndex("ai_runs_outbound_message_id_idx")
       .on(table.outboundMessageId)
       .where(sql`${table.outboundMessageId} IS NOT NULL`),
@@ -520,6 +553,10 @@ export const aiRuns = pgTable(
       table.startedAt.desc()
     ),
     inputFingerprintIdx: index("ai_runs_input_fingerprint_idx").on(table.inputFingerprint),
+    recordingContractCheck: check(
+      "ai_runs_recording_contract_check",
+      sql`${table.recordingContract} IN ('native_grounded', 'native_recorded', 'legacy_narrow')`
+    ),
     channelCheck: check("ai_runs_channel_check", sql`${table.channel} IN ('site_widget')`),
     runtimeModeCheck: check(
       "ai_runs_runtime_mode_check",
@@ -535,12 +572,16 @@ export const aiRuns = pgTable(
     ),
     decisionProfileCheck: check(
       "ai_runs_decision_profile_check",
-      sql`${table.decisionProfile} IN ('legacy_s05', 'live_v2')`
+      sql`${table.decisionProfile} IN ('legacy_s05', 'live_v2', 'grounded_v1')`
     ),
     runtimeProfileCheck: check(
       "ai_runs_runtime_profile_check",
-      sql`(${table.runtimeMode} = 'direct_openai' AND ${table.decisionProfile} = 'legacy_s05')
-        OR (${table.runtimeMode} = 'mastra_openai_api' AND ${table.decisionProfile} = 'live_v2')`
+      sql`(${table.recordingContract} = 'native_recorded'
+          AND ((${table.runtimeMode} = 'direct_openai' AND ${table.decisionProfile} = 'legacy_s05')
+            OR (${table.runtimeMode} = 'mastra_openai_api' AND ${table.decisionProfile} = 'live_v2')))
+        OR (${table.recordingContract} IN ('native_grounded', 'legacy_narrow')
+          AND ${table.runtimeMode} = 'direct_openai'
+          AND ${table.decisionProfile} = 'grounded_v1')`
     ),
     decisionActionCheck: check(
       "ai_runs_decision_action_check",
@@ -548,7 +589,7 @@ export const aiRuns = pgTable(
     ),
     idempotencyKeyCheck: check(
       "ai_runs_idempotency_key_check",
-      sql`char_length(${table.idempotencyKey}) BETWEEN 1 AND 200 AND ${table.idempotencyKey} ~ '^[A-Za-z0-9._:/@+-]+$'`
+      sql`${table.idempotencyKey} IS NULL OR (char_length(${table.idempotencyKey}) BETWEEN 1 AND 200 AND ${table.idempotencyKey} ~ '^[A-Za-z0-9._:/@+-]+$')`
     ),
     inputFingerprintCheck: check(
       "ai_runs_input_fingerprint_check",
@@ -577,7 +618,7 @@ export const aiRuns = pgTable(
     ),
     configuredModelProviderCheck: check(
       "ai_runs_configured_model_provider_check",
-      sql`${table.configuredModelProvider} IN ('none', 'openai', 'fake')`
+      sql`${table.configuredModelProvider} IS NULL OR ${table.configuredModelProvider} IN ('none', 'openai', 'fake')`
     ),
     observedModelProviderCheck: check(
       "ai_runs_observed_model_provider_check",
@@ -585,13 +626,14 @@ export const aiRuns = pgTable(
     ),
     modelNamesCheck: check(
       "ai_runs_model_names_check",
-      sql`char_length(${table.configuredModelName}) BETWEEN 1 AND 120
-        AND ${table.configuredModelName} ~ '^[A-Za-z0-9._:/@+-]+$'
+      sql`(${table.configuredModelName} IS NULL OR (char_length(${table.configuredModelName}) BETWEEN 1 AND 120
+        AND ${table.configuredModelName} ~ '^[A-Za-z0-9._:/@+-]+$'))
         AND (${table.observedModelName} IS NULL OR (char_length(${table.observedModelName}) BETWEEN 1 AND 120 AND ${table.observedModelName} ~ '^[A-Za-z0-9._:/@+-]+$'))`
     ),
     modelObservationStateCheck: check(
       "ai_runs_model_observation_state_check",
-      sql`(${table.status} = 'running'
+      sql`${table.recordingContract} <> 'native_recorded'
+        OR (${table.status} = 'running'
           AND ${table.observedModelProvider} IS NULL
           AND ${table.observedModelName} IS NULL)
         OR (${table.status} <> 'running'
@@ -601,7 +643,7 @@ export const aiRuns = pgTable(
     ),
     reasoningEffortCheck: check(
       "ai_runs_reasoning_effort_check",
-      sql`${table.reasoningEffort} IN ('none', 'low', 'medium', 'high')`
+      sql`${table.reasoningEffort} IS NULL OR ${table.reasoningEffort} IN ('none', 'low', 'medium', 'high')`
     ),
     tokenCountsCheck: check(
       "ai_runs_token_counts_check",
@@ -634,8 +676,11 @@ export const aiRuns = pgTable(
         'handoff_to_manager',
         'missing_provider_config',
         'model_error',
+        'semantic_verifier_error',
+        'turn_timeout',
         'empty_model_response',
         'unsafe_model_response',
+        'grounding_validation_failed',
         'agent_reply_blocked',
         'ai_persistence_unconfirmed',
         'execution_context_mismatch',
@@ -665,21 +710,66 @@ export const aiRuns = pgTable(
       "ai_runs_profile_validator_result_check",
       sql`${table.profileValidatorResult} IN ('not_run', 'passed', 'rejected', 'failed')`
     ),
+    verifierVerdictCheck: check(
+      "ai_runs_verifier_verdict_check",
+      sql`${table.verifierVerdict} IS NULL OR ${table.verifierVerdict} IN ('pass', 'repair', 'handoff', 'block')`
+    ),
+    catalogContentHashCheck: check(
+      "ai_runs_catalog_content_hash_check",
+      sql`${table.catalogContentHash} IS NULL OR char_length(${table.catalogContentHash}) = 64`
+    ),
     timingCheck: check(
       "ai_runs_timing_check",
-      sql`(${table.status} = 'running' AND ${table.completedAt} IS NULL AND ${table.latencyMs} IS NULL)
+      sql`(${table.recordingContract} = 'native_recorded'
+        AND ((${table.status} = 'running' AND ${table.completedAt} IS NULL AND ${table.latencyMs} IS NULL)
         OR (${table.status} <> 'running'
           AND ${table.completedAt} IS NOT NULL
           AND ${table.completedAt} >= ${table.startedAt}
           AND ${table.latencyMs} IS NOT NULL
-          AND ${table.latencyMs} >= 0)`
+          AND ${table.latencyMs} >= 0)))
+        OR (${table.recordingContract} IN ('native_grounded', 'legacy_narrow')
+          AND ${table.status} <> 'running'
+          AND ${table.completedAt} IS NOT NULL
+          AND ${table.latencyMs} IS NULL)`
     ),
     outboundLinkageCheck: check(
       "ai_runs_outbound_linkage_check",
       sql`(${table.status} IN ('persisted', 'handed_off')
           AND ${table.outboundMessageId} IS NOT NULL
+          AND ${table.outboundPublicMessageId} IS NOT NULL
           AND ${table.sendGateResult} = 'allowed')
-        OR (${table.status} NOT IN ('persisted', 'handed_off') AND ${table.outboundMessageId} IS NULL)`
+        OR (${table.status} NOT IN ('persisted', 'handed_off')
+          AND ${table.outboundMessageId} IS NULL
+          AND ${table.outboundPublicMessageId} IS NULL)`
+    ),
+    publicInternalLinkageCheck: check(
+      "ai_runs_public_internal_linkage_check",
+      sql`${table.inboundMessageId} IS NOT NULL
+        AND ${table.inboundPublicMessageId} IS NOT NULL
+        AND ((${table.outboundMessageId} IS NULL) = (${table.outboundPublicMessageId} IS NULL))`
+    ),
+    contractEvidenceCheck: check(
+      "ai_runs_contract_evidence_check",
+      sql`(${table.recordingContract} = 'native_recorded'
+          AND ${table.traceId} IS NOT NULL
+          AND ${table.idempotencyKey} IS NOT NULL
+          AND ${table.policyVersion} IS NOT NULL
+          AND ${table.promptVersion} IS NOT NULL
+          AND ${table.toolVersion} IS NOT NULL
+          AND ${table.disclosureVersion} IS NOT NULL
+          AND ${table.configuredModelProvider} IS NOT NULL
+          AND ${table.configuredModelName} IS NOT NULL
+          AND ${table.reasoningEffort} IS NOT NULL
+          AND ${table.modelProfileVersion} IS NOT NULL
+          AND ${table.startedAt} IS NOT NULL)
+        OR (${table.recordingContract} = 'native_grounded'
+          AND ${table.idempotencyKey} IS NOT NULL
+          AND ${table.status} <> 'running'
+          AND ${table.decisionAction} IS NOT NULL
+          AND ${table.completedAt} IS NOT NULL)
+        OR (${table.recordingContract} = 'legacy_narrow'
+          AND ${table.status} <> 'running'
+          AND ${table.completedAt} IS NOT NULL)`
     ),
     terminalEvidenceCheck: check(
       "ai_runs_terminal_evidence_check",
@@ -698,8 +788,9 @@ export const aiRuns = pgTable(
           AND ${table.failureCode} IS NULL)
         OR (${table.status} IN ('blocked', 'fallback_unavailable', 'failed')
           AND ${table.decisionAction} IS NOT NULL
-          AND ${table.outcomeReason} IS NOT NULL
-          AND ${table.outcomeReason} NOT IN ('no_safe_answer', 'missing_approved_fact')
+          AND (${table.outcomeReason} IS NOT NULL
+            OR (${table.recordingContract} IN ('native_grounded', 'legacy_narrow') AND ${table.reason} IS NOT NULL))
+          AND (${table.outcomeReason} IS NULL OR ${table.outcomeReason} NOT IN ('no_safe_answer', 'missing_approved_fact'))
           AND ${table.failureCode} IS NOT NULL)`
     ),
     sendGateStateCheck: check(
@@ -1030,8 +1121,11 @@ export const aiQualityEvents = pgTable(
         'handoff_to_manager',
         'missing_openai_config',
         'model_error',
+        'semantic_verifier_error',
+        'turn_timeout',
         'empty_model_response',
         'unsafe_model_response',
+        'grounding_validation_failed',
         'agent_reply_blocked',
         'ai_persistence_unconfirmed',
         'execution_context_mismatch',

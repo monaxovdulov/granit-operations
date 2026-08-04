@@ -178,7 +178,8 @@ postgresDescribe("P3 PostgreSQL AI run span retention", () => {
       .values({
         leadId: lead.id,
         channel: "site_widget",
-        agentAllowedToReply: false
+        agentAllowedToReply: false,
+        lastMessageSequence: 1
       })
       .returning({ id: conversations.id });
     if (!conversation) throw new Error("expected conversation");
@@ -189,6 +190,7 @@ postgresDescribe("P3 PostgreSQL AI run span retention", () => {
         leadId: lead.id,
         direction: "inbound",
         senderRole: "visitor",
+        messageSequence: 1,
         body: "P3 retention business state",
         idempotencyKey: `p3-retention:${randomUUID()}`,
         requestFingerprint: "c".repeat(64),

@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 
 import {
-  SITE_WIDGET_CONTRACT_VERSION,
   SITE_WIDGET_MESSAGE_EVENT_TYPE,
+  SITE_WIDGET_V2_CONTRACT_VERSION,
   type SiteWidgetMessageRequest
 } from "@granit/contracts";
 import {
@@ -12,7 +12,6 @@ import {
   aiRuns,
   conversationMessages,
   conversations,
-  createOperationsDb,
   leadTimelineEvents
 } from "@granit/db";
 import { eq } from "drizzle-orm";
@@ -34,31 +33,24 @@ import {
   answerCandidate,
   noReplyCandidate
 } from "./fixtures/live-v2-synthetic.v1.js";
+import {
+  resetPostgresWidgetAiState,
+  startPostgresWidgetAiTestHarness,
+  type PostgresWidgetAiTestHarness
+} from "./helpers/postgres-widget-ai-test-harness.js";
 
 const TEST_PRECOMPUTED_COST_RATE_VERSION = "unit_test_precomputed_cost.v1";
 
-const connectionString = process.env.P2_TEST_DATABASE_URL;
-const postgresDescribe = connectionString ? describe.sequential : describe.skip;
-
-postgresDescribe("P2 PostgreSQL AI observability atomicity", () => {
-  const database = connectionString ? createOperationsDb(connectionString) : undefined;
+describe.sequential("P2 PostgreSQL AI observability atomicity", () => {
+  let database: PostgresWidgetAiTestHarness;
   let app: ReturnType<typeof buildApi> | undefined;
 
-  beforeAll(() => {
-    if (!database) throw new Error("P2_TEST_DATABASE_URL is required");
-  });
+  beforeAll(async () => {
+    database = await startPostgresWidgetAiTestHarness();
+  }, 180_000);
 
   beforeEach(async () => {
-    await database?.client.unsafe("TRUNCATE TABLE leads RESTART IDENTITY CASCADE");
-    await database?.db
-      .update(aiRuntimeControls)
-      .set({
-        enabled: true,
-        version: 1,
-        changedByManagerId: null,
-        changedByManagerEmail: null
-      })
-      .where(eq(aiRuntimeControls.scope, "site_widget"));
+    await resetPostgresWidgetAiState(database);
   });
 
   afterEach(async () => {
@@ -69,7 +61,7 @@ postgresDescribe("P2 PostgreSQL AI observability atomicity", () => {
   });
 
   afterAll(async () => {
-    await database?.client.end();
+    await database?.stop();
   });
 
   it("commits outbound, allowed gate and terminal run once across replay", async () => {
@@ -82,7 +74,7 @@ postgresDescribe("P2 PostgreSQL AI observability atomicity", () => {
       modelName: "p2-postgres-fake",
       usage: { inputTokens: 10, outputTokens: 7, totalTokens: 17 }
     }));
-    app = buildApi({
+    app = buildQueuedApi({
       repository,
       widgetAi: {
         enabled: true,
@@ -94,12 +86,14 @@ postgresDescribe("P2 PostgreSQL AI observability atomicity", () => {
     const payload = widgetRequest("p2-postgres-success-0001");
 
     const first = await app.inject({ method: "POST", url: "/public/intake/site-widget/messages", payload });
+    const history = await waitForTerminalHistory(app, first);
     const replay = await app.inject({ method: "POST", url: "/public/intake/site-widget/messages", payload });
 
-    expect(first.json()).toMatchObject({ automation: { status: "replied" } });
+    expect(first.json()).toMatchObject({ automation: { status: "processing" } });
+    expect(history.messages[0]).toMatchObject({ automation: { status: "replied" } });
     expect(replay.json()).toMatchObject({ status: "replayed", automation: { status: "replied" } });
     expect(first.json().trace_id).toBeUndefined();
-    expect(generateReply).toHaveBeenCalledTimes(1);
+    expect(generateReply).not.toHaveBeenCalled();
 
     const [runRows, outboundRows, spanRows, eventRows] = await Promise.all([
       database.db.select().from(aiRuns),
@@ -110,37 +104,24 @@ postgresDescribe("P2 PostgreSQL AI observability atomicity", () => {
     expect(runRows).toHaveLength(1);
     expect(outboundRows).toHaveLength(1);
     expect(runRows[0]).toMatchObject({
+      recordingContract: "native_grounded",
       status: "persisted",
-      decisionAction: "answer",
-      outcomeReason: "reply_persisted",
-      configuredModelProvider: "fake",
-      configuredModelName: "p2-postgres-fake",
-      observedModelProvider: "fake",
-      observedModelName: "p2-postgres-fake",
-      inputTokens: 10,
-      outputTokens: 7,
-      totalTokens: 17,
-      sendGateResult: "allowed",
-      outboundMessageId: outboundRows[0]?.id
+      outboundMessageId: outboundRows[0]?.id,
+      metadata: {
+        queue_wait_ms: expect.any(Number),
+        response_window_epoch: 1,
+        responds_through_sequence: 1
+      }
     });
-    expect(runRows[0]?.sendGateCheckedAt).toBeInstanceOf(Date);
-    expect(runRows[0]!.sendGateCheckedAt!.getTime()).toBeLessThanOrEqual(
-      runRows[0]!.completedAt!.getTime()
-    );
-    expect(spanRows).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ name: "send_gate_check", status: "succeeded" }),
-        expect.objectContaining({ name: "reply_persistence", status: "succeeded" })
-      ])
-    );
+    expect(spanRows).toHaveLength(0);
     expect(eventRows).toHaveLength(0);
   });
 
-  it("commits a blocked terminal run without an outbound after manager takeover", async () => {
+  it("fails closed before a custom recorded generator when PostgreSQL lacks the capability", async () => {
     if (!database) throw new Error("expected test database");
     const repository = new PostgresIntakeRepository(database.db);
     const runRepository = new PostgresAiRunRepository(database.db);
-    app = buildApi({
+    app = buildQueuedApi({
       repository,
       widgetAi: {
         enabled: true,
@@ -169,33 +150,21 @@ postgresDescribe("P2 PostgreSQL AI observability atomicity", () => {
       payload: widgetRequest("p2-postgres-gate-block-0001")
     });
 
-    expect(response.json()).toMatchObject({ automation: { status: "fallback", reason: "agent_reply_blocked" } });
+    const history = await waitForTerminalHistory(app, response);
+    expect(response.json()).toMatchObject({ automation: { status: "processing" } });
+    expect(history.messages[0]).toMatchObject({
+      automation: { status: "blocked", reason: "ai_persistence_unconfirmed" }
+    });
     const [runRows, outboundRows, spanRows, eventRows] = await Promise.all([
       database.db.select().from(aiRuns),
       database.db.select().from(conversationMessages).where(eq(conversationMessages.senderRole, "ai_assistant")),
       database.db.select().from(aiRunSpans),
       database.db.select().from(aiQualityEvents)
     ]);
-    expect(runRows).toMatchObject([
-      { status: "blocked", outcomeReason: "agent_reply_blocked", sendGateResult: "blocked", outboundMessageId: null }
-    ]);
+    expect(runRows).toHaveLength(0);
     expect(outboundRows).toHaveLength(0);
-    expect(runRows[0]?.sendGateCheckedAt).toBeInstanceOf(Date);
-    expect(runRows[0]!.sendGateCheckedAt!.getTime()).toBeLessThanOrEqual(
-      runRows[0]!.completedAt!.getTime()
-    );
-    expect(spanRows).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          name: "send_gate_check",
-          status: "blocked",
-          usedInFinalAnswer: false
-        })
-      ])
-    );
-    expect(eventRows).toMatchObject([
-      { eventType: "blocked", reasonCode: "agent_reply_blocked", managerVisible: true }
-    ]);
+    expect(spanRows).toHaveLength(0);
+    expect(eventRows).toHaveLength(0);
   });
 
   it("does not call the generator while the global AI control is stopped", async () => {
@@ -211,7 +180,7 @@ postgresDescribe("P2 PostgreSQL AI observability atomicity", () => {
       text: "Этот генератор не должен быть вызван.",
       metadata: { model_provider: "fake" }
     }));
-    app = buildApi({
+    app = buildQueuedApi({
       repository,
       widgetAi: { enabled: true, replyGenerator: { generateReply }, runRepository }
     });
@@ -224,7 +193,7 @@ postgresDescribe("P2 PostgreSQL AI observability atomicity", () => {
 
     expect(response.statusCode).toBe(202);
     expect(response.json()).toMatchObject({
-      automation: { status: "fallback", reason: "agent_reply_blocked" }
+      automation: { status: "disabled" }
     });
     expect(generateReply).not.toHaveBeenCalled();
     expect(await database.db.select().from(aiRuns)).toHaveLength(0);
@@ -236,11 +205,11 @@ postgresDescribe("P2 PostgreSQL AI observability atomicity", () => {
     ).toHaveLength(0);
   });
 
-  it("blocks an in-flight reply when the global AI control is stopped", async () => {
+  it("does not call a custom recorded generator before a later global stop", async () => {
     if (!database) throw new Error("expected test database");
     const repository = new PostgresIntakeRepository(database.db);
     const runRepository = new PostgresAiRunRepository(database.db);
-    app = buildApi({
+    app = buildQueuedApi({
       repository,
       widgetAi: {
         enabled: true,
@@ -267,17 +236,12 @@ postgresDescribe("P2 PostgreSQL AI observability atomicity", () => {
       payload: widgetRequest("p2-global-stop-in-flight-0001")
     });
 
-    expect(response.json()).toMatchObject({
-      automation: { status: "fallback", reason: "agent_reply_blocked" }
+    const history = await waitForTerminalHistory(app, response);
+    expect(response.json()).toMatchObject({ automation: { status: "processing" } });
+    expect(history.messages[0]).toMatchObject({
+      automation: { status: "blocked", reason: "ai_persistence_unconfirmed" }
     });
-    expect(await database.db.select().from(aiRuns)).toMatchObject([
-      {
-        status: "blocked",
-        outcomeReason: "agent_reply_blocked",
-        sendGateResult: "blocked",
-        outboundMessageId: null
-      }
-    ]);
+    expect(await database.db.select().from(aiRuns)).toHaveLength(0);
     expect(
       await database.db
         .select()
@@ -286,7 +250,7 @@ postgresDescribe("P2 PostgreSQL AI observability atomicity", () => {
     ).toHaveLength(0);
   });
 
-  it("rolls back outbound and gate when terminal success update fails", async () => {
+  it("does not reach recorded terminal triggers without the PostgreSQL capability", async () => {
     if (!database) throw new Error("expected test database");
     await database.client.unsafe(`
       CREATE FUNCTION p2_reject_persisted_ai_run() RETURNS trigger
@@ -304,7 +268,7 @@ postgresDescribe("P2 PostgreSQL AI observability atomicity", () => {
     `);
     const repository = new PostgresIntakeRepository(database.db);
     const runRepository = new PostgresAiRunRepository(database.db);
-    app = buildApi({
+    app = buildQueuedApi({
       repository,
       widgetAi: {
         enabled: true,
@@ -327,9 +291,9 @@ postgresDescribe("P2 PostgreSQL AI observability atomicity", () => {
       payload: widgetRequest("p2-postgres-rollback-0001")
     });
 
-    expect(response.json()).toMatchObject({
-      automation: { status: "fallback", reason: "ai_persistence_unconfirmed" }
-    });
+    const history = await waitForTerminalHistory(app, response);
+    expect(response.json()).toMatchObject({ automation: { status: "processing" } });
+    expect(history.messages[0]?.automation?.status).toMatch(/blocked|failed/);
     const [runRows, outboundRows, conversationRows, spanRows, eventRows, timelineRows] = await Promise.all([
       database.db.select().from(aiRuns),
       database.db.select().from(conversationMessages).where(eq(conversationMessages.senderRole, "ai_assistant")),
@@ -340,22 +304,13 @@ postgresDescribe("P2 PostgreSQL AI observability atomicity", () => {
     ]);
     expect(outboundRows).toHaveLength(0);
     expect(conversationRows).toMatchObject([
-      { agentAllowedToReply: false, aiState: "needs_manager" }
+      { agentAllowedToReply: true, aiState: "ai_collecting_info" }
     ]);
-    expect(runRows).toMatchObject([
-      { status: "failed", outcomeReason: "ai_persistence_unconfirmed", failureCode: "persistence_failure", outboundMessageId: null }
-    ]);
-    expect(eventRows).toMatchObject([
-      { eventType: "runtime_failure", reasonCode: "ai_persistence_unconfirmed" }
-    ]);
-    expect(timelineRows).toEqual(
+    expect(runRows).toHaveLength(0);
+    expect(eventRows).toHaveLength(0);
+    expect(timelineRows).not.toEqual(
       expect.arrayContaining([
-        expect.objectContaining({
-          eventType: "conversation.ai_manager_review_required",
-          metadata: expect.objectContaining({
-            reason: "ai_reply_persistence_unconfirmed"
-          })
-        })
+        expect.objectContaining({ eventType: "conversation.ai_manager_review_required" })
       ])
     );
     expect(JSON.stringify({ runRows, spanRows, eventRows, timelineRows })).not.toContain(
@@ -366,11 +321,11 @@ postgresDescribe("P2 PostgreSQL AI observability atomicity", () => {
     );
   });
 
-  it("never replays a visitor inbound that collides with the outbound idempotency key", async () => {
+  it("does not execute recorded collision setup without the PostgreSQL capability", async () => {
     if (!database) throw new Error("expected test database");
     const repository = new PostgresIntakeRepository(database.db);
     const runRepository = new PostgresAiRunRepository(database.db);
-    app = buildApi({
+    app = buildQueuedApi({
       repository,
       widgetAi: {
         enabled: true,
@@ -401,6 +356,7 @@ postgresDescribe("P2 PostgreSQL AI observability atomicity", () => {
               channelIdentityId: acceptedInbound.channelIdentityId,
               direction: "inbound",
               senderRole: "visitor",
+              messageSequence: 2,
               body: "Visitor collision canary",
               idempotencyKey: `ai:${input.inboundMessage.publicMessageId}`,
               requestFingerprint: "b".repeat(64),
@@ -427,9 +383,9 @@ postgresDescribe("P2 PostgreSQL AI observability atomicity", () => {
       payload: widgetRequest("p2-postgres-outbound-collision-0001")
     });
 
-    expect(response.json()).toMatchObject({
-      automation: { status: "fallback", reason: "ai_persistence_unconfirmed" }
-    });
+    const history = await waitForTerminalHistory(app, response);
+    expect(response.json()).toMatchObject({ automation: { status: "processing" } });
+    expect(history.messages[0]?.automation?.status).toMatch(/blocked|superseded|failed/);
     const [runRows, messageRows, conversationRows, timelineRows] = await Promise.all([
       database.db.select().from(aiRuns),
       database.db.select().from(conversationMessages),
@@ -439,32 +395,15 @@ postgresDescribe("P2 PostgreSQL AI observability atomicity", () => {
     const collisionRows = messageRows.filter((message) =>
       message.idempotencyKey.startsWith("ai:")
     );
-    expect(collisionRows).toMatchObject([
-      {
-        direction: "inbound",
-        senderRole: "visitor",
-        body: "Visitor collision canary",
-        metadata: { collision_canary: "visitor_inbound" }
-      }
-    ]);
+    expect(collisionRows).toHaveLength(0);
     expect(messageRows.filter((message) => message.senderRole === "ai_assistant")).toHaveLength(0);
-    expect(runRows).toMatchObject([
-      {
-        status: "failed",
-        outcomeReason: "ai_persistence_unconfirmed",
-        failureCode: "persistence_failure",
-        outboundMessageId: null
-      }
-    ]);
+    expect(runRows).toHaveLength(0);
     expect(conversationRows).toMatchObject([
-      { agentAllowedToReply: false, aiState: "needs_manager" }
+      { agentAllowedToReply: true, aiState: "ai_collecting_info" }
     ]);
-    expect(timelineRows).toEqual(
+    expect(timelineRows).not.toEqual(
       expect.arrayContaining([
-        expect.objectContaining({
-          eventType: "conversation.ai_manager_review_required",
-          metadata: expect.objectContaining({ reason: "ai_reply_persistence_unconfirmed" })
-        })
+        expect.objectContaining({ eventType: "conversation.ai_manager_review_required" })
       ])
     );
   });
@@ -478,21 +417,27 @@ postgresDescribe("P2 PostgreSQL AI observability atomicity", () => {
       url: "/public/intake/site-widget/messages",
       payload: widgetRequest("p2-runtime-profile-pairs-0001")
     });
-    const [inbound] = await database.db
+    await app.inject({
+      method: "POST",
+      url: "/public/intake/site-widget/messages",
+      payload: widgetRequest("p2-runtime-profile-pairs-0002")
+    });
+    const inboundRows = await database.db
       .select({
         id: conversationMessages.id,
+        publicMessageId: conversationMessages.publicMessageId,
         leadId: conversationMessages.leadId,
         conversationId: conversationMessages.conversationId
       })
       .from(conversationMessages)
-      .where(eq(conversationMessages.direction, "inbound"))
-      .limit(1);
+      .where(eq(conversationMessages.direction, "inbound"));
 
-    if (!inbound) throw new Error("expected accepted inbound message");
+    const [directInbound, mastraInbound] = inboundRows;
+    if (!directInbound || !mastraInbound) throw new Error("expected two accepted inbound messages");
 
     const runRepository = new PostgresAiRunRepository(database.db);
-    const directLegacy = p2BeginRunInput(inbound, "direct_openai", "legacy_s05");
-    const mastraLive = p2BeginRunInput(inbound, "mastra_openai_api", "live_v2");
+    const directLegacy = p2BeginRunInput(directInbound, "direct_openai", "legacy_s05");
+    const mastraLive = p2BeginRunInput(mastraInbound, "mastra_openai_api", "live_v2");
 
     await expect(runRepository.beginOrReplay(directLegacy)).resolves.toMatchObject({
       kind: "started",
@@ -503,8 +448,8 @@ postgresDescribe("P2 PostgreSQL AI observability atomicity", () => {
       run: { runtimeMode: "mastra_openai_api", decisionProfile: "live_v2" }
     });
 
-    const directLive = p2BeginRunInput(inbound, "direct_openai", "live_v2");
-    const mastraLegacy = p2BeginRunInput(inbound, "mastra_openai_api", "legacy_s05");
+    const directLive = p2BeginRunInput(directInbound, "direct_openai", "live_v2");
+    const mastraLegacy = p2BeginRunInput(mastraInbound, "mastra_openai_api", "legacy_s05");
 
     await expect(runRepository.beginOrReplay(directLive)).rejects.toBeInstanceOf(
       AiRunInputInvariantError
@@ -513,18 +458,18 @@ postgresDescribe("P2 PostgreSQL AI observability atomicity", () => {
       AiRunInputInvariantError
     );
     await expect(
-      database.db.insert(aiRuns).values(p2RunInsert(directLive))
+      database.db.insert(aiRuns).values(p2RunInsert(directLive, directInbound.publicMessageId))
     ).rejects.toMatchObject({
       cause: { constraint_name: "ai_runs_runtime_profile_check" }
     });
     await expect(
-      database.db.insert(aiRuns).values(p2RunInsert(mastraLegacy))
+      database.db.insert(aiRuns).values(p2RunInsert(mastraLegacy, mastraInbound.publicMessageId))
     ).rejects.toMatchObject({
       cause: { constraint_name: "ai_runs_runtime_profile_check" }
     });
   });
 
-  it("persists and replays an honest local/fake live_v2 run through PostgreSQL", async () => {
+  it("fails closed before Mastra generation when PostgreSQL lacks recorded reply capability", async () => {
     if (!database) throw new Error("expected test database");
     const repository = new PostgresIntakeRepository(database.db);
     const runRepository = new PostgresAiRunRepository(database.db);
@@ -535,7 +480,7 @@ postgresDescribe("P2 PostgreSQL AI observability atomicity", () => {
       runtimeRunId: "mastra-local-pg-run-001",
       usage: { inputTokens: 12, outputTokens: 3, totalTokens: 15 }
     }));
-    app = buildApi({
+    app = buildQueuedApi({
       repository,
       widgetAi: {
         enabled: true,
@@ -569,42 +514,18 @@ postgresDescribe("P2 PostgreSQL AI observability atomicity", () => {
       database.db.select().from(aiRunSpans)
     ]);
 
-    expect(first.json()).toMatchObject({ automation: { status: "replied" } });
+    expect(first.json()).toMatchObject({ automation: { status: "disabled" } });
     expect(replay.json()).toMatchObject({
       status: "replayed",
-      automation: { status: "replied" }
+      automation: { status: "disabled" }
     });
-    expect(generate).toHaveBeenCalledTimes(1);
-    expect(outboundRows).toHaveLength(1);
-    expect(runRows).toMatchObject([
-      {
-        status: "persisted",
-        runtimeMode: "mastra_openai_api",
-        decisionProfile: "live_v2",
-        configuredModelProvider: "fake",
-        configuredModelName: "mastra-local-pg-fixture-v1",
-        observedModelProvider: "fake",
-        observedModelName: "mastra-local-pg-fixture-v1",
-        runtimeRunId: "mastra-local-pg-run-001",
-        inputTokens: 12,
-        outputTokens: 3,
-        totalTokens: 15,
-        costEstimateMicrounits: null,
-        costRateVersion: null,
-        outboundMessageId: outboundRows[0]?.id
-      }
-    ]);
-    expect(spanRows).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ name: "model_generation", status: "succeeded" }),
-        expect.objectContaining({ name: "candidate_validation", status: "succeeded" }),
-        expect.objectContaining({ name: "send_gate_check", status: "succeeded" }),
-        expect.objectContaining({ name: "reply_persistence", status: "succeeded" })
-      ])
-    );
+    expect(generate).not.toHaveBeenCalled();
+    expect(outboundRows).toHaveLength(0);
+    expect(runRows).toHaveLength(0);
+    expect(spanRows).toHaveLength(0);
   });
 
-  it("persists an honest controlled live_v2 no-reply without an invalid-candidate failure", async () => {
+  it("does not call Mastra for controlled no-reply without recorded PostgreSQL capability", async () => {
     if (!database) throw new Error("expected test database");
     const repository = new PostgresIntakeRepository(database.db);
     const runRepository = new PostgresAiRunRepository(database.db);
@@ -615,7 +536,7 @@ postgresDescribe("P2 PostgreSQL AI observability atomicity", () => {
       runtimeRunId: "mastra-local-pg-no-reply-001",
       usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 }
     }));
-    app = buildApi({
+    app = buildQueuedApi({
       repository,
       widgetAi: {
         enabled: true,
@@ -634,19 +555,9 @@ postgresDescribe("P2 PostgreSQL AI observability atomicity", () => {
       url: "/public/intake/site-widget/messages",
       payload: widgetRequest("m2-postgres-controlled-no-reply-0001")
     });
-    const [row] = await database.db.select().from(aiRuns);
-
-    expect(response.json()).toMatchObject({
-      automation: { status: "fallback", reason: "unsafe_model_response" }
-    });
-    expect(row).toMatchObject({
-      status: "fallback_unavailable",
-      decisionAction: "no_reply",
-      outcomeReason: "missing_approved_fact",
-      failureCode: null,
-      profileValidatorResult: "passed",
-      observedModelProvider: "fake"
-    });
+    expect(response.json()).toMatchObject({ automation: { status: "disabled" } });
+    expect(generate).not.toHaveBeenCalled();
+    expect(await database.db.select().from(aiRuns)).toHaveLength(0);
   });
 
   it("persists and replays allowlisted externally precomputed cost evidence", async () => {
@@ -733,6 +644,49 @@ postgresDescribe("P2 PostgreSQL AI observability atomicity", () => {
   });
 });
 
+function buildQueuedApi(options: Parameters<typeof buildApi>[0]): ReturnType<typeof buildApi> {
+  return buildApi({
+    ...options,
+    widgetAi: options.widgetAi
+      ? ({
+          ...options.widgetAi,
+          jobWorker: {
+            enabled: true,
+            pollIntervalMs: 10,
+            leaseMs: 5_000,
+            retryBackoffMs: 10,
+            maxAttempts: 3
+          }
+        } as NonNullable<Parameters<typeof buildApi>[0]["widgetAi"]>)
+      : undefined
+  });
+}
+
+async function waitForTerminalHistory(
+  currentApp: ReturnType<typeof buildApi>,
+  accepted: { json(): Record<string, unknown> }
+) {
+  const publicSessionId = accepted.json().public_session_id;
+  if (typeof publicSessionId !== "string") {
+    throw new Error("accepted widget response did not include a public session id");
+  }
+
+  for (let attempt = 0; attempt < 500; attempt += 1) {
+    const response = await currentApp.inject({
+      method: "GET",
+      url: `/public/intake/site-widget/sessions/${publicSessionId}/history?schema_version=site_widget.history.v2`
+    });
+    const history = response.json();
+    const status = history.messages?.[0]?.automation?.status;
+    if (status && !["pending", "processing", "retrying"].includes(status)) {
+      return history;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  throw new Error("timed out waiting for terminal PostgreSQL widget history");
+}
+
 function p2BeginRunInput(
   inbound: { id: string; leadId: string; conversationId: string },
   runtimeMode: BeginAiRunInput["runtimeMode"],
@@ -765,12 +719,13 @@ function p2BeginRunInput(
   };
 }
 
-function p2RunInsert(input: BeginAiRunInput) {
+function p2RunInsert(input: BeginAiRunInput, inboundPublicMessageId: string) {
   return {
     traceId: input.traceId,
     leadId: input.leadId,
     conversationId: input.conversationId,
     inboundMessageId: input.inboundMessageId,
+    inboundPublicMessageId,
     channel: input.channel,
     runtimeMode: input.runtimeMode,
     decisionProfile: input.decisionProfile,
@@ -791,7 +746,7 @@ function p2RunInsert(input: BeginAiRunInput) {
 
 function widgetRequest(idempotencyKey: string): SiteWidgetMessageRequest {
   return {
-    schema_version: SITE_WIDGET_CONTRACT_VERSION,
+    schema_version: SITE_WIDGET_V2_CONTRACT_VERSION,
     event_type: SITE_WIDGET_MESSAGE_EVENT_TYPE,
     idempotency_key: idempotencyKey,
     submitted_at: "2026-07-14T21:00:00.000Z",

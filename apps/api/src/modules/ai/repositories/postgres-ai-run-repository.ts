@@ -6,6 +6,7 @@ import {
   aiQualityEvents,
   aiRunSpans,
   aiRuns,
+  conversationMessages,
   type OperationsDb
 } from "@granit/db";
 
@@ -79,15 +80,33 @@ export class PostgresAiRunRepository implements AiRunRepository {
   async beginOrReplay(input: BeginAiRunInput): Promise<BeginAiRunResult> {
     input = sanitizeAiRunStart(input);
     assertRuntimeProfilePair(input);
+    const [inboundMessage] = await this.db
+      .select({ publicMessageId: conversationMessages.publicMessageId })
+      .from(conversationMessages)
+      .where(
+        and(
+          eq(conversationMessages.id, input.inboundMessageId),
+          eq(conversationMessages.leadId, input.leadId),
+          eq(conversationMessages.conversationId, input.conversationId),
+          eq(conversationMessages.direction, "inbound")
+        )
+      )
+      .limit(1);
+
+    if (!inboundMessage) {
+      throw new AiRunInputInvariantError();
+    }
 
     const [inserted] = await this.db
       .insert(aiRuns)
       .values({
         id: randomUUID(),
+        recordingContract: "native_recorded",
         traceId: input.traceId,
         leadId: input.leadId,
         conversationId: input.conversationId,
         inboundMessageId: input.inboundMessageId,
+        inboundPublicMessageId: inboundMessage.publicMessageId,
         channel: input.channel,
         runtimeMode: input.runtimeMode,
         decisionProfile: input.decisionProfile,
@@ -235,11 +254,33 @@ export async function completeAiRunInTransaction(
     completion: sanitizeAiRunCompletion(input.completion)
   };
   assertCompletionShape(input.run, input.completion, input.outboundMessageId);
+  let outboundPublicMessageId: string | null = null;
+
+  if (input.outboundMessageId) {
+    const [outboundMessage] = await tx
+      .select({ publicMessageId: conversationMessages.publicMessageId })
+      .from(conversationMessages)
+      .where(
+        and(
+          eq(conversationMessages.id, input.outboundMessageId),
+          eq(conversationMessages.leadId, input.run.leadId),
+          eq(conversationMessages.conversationId, input.run.conversationId),
+          eq(conversationMessages.direction, "outbound")
+        )
+      )
+      .limit(1);
+
+    if (!outboundMessage) {
+      throw new AiRunCompletionConflictError();
+    }
+    outboundPublicMessageId = outboundMessage.publicMessageId;
+  }
 
   const [updated] = await tx
     .update(aiRuns)
     .set({
       outboundMessageId: input.outboundMessageId ?? null,
+      outboundPublicMessageId,
       decisionAction: input.completion.normalizedAction,
       status: input.completion.status,
       observedModelProvider: input.completion.observedModelProvider,
@@ -330,24 +371,38 @@ function assertRuntimeProfilePair(input: BeginAiRunInput): void {
 function runningRecordBase(
   row: typeof aiRuns.$inferSelect
 ): Omit<RunningAiRunRecord, "status"> {
-  if (row.channel !== "site_widget") {
+  if (
+    row.recordingContract !== "native_recorded" ||
+    row.traceId === null ||
+    row.channel !== "site_widget" ||
+    row.idempotencyKey === null ||
+    row.policyVersion === null ||
+    row.promptVersion === null ||
+    row.toolVersion === null ||
+    row.disclosureVersion === null ||
+    row.configuredModelProvider === null ||
+    row.configuredModelName === null ||
+    row.reasoningEffort === null ||
+    row.modelProfileVersion === null ||
+    row.startedAt === null
+  ) {
     throw new AiRunCompletionConflictError();
   }
 
   return {
     id: row.id,
-    traceId: row.traceId ?? row.id,
+    traceId: row.traceId,
     leadId: row.leadId,
     conversationId: row.conversationId,
-    inboundMessageId: row.inboundMessageId ?? "",
+    inboundMessageId: row.inboundMessageId,
     channel: "site_widget",
     runtimeMode: enumValue(AI_RUN_RUNTIME_MODES, row.runtimeMode),
     decisionProfile: enumValue(AI_RUN_DECISION_PROFILES, row.decisionProfile),
-    idempotencyKey: row.idempotencyKey ?? `ai-run:${row.id}`,
+    idempotencyKey: row.idempotencyKey,
     inputFingerprint: row.inputFingerprint,
     versions: {
-      policyVersion: row.policyVersion ?? "legacy",
-      promptVersion: row.promptVersion ?? "legacy",
+      policyVersion: row.policyVersion,
+      promptVersion: row.promptVersion,
       toolVersion: row.toolVersion,
       ...(row.assetVersion ? { assetVersion: row.assetVersion } : {}),
       ...(row.toneVersion ? { toneVersion: row.toneVersion } : {}),

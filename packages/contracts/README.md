@@ -10,11 +10,12 @@ Initial S01 contract:
 - TypeScript/Zod artifact: `src/public-intake/v1.ts`;
 - JSON Schema artifact: `schemas/public-intake.v1.json`.
 
-S04 widget contract:
+Current widget contract:
 
-- versions: `site_widget.v1` (legacy synchronous) and `site_widget.v2` (durable async acknowledgement + history polling);
+- supported version: `site_widget.v2` (durable async acknowledgement + history polling);
 - endpoint: `POST /public/intake/site-widget/messages`;
-- TypeScript/Zod artifact: `src/site-widget/v1.ts`;
-- JSON Schema artifact: `schemas/site-widget.v1.json`;
+- TypeScript/Zod artifact: `src/site-widget/v2.ts`;
+- JSON Schema artifact: `schemas/site-widget.v2.json`;
 - public success is valid only after the widget message is persisted;
-- automation is explicitly disabled in S04 through `automation.status: "disabled"`.
+- accepted AI work is exposed as `automation.status: "processing"` and completed state is read from history;
+- `site_widget.v1` is retired and rejected before persistence.

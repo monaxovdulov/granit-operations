@@ -62,7 +62,7 @@ export function m3SmokeExitCode(ok: boolean): 0 | 1 {
   return ok ? 0 : 1;
 }
 
-export function summarizeM3PublicResult(value: unknown): {
+export function summarizeM3PublicResult(value: unknown, history?: unknown): {
   ok: boolean;
   fresh: boolean;
   replayed: boolean;
@@ -72,12 +72,21 @@ export function summarizeM3PublicResult(value: unknown): {
   const automation = isRecord(value) && isRecord(value.automation)
     ? value.automation
     : undefined;
+  const historyMessages =
+    isRecord(history) && Array.isArray(history.messages) ? history.messages : [];
+  const historyReplied = historyMessages.some(
+    (message) => isRecord(message) && isRecord(message.automation) &&
+      message.automation.status === "replied"
+  );
+  const historyReplyPresent = historyMessages.some(
+    (message) => isRecord(message) && message.sender_role === "ai_assistant"
+  );
   return {
     ok: isRecord(value) && value.ok === true,
     fresh: isRecord(value) && value.status === "accepted",
     replayed: isRecord(value) && value.status === "replayed",
-    automationReplied: automation?.status === "replied",
-    replyPresent: isRecord(automation?.reply)
+    automationReplied: automation?.status === "replied" || historyReplied,
+    replyPresent: isRecord(automation?.reply) || historyReplyPresent
   };
 }
 

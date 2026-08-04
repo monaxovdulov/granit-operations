@@ -1,6 +1,6 @@
 import {
-  SITE_WIDGET_CONTRACT_VERSION,
   SITE_WIDGET_MESSAGE_EVENT_TYPE,
+  SITE_WIDGET_V2_CONTRACT_VERSION,
   type SiteWidgetMessageRequest
 } from "@granit/contracts";
 import { describe, expect, it } from "vitest";
@@ -127,7 +127,7 @@ describe("widget AI conversation memory", () => {
 
 function request(index: number, text: string): SiteWidgetMessageRequest {
   return {
-    schema_version: SITE_WIDGET_CONTRACT_VERSION,
+    schema_version: SITE_WIDGET_V2_CONTRACT_VERSION,
     event_type: SITE_WIDGET_MESSAGE_EVENT_TYPE,
     idempotency_key: `widget-memory-message-${String(index).padStart(4, "0")}`,
     submitted_at: new Date(Date.UTC(2026, 6, 18, 10, index)).toISOString(),

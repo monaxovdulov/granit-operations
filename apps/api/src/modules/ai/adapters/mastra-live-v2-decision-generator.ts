@@ -56,6 +56,7 @@ export type LiveV2RuntimeGeneration = {
 
 export type LiveV2RuntimeInvocation = {
   appTraceId: string;
+  signal?: AbortSignal;
 };
 
 export interface ObservedLiveV2DecisionGenerator {
@@ -357,7 +358,12 @@ function buildGenerateOptions(
 
   return {
     runId: invocation.appTraceId,
-    abortSignal: AbortSignal.timeout(MASTRA_LIVE_V2_PROVIDER_TIMEOUT_MS),
+    abortSignal: invocation.signal
+      ? AbortSignal.any([
+          invocation.signal,
+          AbortSignal.timeout(MASTRA_LIVE_V2_PROVIDER_TIMEOUT_MS)
+        ])
+      : AbortSignal.timeout(MASTRA_LIVE_V2_PROVIDER_TIMEOUT_MS),
     instructions: input.assets.prompt.instructions.join("\n"),
     maxSteps: 1,
     maxProcessorRetries: 0,

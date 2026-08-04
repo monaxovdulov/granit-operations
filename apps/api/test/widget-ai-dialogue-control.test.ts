@@ -76,6 +76,35 @@ describe("widget AI dialogue control", () => {
     expect(reply!.text).toContain("вы не называли");
   });
 
+  it("does not invent a grandfather or frustration for ordinary family advice", () => {
+    const familyReply = buildWidgetAiDialogueControlReply(
+      turn("памятник для мамы", [message("visitor", "не разбираюсь", 1)])
+    );
+
+    expect(familyReply).toMatchObject({
+      action: "answer",
+      reason: "dialogue_tentative_one_person_context"
+    });
+    expect(familyReply!.text).not.toMatch(/дедуш/iu);
+    expect(buildWidgetAiDialogueControlReply(turn("ты что посоветуешь?", []))).toBeNull();
+  });
+
+  it("does not route a business-hours question into deadline intake", () => {
+    const input = turn("когда вы работаете?", []);
+    const plan = {
+      action: "answer" as const,
+      intent: "general_question" as const,
+      requestedSlots: [],
+      riskFlags: [],
+      handoffReason: null
+    };
+
+    expect(normalizeWidgetAiReplyPlan({ turn: input, plan })).toEqual({
+      plan,
+      reason: null
+    });
+  });
+
   it("blocks a semantically duplicate requested slot", () => {
     const input = turn("Я не уверен", [
       message("ai_assistant", "Какой тип памятника нужен: одинарный или двойной?", 1)

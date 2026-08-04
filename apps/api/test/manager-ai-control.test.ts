@@ -1,6 +1,6 @@
 import {
-  SITE_WIDGET_CONTRACT_VERSION,
   SITE_WIDGET_MESSAGE_EVENT_TYPE,
+  SITE_WIDGET_V2_CONTRACT_VERSION,
   type SiteWidgetMessageRequest
 } from "@granit/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -222,7 +222,7 @@ function replyCandidate() {
 
 function widgetRequest(idempotencyKey: string): SiteWidgetMessageRequest {
   return {
-    schema_version: SITE_WIDGET_CONTRACT_VERSION,
+    schema_version: SITE_WIDGET_V2_CONTRACT_VERSION,
     event_type: SITE_WIDGET_MESSAGE_EVENT_TYPE,
     idempotency_key: idempotencyKey,
     submitted_at: "2026-07-16T10:00:00.000Z",

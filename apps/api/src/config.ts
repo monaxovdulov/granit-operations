@@ -332,7 +332,18 @@ export function parsePublicIntakeAllowedOrigins(value: string | undefined): stri
 function parseWidgetAiGroundedMode(
   value: string | undefined
 ): "off" | "shadow" | "enforce" {
-  return value === "off" || value === "shadow" ? value : "enforce";
+  if (value === undefined) {
+    return "off";
+  }
+
+  if (value === "off" || value === "shadow" || value === "enforce") {
+    return value;
+  }
+
+  process.stderr.write(
+    `${JSON.stringify({ event: "invalid_widget_ai_grounded_mode", fallback: "off" })}\n`
+  );
+  return "off";
 }
 
 function parseIntegerEnv(

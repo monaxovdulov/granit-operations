@@ -267,7 +267,7 @@ function isCalculationIntakeRequest(normalized: string): boolean {
 }
 
 function isDeadlineIntakeRequest(normalized: string): boolean {
-  return /(срок|сроки|когда|успе(?:ете|ем)|сколько.{0,24}(дела|изготов|готов)|буд(?:ет|ут).{0,24}готов)/i.test(
+  return /(срок|сроки|к\s+какому.{0,16}срок|успе(?:ете|ем)|сколько.{0,24}(дела|изготов|готов)|буд(?:ет|ут).{0,24}готов|когда.{0,32}(?:готов|изготов|сдела|успе))/i.test(
     normalized
   );
 }

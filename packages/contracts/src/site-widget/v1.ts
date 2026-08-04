@@ -1,10 +1,8 @@
 import { z } from "zod";
 
-export const SITE_WIDGET_CONTRACT_VERSION = "site_widget.v1" as const;
 export const SITE_WIDGET_V2_CONTRACT_VERSION = "site_widget.v2" as const;
 export const SITE_WIDGET_MESSAGE_EVENT_TYPE = "site_widget.message_submitted" as const;
 export const SUPPORTED_SITE_WIDGET_VERSIONS = [
-  SITE_WIDGET_CONTRACT_VERSION,
   SITE_WIDGET_V2_CONTRACT_VERSION
 ] as const;
 
@@ -73,9 +71,9 @@ export const SiteWidgetConsentSchema = z
   .strict()
   .optional();
 
-export const SiteWidgetMessageRequestSchema = z
+export const SiteWidgetV2MessageRequestSchema = z
   .object({
-    schema_version: z.literal(SITE_WIDGET_CONTRACT_VERSION),
+    schema_version: z.literal(SITE_WIDGET_V2_CONTRACT_VERSION),
     event_type: z.literal(SITE_WIDGET_MESSAGE_EVENT_TYPE),
     idempotency_key: z.string().trim().min(16).max(128).regex(/^[A-Za-z0-9._:-]+$/),
     submitted_at: z.string().datetime({ offset: true }),
@@ -88,14 +86,7 @@ export const SiteWidgetMessageRequestSchema = z
   })
   .strict();
 
-export const SiteWidgetV2MessageRequestSchema = SiteWidgetMessageRequestSchema.extend({
-  schema_version: z.literal(SITE_WIDGET_V2_CONTRACT_VERSION)
-}).strict();
-
-export const AnySiteWidgetMessageRequestSchema = z.union([
-  SiteWidgetMessageRequestSchema,
-  SiteWidgetV2MessageRequestSchema
-]);
+export const AnySiteWidgetMessageRequestSchema = SiteWidgetV2MessageRequestSchema;
 
 export const SiteWidgetCatalogReferenceSchema = z
   .object({
@@ -109,84 +100,6 @@ export const SiteWidgetCatalogReferenceSchema = z
         /^\/catalog\.html\?section=[a-z0-9-]+&entity=ent_[a-f0-9]+#block-[a-z0-9-]+$/
       ),
     entity_id: z.string().regex(/^ent_[a-f0-9]+$/)
-  })
-  .strict();
-
-export const SiteWidgetAutomationSchema = z
-  .discriminatedUnion("status", [
-    z
-      .object({
-        status: z.literal("disabled"),
-        next_step: z.literal("manager_review")
-      })
-      .strict(),
-    z
-      .object({
-        status: z.literal("fallback"),
-        next_step: z.literal("manager_review"),
-        reason: z.enum([
-          "missing_openai_config",
-          "model_error",
-          "empty_model_response",
-          "unsafe_model_response",
-          "semantic_verifier_error",
-          "grounding_validation_failed",
-          "turn_timeout",
-          "agent_reply_blocked",
-          "ai_persistence_unconfirmed"
-        ])
-      })
-      .strict(),
-    z
-      .object({
-        status: z.literal("degraded"),
-        next_step: z.literal("retry_available"),
-        conversation_state: z.literal("ai_active"),
-        reason: z.enum([
-          "missing_openai_config",
-          "model_error",
-          "empty_model_response",
-          "unsafe_model_response",
-          "semantic_verifier_error",
-          "grounding_validation_failed",
-          "turn_timeout",
-          "ai_persistence_unconfirmed"
-        ])
-      })
-      .strict(),
-    z
-      .object({
-        status: z.literal("replied"),
-        next_step: z.literal("ai_reply_shown"),
-        conversation_state: z.enum(["ai_active", "manager_pending"]),
-        disclosure: z
-          .object({
-            shown: z.literal(true),
-            version: z.string().min(1).max(120),
-            text: z.string().min(1).max(1000)
-          })
-          .strict(),
-        reply: z
-          .object({
-            public_message_id: z.string().uuid(),
-            sender_role: z.literal("ai_assistant"),
-            text: z.string().min(1).max(1000)
-          })
-          .strict()
-      })
-      .strict()
-  ]);
-
-export const SiteWidgetSuccessResponseSchema = z
-  .object({
-    ok: z.literal(true),
-    schema_version: z.literal(SITE_WIDGET_CONTRACT_VERSION),
-    status: z.enum(["accepted", "replayed"]),
-    public_session_id: z.string().uuid(),
-    public_message_id: z.string().uuid(),
-    action: z.literal("show_widget_saved"),
-    automation: SiteWidgetAutomationSchema,
-    message_to_user: z.string()
   })
   .strict();
 
@@ -323,7 +236,6 @@ export const SiteWidgetFallbackErrorResponseSchema = z
   .strict();
 
 export const SiteWidgetResponseSchema = z.union([
-  SiteWidgetSuccessResponseSchema,
   SiteWidgetV2SuccessResponseSchema,
   SiteWidgetValidationErrorResponseSchema,
   SiteWidgetUnsupportedVersionResponseSchema,
@@ -332,10 +244,8 @@ export const SiteWidgetResponseSchema = z.union([
 ]);
 
 export type SiteWidgetUtm = z.infer<typeof SiteWidgetUtmSchema>;
-export type SiteWidgetV1MessageRequest = z.infer<typeof SiteWidgetMessageRequestSchema>;
 export type SiteWidgetV2MessageRequest = z.infer<typeof SiteWidgetV2MessageRequestSchema>;
 export type SiteWidgetMessageRequest = z.infer<typeof AnySiteWidgetMessageRequestSchema>;
-export type SiteWidgetSuccessResponse = z.infer<typeof SiteWidgetSuccessResponseSchema>;
 export type SiteWidgetV2SuccessResponse = z.infer<typeof SiteWidgetV2SuccessResponseSchema>;
 export type SiteWidgetCatalogReference = z.infer<typeof SiteWidgetCatalogReferenceSchema>;
 export type SiteWidgetResponse = z.infer<typeof SiteWidgetResponseSchema>;

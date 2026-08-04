@@ -52,7 +52,7 @@ describe("site widget AI durable job worker", () => {
       schema_version: SITE_WIDGET_V2_CONTRACT_VERSION,
       automation: { status: "processing" }
     });
-    expect(await worker.runOnce(new Date())).toBe(true);
+    expect(await worker.runOnce(new Date(Date.now() + 1_000))).toBe(true);
 
     const afterFailure = await repository.getSiteWidgetHistory!(
       (accepted.body as { public_session_id: string }).public_session_id
@@ -63,7 +63,7 @@ describe("site widget AI durable job worker", () => {
     });
     expect(afterFailure?.messages).toHaveLength(1);
 
-    expect(await worker.runOnce(new Date(Date.now() + 1_000))).toBe(true);
+    expect(await worker.runOnce(new Date(Date.now() + 2_000))).toBe(true);
     const afterRetry = await repository.getSiteWidgetHistory!(
       (accepted.body as { public_session_id: string }).public_session_id
     );
@@ -79,7 +79,7 @@ describe("site widget AI durable job worker", () => {
     ]);
   });
 
-  it("reuses a persisted reply when job completion fails after the reply commit", async () => {
+  it("keeps the atomic replied state when completion acknowledgement fails", async () => {
     const repository = new MemoryIntakeRepository();
     let calls = 0;
     const replyGenerator: PublicWidgetAiReplyGenerator = {
@@ -119,16 +119,16 @@ describe("site widget AI durable job worker", () => {
       await finishJob(input);
     };
 
-    expect(await worker.runOnce(new Date())).toBe(true);
+    expect(await worker.runOnce(new Date(Date.now() + 1_000))).toBe(true);
 
     const publicSessionId = (accepted.body as { public_session_id: string }).public_session_id;
     const afterLostCompletion = await repository.getSiteWidgetHistory!(publicSessionId);
     expect(afterLostCompletion?.messages).toMatchObject([
-      { senderRole: "visitor", automation: { status: "retrying" } },
+      { senderRole: "visitor", automation: { status: "replied" } },
       { senderRole: "ai_assistant", text: "Ответ уже надёжно сохранён." }
     ]);
 
-    expect(await worker.runOnce(new Date(Date.now() + 1_000))).toBe(true);
+    expect(await worker.runOnce(new Date(Date.now() + 2_000))).toBe(false);
 
     const recovered = await repository.getSiteWidgetHistory!(publicSessionId);
     expect(calls).toBe(1);
@@ -153,7 +153,7 @@ describe("site widget AI durable job worker", () => {
     const accepted = await service.acceptSiteWidgetMessage(validV2Request());
     const claimed = await repository.claimSiteWidgetAiJob!({
       leaseMs: 5_000,
-      now: new Date()
+      now: new Date(Date.now() + 1_000)
     });
 
     expect(claimed).not.toBeNull();
@@ -247,7 +247,7 @@ describe("site widget AI durable job worker", () => {
 
     const publicSessionId = (accepted.body as { public_session_id: string }).public_session_id;
     const history = await repository.getSiteWidgetHistory!(publicSessionId);
-    expect(claimCalls).toBe(2);
+    expect(claimCalls).toBeGreaterThanOrEqual(2);
     expect(errors).toHaveLength(1);
     expect(errors[0]).toBeInstanceOf(Error);
     expect(history?.messages).toMatchObject([

@@ -113,9 +113,11 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
         model: this.options.model,
         startedAt
       });
-    } catch {
+    } catch (error) {
       throw new RecordedLiveV2ExecutionError();
     }
+
+    throwIfRecordedTurnAborted(input.signal);
 
     if (beginResult.kind === "terminal_replay") {
       return { kind: "terminal_replay", run: beginResult.run };
@@ -144,7 +146,8 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
           ],
           { observedModelProvider: "none" },
           false
-        )
+        ),
+        input.noReplyApplier
       );
 
       return {
@@ -170,9 +173,12 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
           generateDecision: async (generatorInput) => {
             generatorStartedAt = this.clock();
             try {
+              throwIfRecordedTurnAborted(input.signal);
               const generation = await this.options.generator.generateDecision(generatorInput, {
-                appTraceId: run.traceId
+                appTraceId: run.traceId,
+                signal: input.signal
               });
+              throwIfRecordedTurnAborted(input.signal);
               observation = toTrustedObservation(generation.observation);
               generatorSucceeded = true;
               return generation.candidate;
@@ -215,6 +221,7 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
       });
 
       if (liveOutcome.plan.kind === "persist_reply") {
+        throwIfRecordedTurnAborted(input.signal);
         const action = liveOutcome.plan.action;
         const result = await input.replyApplier.persistReplyAndCompleteRun({
           run,
@@ -262,6 +269,7 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
       }
 
       const state = terminalStateFor(liveOutcome);
+      throwIfRecordedTurnAborted(input.signal);
       const completed = await this.completeWithoutReply(
         run,
         this.completion(
@@ -270,7 +278,8 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
           baseSpans,
           observation,
           state.sendGateResult !== "not_checked"
-        )
+        ),
+        input.noReplyApplier
       );
 
       return {
@@ -278,7 +287,11 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
         run: completed,
         outcome: terminalOutcome(liveOutcome, completed)
       };
-    } catch {
+    } catch (error) {
+      if (input.signal?.aborted) {
+        throw error;
+      }
+
       if (atomicCompletion) {
         throw new RecordedLiveV2ExecutionError();
       }
@@ -303,10 +316,12 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
             failedSpans,
             observation,
             false
-          )
+          ),
+          input.noReplyApplier
         );
       } catch {
-        // The public boundary still fails closed when even recorder completion is unavailable.
+        // Preserve a fenced stale-attempt error so the durable worker can supersede it.
+        throw error;
       }
 
       throw new RecordedLiveV2ExecutionError();
@@ -433,8 +448,12 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
 
   private async completeWithoutReply(
     run: RunningAiRunRecord,
-    completion: AiRunTerminalCompletion
+    completion: AiRunTerminalCompletion,
+    applier?: NonNullable<Parameters<RecordedAiTurnService["execute"]>[0]["noReplyApplier"]>
   ): Promise<TerminalAiRunRecord> {
+    if (applier) {
+      return applier.completeWithoutReply({ run, completion });
+    }
     return this.options.repository.completeWithoutReply({ run, completion });
   }
 
@@ -453,6 +472,12 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
       latencyMs,
       ...(errorCode ? { errorCode } : {})
     };
+  }
+}
+
+function throwIfRecordedTurnAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) {
+    throw new RecordedLiveV2ExecutionError();
   }
 }
 

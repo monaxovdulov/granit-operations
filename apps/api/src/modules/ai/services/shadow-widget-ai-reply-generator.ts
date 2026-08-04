@@ -32,11 +32,14 @@ export class ShadowWidgetAiReplyGenerator implements PublicWidgetAiReplyGenerato
     private readonly sink?: WidgetAiShadowObservationSink
   ) {}
 
-  async generateReply(input: AiTurnInput): Promise<PublicWidgetAiReplyResult> {
+  async generateReply(
+    input: AiTurnInput,
+    options?: { signal?: AbortSignal }
+  ): Promise<PublicWidgetAiReplyResult> {
     const startedAtMs = Date.now();
     const startedAt = new Date(startedAtMs).toISOString();
     const groundedStartedAtMs = Date.now();
-    const groundedSettled = Promise.resolve(this.grounded.generateReply(input)).then(
+    const groundedSettled = Promise.resolve(this.grounded.generateReply(input, options)).then(
       (result) => ({
         status: "fulfilled" as const,
         result: result as PublicWidgetAiReplyResult,
@@ -49,9 +52,7 @@ export class ShadowWidgetAiReplyGenerator implements PublicWidgetAiReplyGenerato
       })
     );
 
-    const legacyResult = (await this.legacy.generateReply(
-      input
-    )) as PublicWidgetAiReplyResult;
+    const legacyResult = (await this.legacy.generateReply(input, options)) as PublicWidgetAiReplyResult;
     const legacyLatencyMs = Date.now() - startedAtMs;
 
     void groundedSettled

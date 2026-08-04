@@ -68,7 +68,10 @@ const LEGACY_ALLOWED_AI_METADATA_KEYS = new Set([
   "policy_reason",
   "prompt_version",
   "public_session_id",
+  "queue_wait_ms",
   "repair_applied",
+  "response_window_epoch",
+  "responds_through_sequence",
   "requirement_verdict_count",
   "render_reason",
   "reply_renderer",
@@ -82,6 +85,11 @@ const LEGACY_ALLOWED_AI_METADATA_KEYS = new Set([
   "verifier_version",
   "verifier_violations"
 ]);
+const BOUNDED_OPERATIONAL_INTEGER_METADATA = new Map([
+  ["queue_wait_ms", 0],
+  ["response_window_epoch", 0],
+  ["responds_through_sequence", 1]
+] as const);
 
 export class AiObservabilitySanitizationError extends Error {
   constructor() {
@@ -97,6 +105,21 @@ export function sanitizeAiObservabilityMetadata(
 
   for (const [key, value] of Object.entries(metadata)) {
     if (!LEGACY_ALLOWED_AI_METADATA_KEYS.has(key)) {
+      continue;
+    }
+
+    const minimumInteger = BOUNDED_OPERATIONAL_INTEGER_METADATA.get(
+      key as "queue_wait_ms" | "response_window_epoch" | "responds_through_sequence"
+    );
+    if (minimumInteger !== undefined) {
+      if (
+        typeof value === "number" &&
+        Number.isInteger(value) &&
+        value >= minimumInteger &&
+        value <= POSTGRES_INTEGER_MAX
+      ) {
+        sanitized[key] = value;
+      }
       continue;
     }
 

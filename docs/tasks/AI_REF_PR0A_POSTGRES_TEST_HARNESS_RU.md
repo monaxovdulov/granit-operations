@@ -1,6 +1,6 @@
 # Срез AI-рефакторинга: AI-REF-PR0A — настоящий PostgreSQL test harness
 
-Статус: `planned` для bounded implementation после `needs_redesign`
+Статус: `accept`; teaching перенесён в общий Teach-back Goal
 
 Создан: 2026-08-03
 
@@ -826,6 +826,93 @@ schema/migration развилки: active manifest и текущая Drizzle sch
 для расширенного `ai_runs` insert. Это не исправлялось, потому что production
 schema/migrations явно вне области PR 0a.
 
+### 18.1. Второй bounded Repair после принятого redesign
+
+Выполнен 2026-08-04 на base/head
+`777d7dca351176b30042fa8b6bd136be041ddc04`; commit не создавался.
+
+Изменены только два разрешённых файла:
+
+- `apps/api/test/helpers/postgres-widget-ai-test-harness.ts`;
+- `apps/api/test/widget-ai-postgres-runtime-invariants.test.ts`.
+
+Результат:
+
+- production-shaped reply с `action`/`intent` проходит до реального
+  `INSERT INTO ai_runs`; typed xfail принимает только PostgreSQL `42703` из
+  query именно этой таблицы и падает при green или иной деградации;
+- real-PostgreSQL shadow scenario удерживает grounded result barrier-ом,
+  подтверждает legacy outbound и нулевые slot/requirement/handoff mutations,
+  затем одну idempotent запись `ai_shadow_comparisons`;
+- cleanup пытается независимо закрыть client и удалить container, после чего
+  возвращает `AggregateError`, если любой шаг не удался.
+
+Evidence текущего diff:
+
+- `npm run test:widget-ai:postgres` — два чистых запуска, оба `10 passed`;
+- `npx vitest run apps/api/test/widget-ai-job-worker.test.ts --maxWorkers=1` —
+  `4 passed`;
+- `npm run typecheck` — green;
+- `npm run build` — green, Vite `2476 modules transformed`;
+- `git diff --check` — green;
+- после прогонов label-filter Docker не вернул контейнеров;
+- frozen `package.json` и `package-lock.json` сохранили утверждённые SHA-256;
+- helper/spec: 158/671 строк, SHA-256
+  `ea909e18fa2ba7ef8449e7c518e73c96b1d7d185d01d87501b2d431fd7a05b24` и
+  `e45d7db4e96ca1cd196d24e8a3f615ba16e847812bacbcc0356ad075be68b33f`;
+- scoped diff: 2 файла, 206 insertions / 6 deletions, `+200` net от redesign
+  hashes. Это выше ориентира `+180`, но ниже review-порога `+260`; 20 строк
+  превышения относятся к точному обходу nested PostgreSQL cause и
+  fail-closed cleanup двух независимых ресурсов.
+
+Непроверено: Docker-less CI, signal/kill cleanup, staging/production schema и
+нагрузка вне детерминированных scenarios. Rollback: вернуть два файла к hashes
+redesign; production rollback не нужен.
+
+### 17.1. Свежая независимая проверка второго bounded Repair
+
+Проверка выполнена 2026-08-04 от HEAD
+`777d7dca351176b30042fa8b6bd136be041ddc04`; commit не создавался. Рабочий код и
+tests Reviewer не менял.
+
+Code Scout:
+
+- Callers/normal path: harness вызывается только focused suite
+  (`apps/api/test/widget-ai-postgres-runtime-invariants.test.ts:60-73`), а production
+  shadow assembly соблюдает ту же границу generator/sink
+  (`apps/api/src/app-context.ts:219-228`).
+- Failure paths: migration failure сохраняет исходную и cleanup ошибки
+  (`apps/api/test/helpers/postgres-widget-ai-test-harness.ts:62-70`); normal cleanup
+  независимо пытается закрыть client и container и fail-closed возвращает
+  `AggregateError` (`.../postgres-widget-ai-test-harness.ts:137-157`).
+- Concurrency/idempotency/stale state: claim, reclaim, takeover, lost finish и duplicate
+  intake остаются active; burst/newer-inbound/lost-lease принимаются
+  только по typed reason (`.../widget-ai-postgres-runtime-invariants.test.ts:75-203,311-425`).
+  Shadow observation повторно пишется с тем же inbound id и остаётся одной
+  (`.../widget-ai-postgres-runtime-invariants.test.ts:247-309`).
+- Schema/migrations: production schema/migrations не изменены; production-shaped xfail
+  требует `42703` и query именно `ai_runs`, а green и иная деградация валят
+  suite (`.../widget-ai-postgres-runtime-invariants.test.ts:205-244,610-628`).
+- Contracts/privacy/send gate/takeover: public contracts, prompts/tools/model policy, privacy
+  и runtime wiring не менялись; takeover по-прежнему доказывает send-time block
+  (`.../widget-ai-postgres-runtime-invariants.test.ts:119-158`).
+- False-green: в suite нет `skip/todo/only`; xfail-wrapper отвергает неверный
+  code и unexpected green (`.../widget-ai-postgres-runtime-invariants.test.ts:463-475`). Shadow
+  barrier отделяет legacy outbound от grounded observation до SQL assertions.
+- Cleanup/rollback/deploy: diff ограничен helper/spec и этой карточкой;
+  package files, production source, migrations, deploy/runtime config и другой repo не
+  затронуты. Rollback — возврат двух test files к redesign hashes.
+
+Evidence: frozen package hashes и helper/spec hashes совпали с разделом 18.1;
+base hashes `b3856a...`/`dfa1fff...` воспроизведены; scoped diff — `206/6`,
+`+200` net; `git diff --check` green. Третий PostgreSQL run не запускался:
+два зелёных запуска `10 passed` относятся к текущим exact hashes, а новой
+гипотезы для повтора нет. Docker API в Reviewer sandbox недоступен;
+отсутствие container опирается на evidence двух запусков. Непроверены
+Docker-less CI, signal/kill cleanup, staging/production schema и load beyond scenarios.
+
+Блокирующих находок нет. Verdict: `accept`.
+
 ## 19. Контрольный список понимания
 
 Статус после будущего `accept`: `teaching_deferred`.
@@ -859,14 +946,14 @@ PR 0c — короткие hotfix-ы — начинается только по�
 ```text
 Следующий запуск Goal
 
-Роль: Исполнитель bounded PR 0a implementation
-Модель и reasoning: сильная coding-модель, high/xhigh рекомендуется
-Документ среза: docs/tasks/AI_REF_PR0A_POSTGRES_TEST_HARNESS_RU.md
+Роль: Архитектор/владелец stop-gate PR 0b
+Модель и reasoning: текущая Codex-модель, high reasoning
+Документ среза: docs/tasks/AI_REF_PR0B_CANONICAL_AI_SCHEMA_MIGRATION_RU.md
 Исходный SHA: 7aa3e892b4f29b817d53e0d7b13443ee9c16bcde
-Текущий SHA: 7aa3e892b4f29b817d53e0d7b13443ee9c16bcde
-Текущий статус: planned после needs_redesign и принятого redesign
-Разрешённая запись: только helper/spec из пересмотренной области и evidence/передача этого task doc
-Обязательный вход: независимый review, redesign Архитектора, baseline hashes и Goal governance v2
-Ожидаемый результат: production-shaped typed xfail, PostgreSQL shadow invariant и fail-closed normal cleanup
-Условия остановки: четыре стоп-гейта AGENTS.md; не делать test-only DDL; не начинать PR 0b до независимого accept PR 0a
+Текущий SHA: 777d7dca351176b30042fa8b6bd136be041ddc04
+Текущий статус: PR 0a accept; PR 0b needs_human_decision до schema/migration edit
+Разрешённая запись: компактная карточка и read-only baseline PR 0b
+Обязательный вход: verdict PR 0a, ADR-010 и canonical observability contract
+Ожидаемый результат: точная owner-approved canonical migration strategy с rollback
+Условия остановки: не менять schema/migrations до решения владельца; не делать deploy или external DB apply
 ```

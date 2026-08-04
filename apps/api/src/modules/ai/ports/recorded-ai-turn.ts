@@ -50,6 +50,18 @@ export interface RecordedAiReplyApplier {
   }): Promise<RecordedAiPersistReplyResult>;
 }
 
+/**
+ * App-owned terminal boundary for a recorded turn that produces no outbound reply. Queued
+ * executions use it to fence the live lease attempt and commit the run, manager handoff and job
+ * terminal state together.
+ */
+export interface RecordedAiNoReplyApplier {
+  completeWithoutReply(input: {
+    run: RunningAiRunRecord;
+    completion: AiRunTerminalCompletion;
+  }): Promise<TerminalAiRunRecord>;
+}
+
 export type RecordedAiTurnOutcome = {
   decision: {
     action: RecordedAiReplyAction | "no_reply";
@@ -83,6 +95,8 @@ export interface RecordedAiTurnService {
   execute(input: {
     executionContext: AiTurnExecutionContext;
     turnInput: AiTurnInput;
+    signal?: AbortSignal;
     replyApplier: RecordedAiReplyApplier;
+    noReplyApplier?: RecordedAiNoReplyApplier;
   }): Promise<RecordedAiTurnResult>;
 }

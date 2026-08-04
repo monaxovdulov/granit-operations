@@ -18,6 +18,13 @@ export type TransitionSiteWidgetConversationToManagerReviewInput = {
   inboundMessageId: string;
   inboundPublicMessageId: string;
   reason: PublicWidgetManagerReviewReason;
+  expectedGenerationEpoch?: number;
+  respondsThroughSequence?: number;
+  runtimeMode?: "direct_openai" | "mastra_openai_api";
+  jobCommit?: {
+    jobId: string;
+    attemptCount: number;
+  };
 };
 
 export interface PublicWidgetManagerReviewRepository {

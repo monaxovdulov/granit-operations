@@ -50,10 +50,7 @@ export function buildApi(options: BuildApiOptions) {
   registerManagerRoutes(app, context.managerLeads, context.managerAuth);
   registerTelegramRoutes(app, context.telegramWebhook);
 
-  if (
-    options.widgetAi?.runtimeMode !== "mastra_openai_api" &&
-    options.widgetAi?.jobWorker?.enabled
-  ) {
+  if (options.widgetAi?.jobWorker?.enabled) {
     const abortController = new AbortController();
     const worker = new WidgetAiJobWorker(
       options.repository,

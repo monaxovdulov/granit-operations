@@ -37,7 +37,10 @@ export class OpenAiWidgetAssistantProvider
     }
   }
 
-  async generateReply(input: WidgetAiProviderInput): Promise<WidgetAiProviderResult> {
+  async generateReply(
+    input: WidgetAiProviderInput,
+    signal?: AbortSignal
+  ): Promise<WidgetAiProviderResult> {
     const response = await requestOpenAiStructuredResponse({
       apiKey: this.options.apiKey,
       model: this.options.model,
@@ -49,7 +52,8 @@ export class OpenAiWidgetAssistantProvider
         prompt_version: WIDGET_AI_PROMPT_VERSION,
         policy_version: WIDGET_AI_POLICY_VERSION
       },
-      maxOutputTokens: 120
+      maxOutputTokens: 120,
+      signal
     });
 
     return {

@@ -25,14 +25,11 @@ const activeMigrationManifest = [
   "0013_live_widget_memory_shadow.sql",
   "0014_manager_ai_runtime_controls.sql",
   "0015_ai_quality_events.sql",
-  "0016_widget_ai_jobs.sql"
+  "0016_widget_ai_jobs.sql",
+  "0017_ai_schema_reconciliation.sql",
+  "0018_widget_ai_turn_identity.sql",
+  "0019_widget_ai_latest_wins.sql"
 ];
-
-const excludedMigrationBranches = new Set([
-  "0010_ai_run_quality_observability.sql",
-  "0011_live_v2_controlled_no_reply.sql",
-  "0012_manager_ai_runtime_controls.sql"
-]);
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
 const migrationsDir = resolve(repositoryRoot, "packages/db/migrations");
@@ -62,7 +59,11 @@ export async function startPostgresWidgetAiTestHarness(): Promise<PostgresWidget
   try {
     await applyActiveMigrations(database);
   } catch (error) {
-    await stopHarness(database, container);
+    try {
+      await stopHarness(database, container);
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], "PR0a migration and cleanup failed");
+    }
     throw error;
   }
 
@@ -99,23 +100,31 @@ export async function resetPostgresWidgetAiState(harness: PostgresWidgetAiTestHa
 
 async function applyActiveMigrations(database: OperationsDbHandle) {
   for (const migration of activeMigrationManifest) {
-    const sql = await readFile(resolve(migrationsDir, migration), "utf8");
-    await database.client.unsafe(sql);
+    const connection = await database.client.reserve();
+    try {
+      await connection.unsafe(await readFile(resolve(migrationsDir, migration), "utf8"));
+    } catch (error) {
+      await connection.unsafe("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally {
+      connection.release();
+    }
   }
 }
 
 async function assertMigrationManifestCurrent() {
   const sqlFiles = (await readdir(migrationsDir)).filter((file) => file.endsWith(".sql")).sort();
-  const expected = new Set([...activeMigrationManifest, ...excludedMigrationBranches]);
-  const unknown = sqlFiles.filter((file) => !expected.has(file));
+  const unknown = sqlFiles.filter((file) => !activeMigrationManifest.includes(file));
   const missing = activeMigrationManifest.filter((file) => !sqlFiles.includes(file));
+  const outOfOrder = sqlFiles.some((file, index) => file !== activeMigrationManifest[index]);
 
-  if (unknown.length || missing.length) {
+  if (unknown.length || missing.length || outOfOrder) {
     throw new Error(
       [
         "PR0a PostgreSQL harness migration manifest drift",
         unknown.length ? `unknown: ${unknown.join(", ")}` : undefined,
-        missing.length ? `missing: ${missing.join(", ")}` : undefined
+        missing.length ? `missing: ${missing.join(", ")}` : undefined,
+        outOfOrder ? "root SQL files are not the exact lexicographic active chain" : undefined
       ]
         .filter(Boolean)
         .join("; ")
@@ -134,6 +143,21 @@ async function stopHarness(
   database: OperationsDbHandle,
   container: StartedPostgreSqlContainer
 ) {
-  await database.client.end({ timeout: 5 }).catch(() => undefined);
-  await container.stop({ remove: true, removeVolumes: true }).catch(() => undefined);
+  const errors: unknown[] = [];
+
+  try {
+    await database.client.end({ timeout: 5 });
+  } catch (error) {
+    errors.push(error);
+  }
+
+  try {
+    await container.stop({ remove: true, removeVolumes: true });
+  } catch (error) {
+    errors.push(error);
+  }
+
+  if (errors.length) {
+    throw new AggregateError(errors, "PR0a PostgreSQL harness cleanup failed");
+  }
 }

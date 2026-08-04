@@ -642,7 +642,7 @@ class MemoryIntakeRepository implements IntakeRepository {
       publicSessionId: input.widgetPublicSessionId ?? randomUUID(),
       agentAllowedToReply: input.automationRequested,
       request: {
-        schema_version: "site_widget.v1",
+        schema_version: "site_widget.v2",
         event_type: "site_widget.message_submitted",
         idempotency_key: input.idempotencyKey,
         submitted_at: input.message.submittedAt,

@@ -1,3 +1,6 @@
+-- Non-executable provenance archive.
+-- Original path: packages/db/migrations/0011_live_v2_controlled_no_reply.sql
+-- Archived by AI-REF-PR0B A2; superseded by migrations/0017_ai_schema_reconciliation.sql.
 BEGIN;
 
 ALTER TABLE ai_runs
