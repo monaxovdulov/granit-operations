@@ -10,6 +10,12 @@ docs/tasks/TEMPLATE_RU.md
 
 Current task records:
 
+- `AI_REF_SOURCE_OF_TRUTH_REALIGNMENT_RU.md` - owner-approved move to
+  repo-local AI authority: current code, app-owned queue/direct runtime and
+  `PR0a-PR9` replace external planning dependencies.
+- `AI_REF_PR0A_POSTGRES_TEST_HARNESS_RU.md` through
+  `AI_REF_PR2_LATEST_WINS_FRESH_TURN_RU.md` - current AI refactor slice records.
+
 - `S01_PROVIDER_EVIDENCE_REVIEW_SIGNOFF_RU.md` - planned owner/release review for S01 operations provider evidence.
 - `S01_REVIEWABLE_CHUNKS_AND_CHECKS_RU.md` - planned split of dirty operations changes into reviewable chunks and checks.
 - `S02_MANAGER_AUTH_YANDEX_RU.md` - protected manager login through Yandex ID plus operations allowlist/roles.
@@ -35,7 +41,7 @@ Current task records:
 - `AI_DIALOG_PRIVACY_VISIBILITY_P3_RU.md` - passed P3 record for protected manager-visible AI
   quality state, strict repo-owned asset manifest, centralized observability allowlist and bounded
   expired-span retention cleanup before any Mastra dependency.
-- `AI_DIALOG_MASTRA_OBSERVABILITY_FIRST_SLICE_RU.md` - active implementation plan: G0/G1/W0,
+- `AI_DIALOG_MASTRA_OBSERVABILITY_FIRST_SLICE_RU.md` - historical implementation record, not the active roadmap: G0/G1/W0,
   G1Q/P2/P3/G4/M1/M2/G5/G6 passed; exact G6 base `ad40c27...` was approved, but the first M3
   Mastra call failed closed before trusted provider observation and M3 remains blocked
   `P1 -> P1Q -> P2 -> P3 -> M1 disabled -> M2 local/fake -> G6 owner gate -> M3 authenticated

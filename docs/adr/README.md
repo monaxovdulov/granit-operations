@@ -2,19 +2,13 @@
 
 Use this directory for meaningful `granit-operations` decisions only.
 
-Cross-project architecture, repo boundaries, release/deploy policy, AI safety gates, and S01-S15 order live in:
-
-```text
-/home/devuser/ai-projects/granit-plan-app/ai-agent-stack-wiki/wiki/
-```
+Architecture, repo boundaries, release/deploy policy, AI safety gates and the
+`PR0a-PR9` order are repo-local. Start with `docs/source-of-truth.md` and
+`ADR-012-REPO_LOCAL_AI_SOURCE_OF_TRUTH_RU.md`.
 
 Do not create ADRs for every small task. Use ADRs for decisions that future agents must not accidentally reopen.
 
-ADR template:
-
-```text
-/home/devuser/ai-projects/granit-plan-app/docs/templates/ADR_TEMPLATE.md
-```
+Use the required fields below as the local ADR template.
 
 Required fields:
 
@@ -40,3 +34,4 @@ Current ADRs:
 - `ADR-009-COMPATIBILITY_EXPORT_POLICY_RU.md` - old `auth`, `routes`, `services` and `repositories` paths remain compatibility exports, while new production imports must use `modules/*`.
 - `ADR-010-AI_OBSERVABILITY_RUNTIME_BOUNDARY_RU.md` - Studio-like AI observability is allowed only as an optional app-owned sink/export layer; primary widget AI runtime, send gate, persistence and manager controls stay app-owned.
 - `ADR-011-CUSTOMER_FACING_LANDING_SOURCE_RU.md` - active customer-facing landing/widget smoke source is `monaxovdulov/landing-granit-static`; `granit-site-cms` is not the current rollout target.
+- `ADR-012-REPO_LOCAL_AI_SOURCE_OF_TRUTH_RU.md` - current code and repo-local owner docs define AI facts, app-owned queue/direct runtime direction and `PR0a-PR9`; historical external planning links are provenance only.

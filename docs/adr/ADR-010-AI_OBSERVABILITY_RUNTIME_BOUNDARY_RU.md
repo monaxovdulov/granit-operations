@@ -4,16 +4,18 @@ Status: accepted
 Date: 2026-07-20
 Repo scope: `granit-operations`
 Related task: `docs/tasks/RECONCILE_REMAINING_BRANCHES_RU.md`
+Reconciled: 2026-08-04 by `ADR-012-REPO_LOCAL_AI_SOURCE_OF_TRUTH_RU.md`
 
 ## Context
 
-После разбора PR #2 `codex/mastra-observability-first-slice` в `main` остался один актуальный AI runtime:
+После PR0a-PR2 primary orchestration в `main` принадлежит приложению:
 
 ```text
 PublicWidgetIntakeService
-  -> app-owned persistence and send gate
-  -> PublicWidgetAiReplyGenerator
-  -> grounded generator/verifier contract
+  -> app-owned persistence and PostgreSQL queue
+  -> latest-wins / fresh context / response-window identity
+  -> direct model boundary by default
+  -> app-owned validation, commit fence and send gate
   -> app-owned ai_runs / ai_quality_events
   -> manager-visible safe summary
 ```
@@ -32,7 +34,9 @@ Primary AI runtime source of truth remains app-owned:
 - `ai_runs`, `ai_quality_events`, eval tables and future app-owned trace/span tables are the operational source of truth.
 - Manager-visible AI quality data must be summarized and sanitized; raw provider traces, spans, prompts, secrets and raw errors are not manager payload.
 
-Mastra-like observability is allowed only as an optional integration layer:
+Mastra is not primary orchestration. The existing `mastra_openai_api` mode is a
+bounded staging adapter behind app-owned queue, state and gates. Mastra-like
+observability remains optional:
 
 ```text
 current runtime
@@ -53,12 +57,14 @@ Mastra, OpenTelemetry or another tracing tool may not own:
 - DB migration numbering;
 - eval pass/fail source of truth.
 
-If Mastra is introduced later, it must be implemented as one of:
+Any Mastra integration must remain one of:
 
-- an optional `PublicWidgetAiReplyGenerator` provider that still obeys the existing generator/verifier contract and app-owned send gate; or
+- the existing bounded staging/model adapter that obeys app-owned queue,
+  validation, commit and send-gate contracts; or
 - an optional observability sink/exporter under an explicit observability module.
 
-It must not restore old live-v2 orchestration or old Mastra run/span repositories as the primary runtime.
+It must not make Mastra workflows or run/span repositories the primary runtime
+or operational source of truth.
 
 New DB changes must continue from the current migration sequence. Old Mastra alternative migrations `0010`/`0011` are not valid source files for `main`.
 
@@ -82,10 +88,10 @@ The tradeoff is that Mastra Studio parity may require an adapter/export layer ra
 
 ## Checks / Guardrails
 
-The repo has boundary tests in `apps/api/test/modular-boundaries.test.ts` that should fail if production code:
+Boundary checks should fail if production code:
 
-- imports Mastra/live-v2 as part of primary runtime assembly;
-- makes Mastra an app-context orchestration dependency;
+- lets Mastra own queue scheduling, current conversation state or commit order;
+- enables the bounded Mastra mode outside its approved staging boundary;
 - bypasses the `PublicWidgetAiReplyGenerator` intake boundary;
 - exposes AI quality as raw metadata/traces/spans instead of manager-safe summary fields.
 
@@ -96,7 +102,8 @@ Relevant local checks for this ADR:
 
 ## Remaining Risk
 
-This ADR is not approval to implement or deploy Mastra, OpenTelemetry, tracing tables, production migrations or raw debug capture.
+This ADR does not approve production Mastra activation, OpenTelemetry, new
+tracing tables, production migrations or raw debug capture.
 
 The next implementation step, if observability parity is required, should be a separate PR for app-owned trace/span contracts and storage, followed by an optional exporter/sink PR.
 

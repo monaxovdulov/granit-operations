@@ -1,33 +1,64 @@
 # Source Of Truth
 
-Status: active source map updated on 2026-07-20
+Status: active repo-local source map approved by the owner on 2026-08-04
 
-The canonical source of truth for architecture, scope, gates, and implementation order is:
+`granit-operations` no longer depends on an external planning repository for AI
+architecture, scope, gates or implementation order.
+
+## Authority
+
+Use two kinds of truth without mixing them:
+
+1. Current executable behavior is established by the checked-out `main` SHA,
+   public contracts, active Drizzle schema/migrations, runtime assembly and
+   executable tests.
+2. Target AI architecture and implementation order are established by accepted
+   repo-local owner decisions, ADRs and the active `AI_REF_*` slice card.
+
+The active decision hierarchy is:
+
+1. `docs/adr/ADR-012-REPO_LOCAL_AI_SOURCE_OF_TRUTH_RU.md`;
+2. `docs/architecture/AI_LIVE_AGENT_REFACTOR_FINAL_OWNER_REVIEW_RU.md`;
+3. `docs/architecture/AI_LIVE_AGENT_REFACTOR_OWNER_SPEC_RU.md`;
+4. `docs/architecture/AI_REFACTOR_MINIMAL_GOAL_GOVERNANCE_RU.md`;
+5. `docs/AI_AGENT_REFACTOR_PLAYBOOK_RU.md`;
+6. the current compact `docs/tasks/AI_REF_*.md` card and exact-SHA evidence;
+7. current code, contracts, migrations and tests for factual implementation
+   details not decided above.
+
+If prose and code disagree, do not silently describe the target as already
+implemented. Code defines current behavior; accepted owner documents define the
+target and roadmap. Record the gap in the current slice.
+
+Historical task, evidence, design and ADR files may contain links to retired
+external plans. Those links are provenance only and are not instructions or an
+active source of truth.
+
+## Current AI Direction
+
+The approved architecture is:
 
 ```text
-/home/devuser/ai-projects/granit-plan-app/ai-agent-stack-wiki/wiki/
+public intake
+  -> app-owned PostgreSQL persistence and durable queue
+  -> latest-wins / response-window identity / fresh context
+  -> direct model boundary by default
+  -> app-owned validation, commit fence and send gate
+  -> atomic reply and terminal job commit
+  -> app-owned observability and manager controls
 ```
 
-Primary wiki pages for this repo:
+`Mastra` is not the primary runtime or roadmap owner. The existing
+`mastra_openai_api` path is a bounded staging adapter only. It may not own
+business state, queue semantics, manager takeover, send gates, migrations or
+public contracts.
 
-- `00-current-brief.md`
-- `02-product-requirements.md`
-- `04-lead-pipeline-and-crm.md`
-- `05-handoff-and-human-control.md`
-- `06-channels-identity-memory.md`
-- `07-agent-architecture.md`
-- `12-open-questions.md`
-- `15-observability-contract.md`
-- `19-system-boundaries.md`
-- `23-production-ready-first-release.md`
-- `24-agent-driven-production-flow.md`
-- `25-first-implementation-slices.md`
+The active implementation order is `PR0a -> PR0b -> PR0c -> PR1 -> ... -> PR9`
+from `AI_REFACTOR_MINIMAL_GOAL_GOVERNANCE_RU.md`, not an older `S01-S15` AI
+delivery sequence.
 
-Repo-local docs are working implementation docs. They should copy only the specs needed to build and verify the current slice.
-
-The research outputs, reviews, owner briefs, and prompt packs under the planning repo are archive/provenance after the 2026-05-11 wiki import. Do not copy them wholesale into this repo.
-
-Repo-local decision for the current customer-facing landing source: `docs/adr/ADR-011-CUSTOMER_FACING_LANDING_SOURCE_RU.md`.
+The current customer-facing landing source is decided by
+`docs/adr/ADR-011-CUSTOMER_FACING_LANDING_SOURCE_RU.md`.
 
 ## Boundary
 
@@ -57,16 +88,11 @@ For customer-facing website/widget work, the current active landing repository i
 
 Historical release evidence may mention paired smoke with `granit-site-cms`; do not infer the current landing source from those old evidence records. Use ADR-011 and this section for current agent work.
 
-## Current Runtime Slice
+## Release Boundary
 
-The original scaffold started with S01:
-
-```text
-website form -> operations intake API -> stored lead -> manager visibility
-```
-
-`main` has since advanced beyond that scaffold. The current staging candidate includes the app-owned website widget AI runtime, grounded generator/verifier boundary, send gate, manager controls and sanitized quality visibility.
-
-This is still not production approval. Production deploy, production migrations, Telegram AI outbound, urgent notifications, raw AI trace capture and Mastra as a primary runtime remain blocked unless a later owner-approved release task explicitly allows them.
+This decision is not production approval. Production deploy, production
+migrations, Telegram AI outbound, urgent notifications, raw AI trace capture
+and any promotion of a staging adapter to primary runtime remain blocked unless
+a later owner-approved release task explicitly allows them.
 
 For customer-facing website/widget staging checks, pair `granit-operations` with the active landing repo `landing-granit-static`.

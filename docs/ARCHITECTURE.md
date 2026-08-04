@@ -1,31 +1,33 @@
 # Architecture
 
-Status: S03 manager UI slice needs review
+Status: active repo-local map updated on 2026-08-04
 
 Canonical sources:
 
-- `/home/devuser/ai-projects/granit-plan-app/ai-agent-stack-wiki/wiki/11-final-adr-foundation-stack.md`
-- `/home/devuser/ai-projects/granit-plan-app/ai-agent-stack-wiki/wiki/19-system-boundaries.md`
-- `/home/devuser/ai-projects/granit-plan-app/ai-agent-stack-wiki/wiki/22-ts-stack-focus.md`
+- `docs/source-of-truth.md`;
+- `docs/adr/ADR-012-REPO_LOCAL_AI_SOURCE_OF_TRUTH_RU.md`;
+- `docs/architecture/AI_LIVE_AGENT_REFACTOR_FINAL_OWNER_REVIEW_RU.md`;
+- current code, contracts and migrations at the checked-out SHA.
 
 `granit-operations` is the business operations application.
 
-Target shape:
+Current shape:
 
 ```text
-Fastify/Drizzle intake API
-manager backend and manager panel
-Telegram adapter later
-Mastra/OpenAI AI workflows later
-Postgres operational state
-observability/evals/review loop
-deploy/smoke/rollback scripts later
+Fastify public intake and manager API
+React/Vite/Mantine manager panel
+Postgres operational state and app-owned durable AI queue
+latest-wins response windows and fresh context assembly
+direct OpenAI runtime boundary by default
+bounded Mastra staging adapter, never primary orchestration
+app-owned validation, send gate, commit fence and observability
+Telegram inbound and manager-authored delivery path
 ```
 
-Current focus:
+Active AI target:
 
 ```text
-React/Vite/Mantine manager panel -> protected manager API -> server-side Yandex session
+PR0a -> PR0b -> PR0c -> PR1 -> ... -> PR9
 ```
 
 Protected manager access:
@@ -48,9 +50,11 @@ apps/manager/      React/Vite/Mantine manager panel
 packages/contracts public intake contract artifacts
 packages/db        Drizzle/Postgres schema and migrations
 packages/shared    operations-local shared utilities
-docs/              implementation docs derived from the main wiki
+docs/              repo-local owner decisions, ADRs, task cards and evidence
 ```
 
 Route handlers should be protocol adapters. Domain services own business behavior and must not rely on hidden request/reply mutation.
 
-Do not add AI replies, Telegram, widget AI, urgent production notifications, full SEO migration, or production deploy in S03.
+Do not infer production approval from implemented staging/runtime code. Deploy,
+production migrations, Telegram AI outbound, secrets and runtime activation
+remain separately gated.

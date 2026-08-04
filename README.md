@@ -31,15 +31,18 @@
 
 ## 3. Текущее состояние AI в `main`
 
-В `main` уже есть app-owned grounded website widget AI runtime:
+В `main` уже есть app-owned website widget AI runtime на durable PostgreSQL
+очереди:
 
 ```text
 PublicWidgetIntakeService
-  -> сохраняет inbound в Postgres
-  -> проверяет app-owned send gate / manager takeover
-  -> PublicWidgetAiReplyGenerator
-  -> grounded generator + independent semantic verifier
-  -> сохраняет outbound только после pass и send-time gate
+  -> сохраняет inbound и durable job в Postgres
+  -> supersede/coalescing для устаревших pending jobs
+  -> WidgetAiJobWorker claim-ит актуальный response window
+  -> fresh assembler читает текущее состояние разговора
+  -> direct OpenAI boundary по умолчанию
+  -> app-owned validator / send gate / manager takeover
+  -> атомарно сохраняет outbound и terminal job state
   -> пишет ai_runs / ai_quality_events
   -> показывает менеджеру sanitized quality summary
 ```
@@ -51,7 +54,13 @@ PublicWidgetIntakeService
 - Допустимые режимы: `off`, `shadow`, `enforce`.
 - Отсутствующий, пустой или неизвестный `AI_WIDGET_GROUNDED_MODE` трактуется как `off`; неизвестное значение также пишет sanitized startup error без самого env value. Для customer-visible grounded AI режим `shadow` или `enforce` должен быть задан явно.
 - OpenAI ключ — только server-side: `OPENAI_API_KEY`; он не должен попасть в лендинг, frontend, docs или логи.
-- Primary runtime не Mastra. Mastra/Studio-like observability допустима только позже как optional sink/export layer, см. [ADR-010](docs/adr/ADR-010-AI_OBSERVABILITY_RUNTIME_BOUNDARY_RU.md).
+- Primary runtime и orchestration принадлежат приложению: PostgreSQL queue,
+  fresh context, validation, commit fence и send gate.
+- `direct_openai` является runtime mode по умолчанию. Существующий
+  `mastra_openai_api` разрешён только как bounded staging adapter и не владеет
+  очередью, business state, send gate или roadmap.
+- Актуальное owner-решение об источниках истины и роли runtime зафиксировано в
+  [ADR-012](docs/adr/ADR-012-REPO_LOCAL_AI_SOURCE_OF_TRUTH_RU.md).
 
 ## 4. Текущее состояние знаний / RAG
 
@@ -73,20 +82,19 @@ HTML сайта не является автоматическим источн�
 
 ## 5. Индекс: куда идти следующему агенту
 
-Для задачи “выкатить AI на staging и подключить catalog/RAG” читать в таком порядке:
+Для AI-задач читать в таком порядке:
 
 1. [Этот README](README.md) — текущая карта и маршрут.
-2. [source-of-truth.md](docs/source-of-truth.md) — repo boundaries и active landing map.
-3. [STAGING_WIDGET_AI_RAG_ROLLOUT_RU.md](docs/tasks/STAGING_WIDGET_AI_RAG_ROLLOUT_RU.md) — конкретный task-runbook для staging AI + RAG.
-4. [ADR-011](docs/adr/ADR-011-CUSTOMER_FACING_LANDING_SOURCE_RU.md) — настоящий лендинг: `landing-granit-static`.
-5. [ADR-008](docs/adr/ADR-008-PUBLIC_WIDGET_AI_REPLY_GENERATOR_BOUNDARY_RU.md) — public widget AI generator boundary.
-6. [ADR-010](docs/adr/ADR-010-AI_OBSERVABILITY_RUNTIME_BOUNDARY_RU.md) — Mastra/observability boundary.
-7. [ENVIRONMENT.md](docs/ENVIRONMENT.md) — env names без secret values.
-8. [AI_ASSISTANT_OWNER_ARCHITECTURE_GUIDE_RU.md](docs/AI_ASSISTANT_OWNER_ARCHITECTURE_GUIDE_RU.md) — как устроен AI-консультант.
-9. [AI_ASSISTANT_OWNER_INPUT_GUIDE_RU.md](docs/AI_ASSISTANT_OWNER_INPUT_GUIDE_RU.md) — что владелец должен дать для базы знаний.
-10. [SMOKE_TESTS.md](docs/SMOKE_TESTS.md) — smoke expectations.
-11. [BACKUP_RESTORE_ROLLBACK.md](docs/BACKUP_RESTORE_ROLLBACK.md) и [STAGING_GO_LIVE_READINESS_RU.md](docs/tasks/STAGING_GO_LIVE_READINESS_RU.md) — staging safety gates.
-12. [release evidence index](docs/release/evidence/README.md) — куда писать новую evidence после smoke.
+2. [source-of-truth.md](docs/source-of-truth.md) — repo-local hierarchy, runtime и boundaries.
+3. [ADR-012](docs/adr/ADR-012-REPO_LOCAL_AI_SOURCE_OF_TRUTH_RU.md) — owner-решение: code-first facts, app-owned queue, direct runtime и roadmap `PR0a-PR9`.
+4. [AI_LIVE_AGENT_REFACTOR_FINAL_OWNER_REVIEW_RU.md](docs/architecture/AI_LIVE_AGENT_REFACTOR_FINAL_OWNER_REVIEW_RU.md) — подробный актуальный план.
+5. [AI_REFACTOR_MINIMAL_GOAL_GOVERNANCE_RU.md](docs/architecture/AI_REFACTOR_MINIMAL_GOAL_GOVERNANCE_RU.md) — порядок срезов `PR0a-PR9`.
+6. Текущая карточка среза из `docs/tasks/AI_REF_*.md` и её exact-SHA evidence.
+7. [ADR-011](docs/adr/ADR-011-CUSTOMER_FACING_LANDING_SOURCE_RU.md) — настоящий лендинг: `landing-granit-static`.
+8. [ENVIRONMENT.md](docs/ENVIRONMENT.md) — env names без secret values.
+9. [SMOKE_TESTS.md](docs/SMOKE_TESTS.md) — smoke expectations.
+10. [BACKUP_RESTORE_ROLLBACK.md](docs/BACKUP_RESTORE_ROLLBACK.md) и [STAGING_GO_LIVE_READINESS_RU.md](docs/tasks/STAGING_GO_LIVE_READINESS_RU.md) — staging safety gates.
+11. [release evidence index](docs/release/evidence/README.md) — куда писать новую evidence после smoke.
 
 Исторический план [SERIOUS_AI_LAYER_RU.md](docs/tasks/SERIOUS_AI_LAYER_RU.md) можно читать как background, но он не является актуальным статусом runtime.
 

@@ -40,7 +40,10 @@ Examples:
 - operations-only observability storage detail;
 - operations-only backup procedure detail.
 
-Cross-repo decisions stay in `granit-plan-app`, especially public intake contract ownership, repo boundaries, release/deploy policy, AI policy gates, and S01-S15 order.
+Architecture, repo boundaries, release/deploy policy, AI gates and implementation
+order for this repository are decided in repo-local owner docs and ADRs. The
+active AI order is `PR0a-PR9`; historical external planning links are provenance
+only.
 
 ## Task Rules
 
