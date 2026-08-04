@@ -14,7 +14,8 @@ Goal: `AI-LIVE-REF-ROADMAP`.
 `777d7dca351176b30042fa8b6bd136be041ddc04` /
 `b5a1fd4b40385553f546d1638b65fd5247a33682`; implementation опубликована в
 `origin/main`, повторная проверка выполнена на
-`29dd8c15e4fc4459af51b7f26b49b339c4f15fb2`.
+`29dd8c15e4fc4459af51b7f26b49b339c4f15fb2`; accepted repair опубликован
+в `origin/main` commit `ca1cdb798829674e40b4eab7e4e948476e71d61c`.
 
 Фактическая модель Исполнителя: текущая Codex-модель, high reasoning.
 
@@ -536,23 +537,31 @@ docs/tasks/README.md
 выше. После `accept` добавлена только эта честная evidence-запись;
 production/test repair не изменялся. Исходный пользовательский `output/` не изменён.
 
-Rollback до commit: удалить этот узкий diff. После accepted commit: отдельный
-`git revert` repair-коммита; schema/data rollback не требуется.
+Публикация: после `git fetch origin main` remote base остался
+`29dd8c15e4fc4459af51b7f26b49b339c4f15fb2`; accepted repair зафиксирован
+commit `ca1cdb798829674e40b4eab7e4e948476e71d61c` (`AI refactor PR2: retire
+stale widget AI backlog`) и обычным fast-forward push опубликован в
+`origin/main`. Итоговый remote `main` SHA сразу после push:
+`ca1cdb798829674e40b4eab7e4e948476e71d61c`. Force-push, deploy, external DB
+и model call не выполнялись.
+
+Rollback: `git revert ca1cdb798829674e40b4eab7e4e948476e71d61c`; schema/data rollback
+для этого repair не требуется.
 
 ## 10. Передача Goal
 
 ```text
 Goal: AI-LIVE-REF-ROADMAP
 Текущий срез: AI-REF-PR2
-Статус: accepted; publication in progress
-Base/head SHA: 29dd8c15e4fc4459af51b7f26b49b339c4f15fb2 / accepted uncommitted repair diff
+Статус: accepted and published
+Base/head SHA: 29dd8c15e4fc4459af51b7f26b49b339c4f15fb2 / ca1cdb798829674e40b4eab7e4e948476e71d61c
 Результат: latest-wins fresh-turn durable v2 queue terminalize-ит migrated non-latest backlog
 Evidence: targeted 120/120 (API 30; M2 16; worker 4; PostgreSQL 24;
           migrations 5; M3 14; P2 async 14; P2 PostgreSQL 10; assembly 3);
           typecheck/build/diff-check green
 Непроверено: external migration/deploy/paid smoke/production load;
              staging Mastra recorded PostgreSQL capability
-Rollback: удалить uncommitted repair diff; после commit — отдельный revert без schema rollback
+Rollback: `git revert ca1cdb798829674e40b4eab7e4e948476e71d61c`; schema rollback не нужен
 Verdict: sixth fresh independent Reviewer `accept`; no blocking findings
-Следующий срез: publish accepted PR2 repair, затем CONV-1
+Следующий срез: CONV-1 direct live-v2 adapter parity
 ```

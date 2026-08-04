@@ -1,22 +1,22 @@
 {
   "schema_version": 1,
   "repo": "granit-operations",
-  "updated_at": "2026-08-04T23:15:26Z",
-  "git_head": "29dd8c15e4fc4459af51b7f26b49b339c4f15fb2",
+  "updated_at": "2026-08-04T23:17:37Z",
+  "git_head": "ca1cdb798829674e40b4eab7e4e948476e71d61c",
   "mode": "implementation",
-  "state": "ai_runtime_convergence_pr2_repair_accepted",
+  "state": "ai_runtime_convergence_pr2_repair_published",
   "dirty_worktree": {
     "status": "dirty",
-    "summary": "PR2 pending and expired-processing backlog repair has fresh independent accept and is pending its separate commit/push; pre-existing untracked output/ is intentionally untouched"
+    "summary": "PR2 pending and expired-processing backlog repair has fresh independent accept and is published at ca1cdb798829674e40b4eab7e4e948476e71d61c; pre-existing untracked output/ is intentionally untouched"
   },
   "context": {
-    "last_scan_at": "2026-08-04T23:15:26Z",
-    "fresh_until": "2026-08-05T23:15:26Z",
+    "last_scan_at": "2026-08-04T23:17:37Z",
+    "fresh_until": "2026-08-05T23:17:37Z",
     "source_hashes": {}
   },
   "rules": {
     "status": "current",
-    "last_refresh_at": "2026-08-04T23:15:26Z"
+    "last_refresh_at": "2026-08-04T23:17:37Z"
   },
   "task": {
     "type": "ai-runtime-convergence-pr2-repair",
@@ -45,5 +45,5 @@
       "reason": "fresh codex exec found no blocking findings; nine-suite matrix 120/120, typecheck/build and exact diff fingerprint passed"
     }
   },
-  "next_action": "Commit and push the independently accepted PR2 repair to origin/main, record publication SHA, then create the CONV-1 compact card."
+  "next_action": "Create the CONV-1 compact card from current-main baseline before any working-code change."
 }

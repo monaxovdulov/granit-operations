@@ -1,8 +1,9 @@
 # Goal: AI Runtime Convergence и очистка репозитория
 
 Статус: `implementing`; Goal запущена 2026-08-04. Обязательный
-current-main repair PR2 получил свежий independent `accept`; выполняется его
-отдельная публикация перед CONV-1.
+current-main repair PR2 получил свежий independent `accept` и опубликован
+в `origin/main` commit `ca1cdb798829674e40b4eab7e4e948476e71d61c`. Активный
+технический срез — CONV-1.
 
 Goal ID: `AI-RUNTIME-CONVERGENCE`.
 
