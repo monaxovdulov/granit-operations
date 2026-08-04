@@ -1,14 +1,16 @@
 # Goal: AI Runtime Convergence и очистка репозитория
 
-Статус: `planned`; Goal ещё не запущена.
+Статус: `implementing`; Goal запущена 2026-08-04. Обязательный
+current-main repair PR2 получил свежий independent `accept`; выполняется его
+отдельная публикация перед CONV-1.
 
 Goal ID: `AI-RUNTIME-CONVERGENCE`.
 
 Репозиторий: `granit-operations`.
 
-Предварительный base SHA: `7a0093b`. При запуске новой сессии обязательно
-сверить `HEAD`, `origin/main`, dirty worktree и заменить baseline фактическим
-SHA, если `main` продвинулся.
+Фактический стартовый SHA: `29dd8c15e4fc4459af51b7f26b49b339c4f15fb2`
+(`HEAD == origin/main` на старте; единственный исходный untracked path —
+пользовательский `output/`, он не изменяется).
 
 ## 1. Цель
 

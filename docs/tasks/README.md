@@ -10,9 +10,10 @@ docs/tasks/TEMPLATE_RU.md
 
 Current task records:
 
-- `AI_RUNTIME_CONVERGENCE_GOAL_RU.md` - planned multi-slice Goal for direct
+- `AI_RUNTIME_CONVERGENCE_GOAL_RU.md` - active multi-slice Goal for direct
   live-v2 convergence, Mastra/legacy removal, active-doc reduction and
-  anti-clutter guardrails; not started.
+  anti-clutter guardrails; prerequisite PR2 backlog repair is independently
+  `accepted` and is being published separately before CONV-1.
 - `AI_REF_SOURCE_OF_TRUTH_REALIGNMENT_RU.md` - owner-approved move to
   repo-local AI authority: current code, app-owned queue/direct runtime and
   `PR0a-PR9` replace external planning dependencies.

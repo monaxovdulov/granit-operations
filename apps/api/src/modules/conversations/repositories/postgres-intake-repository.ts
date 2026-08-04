@@ -1425,7 +1425,15 @@ export class PostgresIntakeRepository implements IntakeRepository {
         })
         .where(
           and(
-            or(eq(widgetAiJobs.status, "pending"), eq(widgetAiJobs.status, "retrying")),
+            or(
+              eq(widgetAiJobs.status, "pending"),
+              eq(widgetAiJobs.status, "retrying"),
+              and(
+                eq(widgetAiJobs.status, "processing"),
+                isNotNull(widgetAiJobs.leaseExpiresAt),
+                lte(widgetAiJobs.leaseExpiresAt, input.now)
+              )
+            ),
             sql`EXISTS (
               SELECT 1
               FROM conversations current_conversation
@@ -1434,6 +1442,13 @@ export class PostgresIntakeRepository implements IntakeRepository {
                   current_conversation.generation_epoch <> ${widgetAiJobs.expectedGenerationEpoch}
                   OR current_conversation.status <> 'open'
                   OR current_conversation.agent_allowed_to_reply <> true
+                  OR (
+                    SELECT max(visitor_message.message_sequence)
+                    FROM conversation_messages visitor_message
+                    WHERE visitor_message.conversation_id = ${widgetAiJobs.conversationId}
+                      AND visitor_message.direction = 'inbound'
+                      AND visitor_message.sender_role = 'visitor'
+                  ) IS DISTINCT FROM ${widgetAiJobs.respondsThroughSequence}
                 )
             )`
           )

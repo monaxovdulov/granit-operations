@@ -1,39 +1,49 @@
 {
   "schema_version": 1,
   "repo": "granit-operations",
-  "updated_at": "2026-07-22T10:24:29Z",
-  "git_head": "a475f1c",
-  "mode": "design",
-  "state": "widget_issues_14_17_design_review",
+  "updated_at": "2026-08-04T23:15:26Z",
+  "git_head": "29dd8c15e4fc4459af51b7f26b49b339c4f15fb2",
+  "mode": "implementation",
+  "state": "ai_runtime_convergence_pr2_repair_accepted",
   "dirty_worktree": {
-    "status": "clean",
-    "summary": "agent/catalog-knowledge-staging has only the approved #14-#17 design and workflow-state update pending commit; sibling repo dirty main checkout is intentionally untouched"
+    "status": "dirty",
+    "summary": "PR2 pending and expired-processing backlog repair has fresh independent accept and is pending its separate commit/push; pre-existing untracked output/ is intentionally untouched"
   },
   "context": {
-    "last_scan_at": "2026-07-22T10:24:29Z",
-    "fresh_until": "2026-07-29T10:24:29Z",
+    "last_scan_at": "2026-08-04T23:15:26Z",
+    "fresh_until": "2026-08-05T23:15:26Z",
     "source_hashes": {}
   },
   "rules": {
     "status": "current",
-    "last_refresh_at": "2026-07-22T10:24:29Z"
+    "last_refresh_at": "2026-08-04T23:15:26Z"
   },
   "task": {
-    "type": "widget-issues-14-17",
-    "summary": "Owner approved the cross-repository design for dialogue control, safe catalog references, durable asynchronous AI jobs, truthful widget progress, timestamps, staging rollout and the follow-up #13 quality audit.",
-    "source": "GitHub issues #14-#17 and owner instruction"
+    "type": "ai-runtime-convergence-pr2-repair",
+    "summary": "PR2 repair terminalizes migrated non-latest pending/retrying jobs and expired processing jobs after worker loss; two real PostgreSQL regressions cover polling recovery.",
+    "source": "docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md and docs/tasks/AI_REF_PR2_LATEST_WINS_FRESH_TURN_RU.md"
   },
   "checks": {
-    "docs_diff_check": {
+    "pr2_aggregate": {
+      "command": "nine-suite sequential vitest aggregate",
+      "status": "passed",
+      "reason": "120/120 including 24 real PostgreSQL runtime invariants"
+    },
+    "build": {
+      "command": "npm run build",
+      "status": "passed",
+      "reason": "bounded API source/tests, manager typecheck and Vite production build passed"
+    },
+    "diff_check": {
       "command": "git diff --check",
       "status": "passed",
-      "reason": "approved design and workflow-state update have no whitespace errors"
+      "reason": "repair and evidence diff have no whitespace errors"
     },
-    "runtime_checks": {
-      "command": "not run",
-      "status": "skipped",
-      "reason": "design gate only; runtime implementation starts after owner review of the committed spec"
+    "independent_review": {
+      "session_id": "019fcf04-8f4c-7663-a4f9-91376542cf42",
+      "status": "accepted",
+      "reason": "fresh codex exec found no blocking findings; nine-suite matrix 120/120, typecheck/build and exact diff fingerprint passed"
     }
   },
-  "next_action": "After owner review of docs/superpowers/specs/2026-07-22-widget-issues-14-17-design.md, implement P0 #14 and #16 first, then P1 #15 and #17."
+  "next_action": "Commit and push the independently accepted PR2 repair to origin/main, record publication SHA, then create the CONV-1 compact card."
 }

@@ -931,6 +931,84 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
     ]);
   });
 
+  it("retires migrated non-latest pending jobs before history polling", async () => {
+    const sessionId = randomUUID();
+    const { service, worker } = runtime();
+
+    await accept(
+      service,
+      widgetRequest("legacy-backlog-1", { sessionId, text: "Первый вопрос" })
+    );
+    await accept(
+      service,
+      widgetRequest("legacy-backlog-2", { sessionId, text: "Актуальный вопрос" })
+    );
+
+    // Reproduce the 0016 -> 0018 backfill shape: several legacy pending jobs
+    // receive the conversation's current epoch while keeping their own inbound sequence.
+    await harness.db
+      .update(widgetAiJobs)
+      .set({
+        status: "pending",
+        terminalReason: null,
+        completedAt: null,
+        expectedGenerationEpoch: 2,
+        availableAt: new Date(0)
+      })
+      .where(eq(widgetAiJobs.respondsThroughSequence, 1));
+
+    expect(await worker.runOnce(readyNow())).toBe(true);
+    expect(await jobRows()).toMatchObject([
+      { status: "superseded", terminalReason: "turn_not_current" },
+      { status: "replied" }
+    ]);
+
+    const history = await service.getSiteWidgetHistory(
+      sessionId,
+      "site_widget.history.v2"
+    );
+    expect(history.body).toMatchObject({ poll_after_ms: undefined });
+  });
+
+  it("retires an expired non-latest processing job after worker loss", async () => {
+    const sessionId = randomUUID();
+    const { service, worker } = runtime();
+
+    await accept(
+      service,
+      widgetRequest("lost-worker-backlog-1", { sessionId, text: "Первый вопрос" })
+    );
+    await accept(
+      service,
+      widgetRequest("lost-worker-backlog-2", { sessionId, text: "Актуальный вопрос" })
+    );
+
+    await harness.db
+      .update(widgetAiJobs)
+      .set({
+        status: "processing",
+        terminalReason: null,
+        completedAt: null,
+        expectedGenerationEpoch: 2,
+        attemptCount: 1,
+        leaseExpiresAt: new Date(0),
+        availableAt: new Date(0)
+      })
+      .where(eq(widgetAiJobs.respondsThroughSequence, 1));
+
+    expect(await worker.runOnce(readyNow())).toBe(true);
+    expect(await jobRows()).toMatchObject([
+      { status: "superseded", terminalReason: "turn_not_current" },
+      { status: "replied" }
+    ]);
+
+    const history = await service.getSiteWidgetHistory(
+      sessionId,
+      "site_widget.history.v2"
+    );
+    expect(history.body).toMatchObject({ poll_after_ms: undefined });
+  });
+
   it("keeps the newest active job visible after history exceeds one hundred messages", async () => {
     const sessionId = randomUUID();
     const { service } = runtime();

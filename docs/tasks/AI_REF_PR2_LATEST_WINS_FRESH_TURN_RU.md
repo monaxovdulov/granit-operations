@@ -1,10 +1,9 @@
 # Карточка среза AI-рефакторинга: AI-REF-PR2 — latest-wins и fresh turn
 
-Статус: `needs_evidence`; владелец 2026-08-04 снял public-contract stop-gate
-выбором `C/A`; замечания четырёх независимых Reviewer исправлены, но обязательный
-пятый свежий Reviewer не запустился из-за внешнего лимита Codex. Резервный
-Claude CLI также недоступен этой организации. Собственный `accept` Исполнитель
-не выдаёт.
+Статус: `accepted`; владелец 2026-08-04 снял public-contract stop-gate
+выбором `C/A`, замечания четырёх прежних независимых Reviewer, blocking finding
+пятого Reviewer и найденный Исполнителем crash-recovery seam исправлены.
+Шестой свежий независимый Reviewer выдал `accept`; блокирующих замечаний нет.
 
 Goal: `AI-LIVE-REF-ROADMAP`.
 
@@ -13,7 +12,9 @@ Goal: `AI-LIVE-REF-ROADMAP`.
 Ветка / base SHA / head SHA:
 `codex/ai-refactor-agent-governance-design` /
 `777d7dca351176b30042fa8b6bd136be041ddc04` /
-`777d7dca351176b30042fa8b6bd136be041ddc04`; commit не создавался.
+`b5a1fd4b40385553f546d1638b65fd5247a33682`; implementation опубликована в
+`origin/main`, повторная проверка выполнена на
+`29dd8c15e4fc4459af51b7f26b49b339c4f15fb2`.
 
 Фактическая модель Исполнителя: текущая Codex-модель, high reasoning.
 
@@ -28,6 +29,12 @@ Goal: `AI-LIVE-REF-ROADMAP`.
 
 Четвёртый независимый Reviewer: `gpt-5.6-sol`, high reasoning, Codex session
 `019fce3e-6fee-7043-b999-4828ab821c1a`; verdict `repair`.
+
+Пятый независимый Reviewer: Codex GPT-5, текущая свежая сессия, verdict
+`needs_fix`; рабочий код до verdict Reviewer не изменял.
+
+Шестой независимый Reviewer: Codex GPT-5 family, high reasoning, Codex session
+`019fcf04-8f4c-7663-a4f9-91376542cf42`; verdict `accept`.
 
 ## 1. Один результат
 
@@ -225,12 +232,13 @@ packages/db/migrations/0019_widget_ai_latest_wins.sql
 docs/tasks/AI_REF_PR2_LATEST_WINS_FRESH_TURN_RU.md
 ```
 
-Base/head SHA остаются
-`777d7dca351176b30042fa8b6bd136be041ddc04`; commit не создавался.
-Worktree содержит принятые предыдущие срезы, поэтому обычный `git diff --stat`
-является cumulative, а не чистым PR2 diff. Текущий cumulative stat относительно
-base: `66 files changed, 4435 insertions(+), 2983 deletions(-)`; untracked
-migration, v2 re-export и карточки в этот stat не входят.
+Исторический cumulative implementation был опубликован commit
+`b5a1fd4b40385553f546d1638b65fd5247a33682` от base
+`777d7dca351176b30042fa8b6bd136be041ddc04`. Этот commit объединяет накопленный
+diff предыдущих принятых срезов и PR2 (`81 files changed, 10742 insertions(+),
+2426 deletions(-)`), поэтому его полный stat не выдаётся за изолированный PR2
+diff. Независимый re-review проверял уже опубликованный current-main SHA
+`29dd8c15e4fc4459af51b7f26b49b339c4f15fb2` без изменения рабочего кода.
 
 Прямое влияние: public widget contract, queue/lease/worker, fresh turn assembly,
 reply commit, history status и controlled M3 consumer. Косвенное влияние:
@@ -246,18 +254,22 @@ policy и manager takeover semantics не менялись.
 | Public API integration | `30/30` | v1 422 до persistence; v2 processing -> history reply |
 | M2 local/fake durable integration | `16/16` | Mastra local/fake через queue, response-window key, replay, takeover/gate failures, newer-inbound и shutdown cancellation |
 | Worker tests | `4/4` | retry, atomic reply acknowledgement loss, stale attempt, polling recovery |
-| Real PostgreSQL runtime | `22/22` | burst, newer inbound abort/fence, lost-lease reply и degradation, history >100, atomic reply/job commit, pool=4/per-conversation=1 |
+| Real PostgreSQL runtime | `24/24` | burst, migrated pending backlog, expired processing recovery, newer inbound abort/fence, lost-lease reply и degradation, history >100, atomic reply/job commit, pool=4/per-conversation=1 |
 | Real PostgreSQL migrations | `5/5` | fresh/seeded lineages, 0019 columns/checks/index, turn backfill |
 | M3 evidence unit | `14/14` | v2 ack + history summary; controlled external smoke не запускался |
 | P2 observability async integration | `14/14` | stale no-reply после reclaim и до reclaim по истёкшей lease; manager-review ack-loss atomicity |
 | P2 PostgreSQL observability | `10/10` | disposable Testcontainers; direct `native_grounded` и честный recorded/Mastra fail-closed без model call |
 | Runtime assembly | `3/3` | staging generator не обходит durable worker/capability gate |
 | Targeted aggregate | `118/118` | девять применимых suite, включая disposable PostgreSQL P2, в одном последовательном прогоне green |
+| Repair regression до исправления | expected red | migrated non-latest predecessor оставался `pending`, пока latest job становился `replied` |
+| Repair regressions после исправления | `2/2` | pending и expired-processing predecessors terminal `superseded`; history больше не имеет фактического polling interval |
+| Repair aggregate | `120/120` | те же девять suite после добавления двух PostgreSQL backlog regressions |
 | Focused cancellation/sanitizer | `13/13` | combined caller/timeout signal и валидация фактически сохраняемых queue/window counters |
 | Typecheck | green | API source, 55 bounded test groups, manager |
 | Production build | green | manager Vite build после полного typecheck |
 | `git diff --check` | green | whitespace errors отсутствуют |
 | Modular boundaries | baseline `12/14` | два stale assertions запрещают уже существующий Mastra/live-v2 слой и требуют старое имя `SENSITIVE_STRING`; PR2 этот тест не меняет |
+| Sixth independent review | `accept` | свежий `codex exec`; Code Scout + девять suite `120/120` + typecheck/build; exact reviewed diff SHA-256 `1bf600f159ca05c90bcb003c88482e616c3cb58241ced257198ad391cf677f83` до/после review |
 
 Не выполнены и не выдаются за evidence:
 
@@ -345,7 +357,57 @@ diff check, подтвердил остальные инварианты и вы
 high, также остановился до чтения кода с ответом об отсутствии доступа у
 организации. Эти попытки не считаются независимой проверкой или evidence.
 
+Пятый fresh Reviewer (Codex GPT-5, 2026-08-04) воспроизвёл current-main
+aggregate `118/118`, production build и исходный modular baseline `12/14`,
+выполнил собственный caller/failure/concurrency/migration/privacy scout и выдал
+`needs_fix`:
+
+1. `0018_widget_ai_turn_identity.sql` backfill-ит все существующие jobs текущим
+   conversation epoch и sequence их inbound message, а
+   `0019_widget_ai_latest_wins.sql` не terminalize-ит старые `pending/retrying`
+   jobs. До PR2 enqueue допускал несколько таких jobs одного разговора.
+   `claimSiteWidgetAiJob` выбирает только job с latest visitor sequence, но его
+   cleanup не помечает non-latest sequence как `superseded`. Поэтому старые jobs
+   остаются `pending` навсегда, а history v2 продолжает возвращать active
+   automation/polling signal после ответа на latest job.
+
+Доказательство находится в:
+
+- `packages/db/migrations/0018_widget_ai_turn_identity.sql` — backfill без
+  latest-wins status reconciliation;
+- `packages/db/migrations/0019_widget_ai_latest_wins.sql` — status enum/index и
+  удаление snapshot без cleanup legacy backlog;
+- `apps/api/src/modules/conversations/repositories/postgres-intake-repository.ts`
+  — claim cleanup не сравнивает `responds_through_sequence` с latest visitor
+  sequence, а claim predicate такое равенство требует;
+- `apps/api/test/ai-schema-migration-reconciliation.test.ts` — backfill case
+  создаёт только один queued job и не покрывает legacy burst backlog.
+
+Ожидаемая проверка repair: migration regression с двумя legacy pending jobs
+одного разговора должен оставить latest job claimable, а predecessor —
+terminal `superseded`; history после обработки latest job не должна сохранять
+ложный active polling signal.
+
 Автор изменений собственный verdict не выдаёт.
+
+Шестой fresh Reviewer запущен отдельным read-only `codex exec` с
+разрешением только на disposable local Testcontainers. Codex session
+`019fcf04-8f4c-7663-a4f9-91376542cf42`, свежий контекст, verdict `accept`:
+
+- explicit blocking findings: none; blocker/high/medium дефектов не найдено;
+- Code Scout проверил claim cleanup, authoritative latest visitor sequence,
+  live/expired lease, response-window idempotency, atomic reply/job fence,
+  history polling, concurrency/lock ordering, migrations, privacy и false-green risk;
+- focused backlog regressions прошли `1/1 + 1/1`; полные PostgreSQL
+  runtime `24/24`, migration reconciliation `5/5`, P2 PostgreSQL `10/10`;
+- остальная матрица прошла `81/81`, итого девять suite `120/120`
+  без skipped tests; `npm run typecheck`, `npm run build`, manager production
+  build и diff checks green;
+- exact tracked diff SHA-256 до и после review совпал:
+  `1bf600f159ca05c90bcb003c88482e616c3cb58241ced257198ad391cf677f83`;
+  staged diff был пуст, исходные три `output/share/*` не затронуты;
+- external DB/deploy/secrets/paid model call, production-scale load и staging
+  Mastra recorded capability не проверялись и не выдаются за evidence.
 
 ## 9. Repair
 
@@ -426,22 +488,71 @@ high, также остановился до чтения кода с ответ
 - focused sanitizer/provider suite прошёл `13/13`, targeted aggregate расширен
   до `118/118`; полный typecheck, manager build и diff check повторно green.
 
-Новый repair выполняется только по замечаниям независимого Reviewer.
+По замечанию пятого независимого Reviewer repair завершён:
+
+- добавлен real PostgreSQL regression, воспроизводящий форму 0016 -> 0018:
+  несколько legacy pending jobs получают current conversation epoch, но
+  сохраняют разные inbound sequence;
+- claim cleanup теперь сравнивает каждую `pending/retrying` job с authoritative
+  latest visitor sequence и terminalize-ит non-latest `pending/retrying`
+  predecessor как `superseded/turn_not_current` до выбора следующей lease;
+- подтверждены единственный latest reply и отсутствие фактического v2 polling
+  interval после завершения latest job;
+- public contract, schema/migration files, prompt/model/policy, privacy,
+  send gate и manager takeover не менялись;
+- focused regression `1/1`, полный PR2 aggregate `119/119`, typecheck,
+  production build и `git diff --check` прошли.
+
+Дополнительный pre-review Code Scout Исполнителя обнаружил и исправил соседний
+crash-recovery seam внутри того же PR2 repair:
+
+- non-latest `processing` predecessor с истёкшей lease и оставшимся retry
+  budget не попадал ни в exhausted cleanup, ни в `pending/retrying` cleanup, ни
+  в latest claim; latest job отвечал, но predecessor навсегда оставался
+  `processing`, сохраняя ложный `poll_after_ms`;
+- stale cleanup расширен только на `processing` с `lease_expires_at <= now`;
+  живая lease и её cancellation/commit-fence path не менялись;
+- добавлен real PostgreSQL worker-loss regression: expired predecessor
+  становится `superseded/turn_not_current`, latest job — `replied`, polling
+  исчезает;
+- новый focused regression `1/1`, полный PR2 aggregate `120/120` (PostgreSQL
+  runtime `24/24`) и production build прошли.
+
+Repair затронул только production repository cleanup, его PostgreSQL regression,
+task/Goal index/evidence и machine-readable workflow state:
+
+```text
+.agents/state/granit-dev-workflow.json
+apps/api/src/modules/conversations/repositories/postgres-intake-repository.ts
+apps/api/test/widget-ai-postgres-runtime-invariants.test.ts
+docs/tasks/AI_REF_PR2_LATEST_WINS_FRESH_TURN_RU.md
+docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md
+docs/tasks/README.md
+```
+
+Точно проверенный Reviewer stat: `6 files changed, 236 insertions(+),
+48 deletions(-)`. Base SHA repair:
+`29dd8c15e4fc4459af51b7f26b49b339c4f15fb2`; exact reviewed diff указан
+выше. После `accept` добавлена только эта честная evidence-запись;
+production/test repair не изменялся. Исходный пользовательский `output/` не изменён.
+
+Rollback до commit: удалить этот узкий diff. После accepted commit: отдельный
+`git revert` repair-коммита; schema/data rollback не требуется.
 
 ## 10. Передача Goal
 
 ```text
 Goal: AI-LIVE-REF-ROADMAP
 Текущий срез: AI-REF-PR2
-Статус: needs_evidence; fifth fresh independent re-review unavailable
-Base/head SHA: 777d7dca351176b30042fa8b6bd136be041ddc04 / тот же
-Результат: latest-wins fresh-turn durable v2 queue реализована
-Evidence: targeted 118/118 (API 30; M2 16; worker 4; PostgreSQL 22;
+Статус: accepted; publication in progress
+Base/head SHA: 29dd8c15e4fc4459af51b7f26b49b339c4f15fb2 / accepted uncommitted repair diff
+Результат: latest-wins fresh-turn durable v2 queue terminalize-ит migrated non-latest backlog
+Evidence: targeted 120/120 (API 30; M2 16; worker 4; PostgreSQL 24;
           migrations 5; M3 14; P2 async 14; P2 PostgreSQL 10; assembly 3);
           typecheck/build/diff-check green
 Непроверено: external migration/deploy/paid smoke/production load;
              staging Mastra recorded PostgreSQL capability
-Rollback: logical PR2 diff + 0019 до external apply; public v1 не восстанавливается автоматически
-Verdict: four Reviewer repair verdicts; fixes complete; accept отсутствует из-за внешнего лимита Reviewer
-Следующий срез: PR3 автоматически только после свежего независимого accept PR2
+Rollback: удалить uncommitted repair diff; после commit — отдельный revert без schema rollback
+Verdict: sixth fresh independent Reviewer `accept`; no blocking findings
+Следующий срез: publish accepted PR2 repair, затем CONV-1
 ```
