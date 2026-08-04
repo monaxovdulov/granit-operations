@@ -32,6 +32,9 @@ Prefer the Russian template in this directory for new owner-facing evidence.
 
 Current evidence records:
 
+- `STAGING_FEATURE_BASELINE_20260803_RU.md` - текущая staging feature baseline по продуктовым
+  фичам: `landing@628e4a07` + widget `v1.1.4@c44f9963` + backend runtime
+  `https://manager.botops.ru`; smoke/regression evidence intentionally pending.
 - `WIDGET_CONVERSATION_SCOPE_19_20260722_RU.md` - staging evidence issue #19: единый cross-page conversation scope, legacy migration, exact catalog navigation/reload и production untouched.
 - `WIDGET_AI_AUDIT_13_20260722_RU.md` - итоговый staging-аудит issues #13–#17: dialogue quality, async delivery, safe catalog actions, manager gate, screenshots и rollback evidence.
 - `CATALOG_RAG_STAGING_20260720_RU.md` - staging evidence нового канонического каталога, knowledge snapshot, provider, deploy, QA и точного live-AI blocker.

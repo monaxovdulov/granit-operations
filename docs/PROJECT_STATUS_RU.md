@@ -1,6 +1,6 @@
 # granit-operations - Статус Репозитория
 
-Обновлено: 2026-07-20T00:00:00Z
+Обновлено: 2026-08-03T00:00:00Z
 
 Этот репозиторий отвечает за рабочую систему бизнеса: intake API, Postgres operational state, manager backend/panel, AI workflows, Telegram delivery, observability/evals.
 
@@ -8,6 +8,7 @@
 
 - `granit-operations` — backend/API, Postgres operational state, manager panel, AI runtime, send gate, CORS and observability/evals.
 - `monaxovdulov/landing-granit-static` (`/home/devuser/ai-projects/landing-granit-static`) — текущий customer-facing лендинг и browser form/widget integration для staging smoke с заказчиками.
+- `monaxovdulov/business-ai-web-widget` — source repo для текущего browser widget runtime; staging baseline использует `@monaxovdulov/site-widget@1.1.4` из `c44f99637e097a47b3c53099c95d7e8e01701ad8`.
 - `granit-site-cms` — не текущий источник customer-facing лендинга для AI/widget rollout; считать отдельным Astro/CMS baseline/future CMS path, пока новая ADR/task явно не изменит это.
 
 Актуальное правило зафиксировано в `docs/adr/ADR-011-CUSTOMER_FACING_LANDING_SOURCE_RU.md`.
@@ -37,6 +38,7 @@
 | Public intake / S01 | `accepted for staging acceleration` | `docs/release/evidence/S01_PUBLIC_INTAKE_PROVIDER_RU.md` |
 | Manager auth/UI/status history / S02-S03 | `accepted for staging acceleration` | `docs/release/evidence/S02_MANAGER_AUTH_YANDEX_RU.md`, `docs/release/evidence/S03_MANAGER_UI_MANTINE_RU.md`, `docs/release/evidence/S03_MIN_LIFECYCLE_RU.md` |
 | Website widget baseline / S04-S06 | `audited/staging evidence` | `docs/release/evidence/S04_WIDGET_PERSISTENCE_RU.md`, `docs/release/evidence/S05_WEBSITE_SAFE_AI_RU.md`, `docs/release/evidence/S06_MANAGER_TAKEOVER_RU.md` |
+| Customer-facing staging feature baseline | `accepted as current feature baseline; smoke pending` | `docs/release/evidence/STAGING_FEATURE_BASELINE_20260803_RU.md` |
 | P0 channel-neutral conversation | `merged into main` | `docs/release/evidence/P0_CHANNEL_NEUTRAL_CONVERSATION_FOUNDATION_RU.md` |
 | Telegram inbound + manager mini-panel | `reviewed locally; staging prep accepted` | `docs/release/evidence/TELEGRAM_INBOUND_MANAGER_MINI_PANEL_RU.md` |
 | Telegram manual delivery sender | `accepted after controlled staging smoke` | `docs/release/evidence/TELEGRAM_OUTBOUND_DELIVERY_SENDER_RU.md` |
@@ -65,6 +67,7 @@
 
 - Task records: `docs/tasks/README.md`
 - Evidence records: `docs/release/evidence/README.md`
+- Current staging feature baseline: `docs/release/evidence/STAGING_FEATURE_BASELINE_20260803_RU.md`
 - Telegram manager reply worker task: `docs/tasks/TELEGRAM_MANAGER_REPLY_WORKER_RU.md`
 - Telegram manager reply worker evidence: `docs/release/evidence/TELEGRAM_MANAGER_REPLY_WORKER_RU.md`
 - Telegram supervised scheduler task: `docs/tasks/TELEGRAM_MANAGER_REPLY_WORKER_SUPERVISED_SCHEDULER_RU.md`
