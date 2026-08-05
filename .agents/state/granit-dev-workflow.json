@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
   "repo": "granit-operations",
-  "updated_at": "2026-08-05T19:12:00Z",
-  "git_head": "8351432916b91edabd014a9093adcbb41bc52813",
-  "mode": "review",
-  "state": "ai_runtime_convergence_conv3_technical_done",
+  "updated_at": "2026-08-05T19:20:00Z",
+  "git_head": "8122a8ef44568d6b97dccee54dee074c4a1c4733",
+  "mode": "planning",
+  "state": "ai_runtime_convergence_conv4_planned",
   "dirty_worktree": {
-    "status": "conv3_uncommitted",
-    "summary": "CONV-3 is technically complete and uncommitted pending fresh independent review; pre-existing untracked output/ remains intentionally untouched"
+    "status": "clean_tracked_except_public_docs",
+    "summary": "accepted CONV-3 is published at 8122a8e; public README work remains separate and pre-existing output/ remains untouched"
   },
   "context": {
     "last_scan_at": "2026-08-04T23:37:25Z",
@@ -133,5 +133,5 @@
       "reason": "ordinary fast-forward push from the reviewed b678a37 base; force-push, deploy and external runtime activation were not used"
     }
   },
-  "next_action": "Run a fresh independent CONV-3 review over the exact staged fingerprint; repair only confirmed findings, then commit and publish after accept."
+  "next_action": "Complete the separate Russian public README slice, then continue the approved CONV-4 documentation reduction without mixing code changes."
 }

@@ -1,7 +1,7 @@
 # Карточка среза AI Runtime Convergence: CONV-3 — удаление Mastra и executable legacy
 
-Статус: `technical_done`; stop-gates send gate и schema сняты решениями владельца
-2026-08-05. Нужен свежий независимый verdict.
+Статус: `accept`; опубликован в commit
+`8122a8ef44568d6b97dccee54dee074c4a1c4733` 2026-08-05.
 
 Goal: `AI-RUNTIME-CONVERGENCE`.
 
@@ -122,6 +122,13 @@ DB migration, а не ручной `DROP INDEX` в production.
 
 Свежий Reviewer проверяет стабильный staged fingerprint. Автор изменений не
 выдаёт verdict собственной работе.
+
+Независимый Reviewer: `gpt-5.6-sol`, reasoning `low`, свежая read-only session
+`019fd35a-b69e-7aa1-9823-3d90f79635fd`. Проверен fingerprint
+`65c2488c23f65e6a3f324340bc973d4fc689b8aa94a691f77ca7348070d3a600`.
+Блокирующих находок нет; verdict — `accept`. Reviewer подтвердил один direct
+assembly, сохранение send gate/takeover и точный индексный контракт миграции
+0021. Повторно тесты Reviewer не запускал и принял evidence Исполнителя.
 
 ### Stop-gate 2026-08-05
 

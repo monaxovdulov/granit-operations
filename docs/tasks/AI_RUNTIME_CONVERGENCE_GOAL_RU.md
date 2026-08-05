@@ -9,7 +9,8 @@ independent `accept` и опубликован в `origin/main` commit
 `4d567d8acfef3718d92358c3980430539aea367d`. Активный срез — CONV-3 по карточке
 `AI_RUNTIME_CONVERGENCE_CONV_3_RUNTIME_REMOVAL_RU.md`; baseline callers
 зафиксирован до рабочего кода. Владелец одобрил точную migration для
-attempt-scoped retry. CONV-3 технически завершён и передаётся свежему Reviewer.
+attempt-scoped retry. CONV-3 получил независимый `accept` и опубликован в
+commit `8122a8ef44568d6b97dccee54dee074c4a1c4733`. Следующий срез — CONV-4.
 
 Goal ID: `AI-RUNTIME-CONVERGENCE`.
 
