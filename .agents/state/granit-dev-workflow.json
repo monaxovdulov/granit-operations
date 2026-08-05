@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
   "repo": "granit-operations",
-  "updated_at": "2026-08-05T00:13:08Z",
-  "git_head": "aff347bb00d07f8ee40f86203bd27a6a99b5b40f",
-  "mode": "implementation",
-  "state": "ai_runtime_convergence_conv1_published_conv2_owner_gate",
+  "updated_at": "2026-08-05T05:25:05Z",
+  "git_head": "b678a37bfa7bbba66c9b416aa0c44743b9b51495",
+  "mode": "independent_review",
+  "state": "ai_runtime_convergence_conv2_accepted_pending_publication",
   "dirty_worktree": {
     "status": "dirty",
-    "summary": "tracked worktree is clean after accepted CONV-1 publication at aff347bb00d07f8ee40f86203bd27a6a99b5b40f; pre-existing untracked output/ is intentionally untouched"
+    "summary": "accepted CONV-2 code, tests, migration and evidence are pending a separate commit/push; pre-existing untracked output/ remains intentionally untouched"
   },
   "context": {
     "last_scan_at": "2026-08-04T23:37:25Z",
@@ -19,9 +19,18 @@
     "last_refresh_at": "2026-08-04T23:37:25Z"
   },
   "task": {
-    "type": "ai-runtime-convergence-conv2-owner-gate",
-    "summary": "Await the owner decision for the exact CONV-2 output, validation, committed-turn and failure/fallback contract before any working-code change.",
-    "source": "docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md; CONV-1 publication evidence remains in docs/tasks/AI_RUNTIME_CONVERGENCE_CONV_1_DIRECT_LIVE_V2_ADAPTER_RU.md"
+    "type": "ai-runtime-convergence-conv2",
+    "summary": "Implement the approved ModelTurnOutput to ValidatedTurnPlan to CommittedTurn direct cutover without implicit fallback.",
+    "source": "docs/tasks/AI_RUNTIME_CONVERGENCE_CONV_2_TURN_CONTRACT_RU.md; Goal remains docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md",
+    "owner_decisions": {
+      "conv2_runtime_model": {
+        "decided_at": "2026-08-05",
+        "model": "gpt-5.6-luna",
+        "reasoning_effort": "medium",
+        "basis": "owner hypothesis within the explicitly approved CONV-2 baseline, not a proven quality claim",
+        "verification": "normal CONV-2 acceptance only; no extra verification layer and no implicit substitution to gpt-5.6-sol"
+      }
+    }
   },
   "checks": {
     "pr2_aggregate": {
@@ -76,7 +85,42 @@
       "remote_main": "aff347bb00d07f8ee40f86203bd27a6a99b5b40f",
       "status": "published",
       "reason": "ordinary fast-forward push after origin/main remained at the reviewed base; force-push, deploy and external runtime impact were not used"
+    },
+    "conv2_targeted": {
+      "command": "six-file focused non-PostgreSQL vitest matrix",
+      "status": "passed",
+      "reason": "62/62 including model-turn validation, direct adapter, runtime assembly, M2 integration, config and sanitizer"
+    },
+    "conv2_postgres": {
+      "command": "three-file sequential real PostgreSQL matrix",
+      "status": "passed",
+      "reason": "41/41: runtime invariants 25/25, observability atomicity 10/10 and migration reconciliation 6/6"
+    },
+    "conv2_full_tests": {
+      "command": "npm test -- --maxWorkers=1",
+      "status": "baseline",
+      "reason": "457 passed, 15 failed, 2 skipped; all 15 failures exactly match the separately reproduced clean b678a37 baseline and no CONV-2 regression was added"
+    },
+    "conv2_build": {
+      "command": "npm run build",
+      "status": "passed",
+      "reason": "bounded API source/tests, manager typecheck and Vite production build passed"
+    },
+    "conv2_modular_boundaries": {
+      "command": "vitest modular-boundaries",
+      "status": "baseline",
+      "reason": "12/14; same two pre-existing stale assertions recorded for CONV-1, with no new CONV-2 failure"
+    },
+    "conv2_diff_check": {
+      "command": "git diff --check HEAD",
+      "status": "passed",
+      "reason": "stable 34-file diff has no whitespace errors"
+    },
+    "conv2_independent_review": {
+      "model": "GPT-5 (exact runtime identifier unavailable)",
+      "status": "accepted",
+      "reason": "repeated fresh non-author review of the stable fingerprint found no blocker across callers, failure paths, concurrency/replay, schema/migration, privacy/sanitization, send gate, takeover and false-green tests"
     }
   },
-  "next_action": "Stop before CONV-2 working code and obtain the owner decision for the exact ModelTurnOutput, ValidatedTurnPlan, CommittedTurn and failure/fallback contract."
+  "next_action": "Publish accepted CONV-2 by ordinary commit/push, record remote SHA, then begin CONV-3 without deploy or paid provider calls."
 }

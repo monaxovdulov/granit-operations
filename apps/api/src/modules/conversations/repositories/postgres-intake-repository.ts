@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import {
   and,
   asc,
@@ -59,6 +61,19 @@ import {
   type AiSlotName
 } from "../../ai/ai-dialog-contract.js";
 import { sanitizeAiObservabilityMetadata } from "../../ai/observability/ai-observability-sanitizer.js";
+import {
+  completeAiRunInTransaction
+} from "../../ai/repositories/postgres-ai-run-repository.js";
+import type {
+  AiRunSpanWrite,
+  AiRunTerminalCompletion,
+  RunningAiRunRecord,
+  TerminalAiRunRecord
+} from "../../ai/repositories/ai-run-repository.js";
+import type {
+  CompleteRecordedSiteWidgetAiNoReplyInput,
+  PersistRecordedSiteWidgetAiReplyInput
+} from "../../ai/repositories/recorded-site-widget-ai-reply-repository.js";
 import {
   aiMessageSentTimelineEvent,
   conversationMessageReceivedTimelineEvent,
@@ -1134,10 +1149,20 @@ export class PostgresIntakeRepository implements IntakeRepository {
           }
         }
 
+        const completedRun = input.recordedRun
+          ? await completeAiRunInTransaction(tx, {
+              run: input.recordedRun.run,
+              completion: withRecordedCommitSpans(input.recordedRun.completion),
+              outboundMessageId: message.id
+            })
+          : undefined;
+
         return {
+          internalMessageId: message.id,
           publicMessageId: message.publicMessageId,
           body: message.body,
-          createdAt: message.createdAt.toISOString()
+          createdAt: message.createdAt.toISOString(),
+          ...(completedRun ? { completedRun } : {})
         };
       });
     } catch (error) {
@@ -1164,6 +1189,177 @@ export class PostgresIntakeRepository implements IntakeRepository {
       ...input,
       channel: "site_widget",
       provider: "site_widget"
+    });
+  }
+
+  async readRecordedSiteWidgetAiGate(input: {
+    leadId: string;
+    conversationId: string;
+  }): Promise<{ aiState: AiState; agentAllowedToReply: boolean }> {
+    const [row] = await this.db
+      .select({
+        aiState: conversations.aiState,
+        agentAllowedToReply: conversations.agentAllowedToReply,
+        conversationStatus: conversations.status,
+        runtimeEnabled: aiRuntimeControls.enabled
+      })
+      .from(conversations)
+      .innerJoin(aiRuntimeControls, eq(aiRuntimeControls.scope, "site_widget"))
+      .where(
+        and(
+          eq(conversations.id, input.conversationId),
+          eq(conversations.leadId, input.leadId)
+        )
+      )
+      .limit(1);
+
+    if (!row || !isAiState(row.aiState)) {
+      throw new Error("recorded site widget AI gate is unavailable");
+    }
+
+    return {
+      aiState: row.aiState,
+      agentAllowedToReply:
+        row.conversationStatus === "open" && row.agentAllowedToReply && row.runtimeEnabled
+    };
+  }
+
+  async persistRecordedSiteWidgetAiReply(
+    input: PersistRecordedSiteWidgetAiReplyInput
+  ): Promise<import("../../ai/ports/recorded-ai-turn.js").RecordedAiPersistReplyResult> {
+    try {
+      const saved = await this.persistAiReplyWithSendGate({
+        leadId: input.run.leadId,
+        conversationId: input.run.conversationId,
+        channel: "site_widget",
+        provider: "site_widget",
+        publicMessageId: input.publicMessageId,
+        inboundPublicMessageId: input.inboundPublicMessageId,
+        idempotencyKey: input.idempotencyKey,
+        requestFingerprint: input.requestFingerprint,
+        expectedGenerationEpoch: requiredRecordedIdentity(input.expectedGenerationEpoch),
+        respondsThroughSequence: requiredRecordedIdentity(input.respondsThroughSequence),
+        runtimeMode: input.runtimeMode,
+        jobCommit: input.jobCommit,
+        body: input.reply.replyDraft,
+        sourcePageUrl: input.sourcePageUrl,
+        metadata: input.metadata,
+        agentAllowedToReplyAfterSend: input.reply.agentAllowedToReplyAfterSend,
+        slotUpdates: input.reply.slotUpdates,
+        requirementUpdates: input.reply.requirementUpdates,
+        handoff: input.reply.handoff,
+        recordedRun: {
+          run: input.run,
+          completion: input.completionPlan.allowed
+        }
+      });
+
+      if (!saved.internalMessageId || !saved.completedRun) {
+        throw new Error("recorded reply replay lacks atomic run linkage");
+      }
+
+      return {
+        status: "persisted",
+        internalMessageId: saved.internalMessageId,
+        publicMessageId: saved.publicMessageId,
+        body: saved.body,
+        completedRun: saved.completedRun
+      };
+    } catch (error) {
+      const blocked = error instanceof AgentReplyBlockedError;
+      const completion = blocked
+        ? withRecordedBlockedSpan(input.completionPlan.agentReplyBlocked)
+        : input.completionPlan.persistenceUnconfirmed;
+      const completedRun = await this.completeRecordedSiteWidgetAiNoReply({
+        run: input.run,
+        completion,
+        publicConversationId: "",
+        inboundPublicMessageId: input.inboundPublicMessageId,
+        expectedGenerationEpoch: input.expectedGenerationEpoch,
+        respondsThroughSequence: input.respondsThroughSequence,
+        runtimeMode: input.runtimeMode,
+        jobCommit: input.jobCommit
+      });
+
+      return {
+        status: "blocked",
+        reason: blocked ? "agent_reply_blocked" : "ai_persistence_unconfirmed",
+        completedRun
+      };
+    }
+  }
+
+  async completeRecordedSiteWidgetAiNoReply(
+    input: CompleteRecordedSiteWidgetAiNoReplyInput
+  ): Promise<TerminalAiRunRecord> {
+    return this.db.transaction(async (tx) => {
+      const expectedGenerationEpoch = requiredRecordedIdentity(
+        input.expectedGenerationEpoch
+      );
+      const respondsThroughSequence = requiredRecordedIdentity(
+        input.respondsThroughSequence
+      );
+      const [currentConversation] = await tx
+        .select({ id: conversations.id })
+        .from(conversations)
+        .where(
+          and(
+            eq(conversations.id, input.run.conversationId),
+            eq(conversations.leadId, input.run.leadId),
+            eq(conversations.generationEpoch, expectedGenerationEpoch),
+            sql`(
+              SELECT max(visitor_message.message_sequence)
+              FROM conversation_messages visitor_message
+              WHERE visitor_message.conversation_id = ${input.run.conversationId}
+                AND visitor_message.direction = 'inbound'
+                AND visitor_message.sender_role = 'visitor'
+            ) = ${respondsThroughSequence}`
+          )
+        )
+        .limit(1)
+        .for("update");
+
+      if (!currentConversation) {
+        throw new AgentReplyBlockedError();
+      }
+
+      if (input.jobCommit) {
+        const completedAt = input.completion.completedAt;
+        const [completedJob] = await tx
+          .update(widgetAiJobs)
+          .set({
+            status: input.completion.sendGateResult === "blocked" ? "superseded" : "blocked",
+            terminalReason: input.completion.outcomeReason,
+            leaseExpiresAt: null,
+            completedAt,
+            updatedAt: completedAt
+          })
+          .where(
+            and(
+              eq(widgetAiJobs.id, input.jobCommit.jobId),
+              eq(widgetAiJobs.status, "processing"),
+              eq(widgetAiJobs.attemptCount, input.jobCommit.attemptCount),
+              isNotNull(widgetAiJobs.leaseExpiresAt),
+              gt(widgetAiJobs.leaseExpiresAt, completedAt),
+              eq(widgetAiJobs.leadId, input.run.leadId),
+              eq(widgetAiJobs.conversationId, input.run.conversationId),
+              eq(widgetAiJobs.inboundPublicMessageId, input.inboundPublicMessageId),
+              eq(widgetAiJobs.runtimeMode, input.runtimeMode ?? "direct_openai"),
+              eq(widgetAiJobs.expectedGenerationEpoch, expectedGenerationEpoch),
+              eq(widgetAiJobs.respondsThroughSequence, respondsThroughSequence)
+            )
+          )
+          .returning({ id: widgetAiJobs.id });
+
+        if (!completedJob) {
+          throw new AgentReplyBlockedError();
+        }
+      }
+
+      return completeAiRunInTransaction(tx, {
+        run: input.run,
+        completion: input.completion
+      });
     });
   }
 
@@ -3144,6 +3340,62 @@ function toWidgetAiRuntimeMode(value: string): "direct_openai" | "mastra_openai_
   }
 
   throw new Error(`invalid site widget AI runtime mode ${value}`);
+}
+
+function requiredRecordedIdentity(value: number | undefined): number {
+  if (!Number.isSafeInteger(value) || value === undefined || value < 0) {
+    throw new Error("queued recorded AI reply requires response-window identity");
+  }
+  return value;
+}
+
+function withRecordedCommitSpans(
+  completion: AiRunTerminalCompletion
+): AiRunTerminalCompletion {
+  return {
+    ...completion,
+    spans: [
+      ...completion.spans,
+      recordedBoundarySpan("send_gate", "send_gate_check", "succeeded", true),
+      recordedBoundarySpan("runtime", "reply_persistence", "succeeded")
+    ]
+  };
+}
+
+function withRecordedBlockedSpan(
+  completion: AiRunTerminalCompletion
+): AiRunTerminalCompletion {
+  return {
+    ...completion,
+    spans: [
+      ...completion.spans,
+      recordedBoundarySpan(
+        "send_gate",
+        "send_gate_check",
+        "blocked",
+        false,
+        "send_gate_blocked"
+      )
+    ]
+  };
+}
+
+function recordedBoundarySpan(
+  kind: AiRunSpanWrite["kind"],
+  name: AiRunSpanWrite["name"],
+  status: AiRunSpanWrite["status"],
+  usedInFinalAnswer?: boolean,
+  errorCode?: AiRunSpanWrite["errorCode"]
+): AiRunSpanWrite {
+  return {
+    spanId: randomUUID(),
+    kind,
+    name,
+    status,
+    latencyMs: 0,
+    ...(usedInFinalAnswer === undefined ? {} : { usedInFinalAnswer }),
+    ...(errorCode ? { errorCode } : {})
+  };
 }
 
 function toSiteWidgetAiJobSummary(row: {

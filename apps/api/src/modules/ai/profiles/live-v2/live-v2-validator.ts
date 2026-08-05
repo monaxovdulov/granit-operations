@@ -249,7 +249,7 @@ export function validateLiveV2Candidate(input: {
     return { ok: true, decision };
   }
 
-  if (normalizeForComparison(decision.replyDraft).length < 2) {
+  if (normalizeLiveV2TextForComparison(decision.replyDraft).length < 2) {
     return invalid("invalid_reply_draft");
   }
 
@@ -269,7 +269,7 @@ export function validateLiveV2Candidate(input: {
     return invalid("known_slot_requested");
   }
 
-  if (unsafeClaimReason(decision.replyDraft)) {
+  if (liveV2UnsafeClaimReason(decision.replyDraft)) {
     return invalid("unsafe_claim");
   }
 
@@ -489,7 +489,7 @@ function hasAnyKnownSlot(turnView: LiveV2TurnView): boolean {
   );
 }
 
-function unsafeClaimReason(replyDraft: string): string | null {
+export function liveV2UnsafeClaimReason(replyDraft: string): string | null {
   const normalized = replyDraft.toLocaleLowerCase("ru-RU");
 
   if (/\d[\d\s]*(?:₽|руб|р\.)/iu.test(normalized)) {
@@ -550,6 +550,13 @@ function unsafeClaimReason(replyDraft: string): string | null {
   return null;
 }
 
+export function liveV2TextHasToneViolation(replyDraft: string): boolean {
+  return hasToneViolation({
+    action: "answer",
+    replyDraft
+  } as Exclude<LiveV2Candidate, { action: "no_reply" }>);
+}
+
 function hasToneViolation(decision: Exclude<LiveV2Candidate, { action: "no_reply" }>): boolean {
   const normalized = decision.replyDraft.toLocaleLowerCase("ru-RU");
 
@@ -570,9 +577,9 @@ function hasToneViolation(decision: Exclude<LiveV2Candidate, { action: "no_reply
 }
 
 function repeatsExistingMessage(replyDraft: string, turnView: LiveV2TurnView): boolean {
-  const normalizedReply = normalizeForComparison(replyDraft);
+  const normalizedReply = normalizeLiveV2TextForComparison(replyDraft);
   const normalizedLastQuestion = turnView.lastAiQuestion
-    ? normalizeForComparison(turnView.lastAiQuestion)
+    ? normalizeLiveV2TextForComparison(turnView.lastAiQuestion)
     : null;
 
   if (normalizedLastQuestion && normalizedReply.includes(normalizedLastQuestion)) {
@@ -580,11 +587,11 @@ function repeatsExistingMessage(replyDraft: string, turnView: LiveV2TurnView): b
   }
 
   return turnView.messages.some(
-    (message) => normalizeForComparison(message.text) === normalizedReply
+    (message) => normalizeLiveV2TextForComparison(message.text) === normalizedReply
   );
 }
 
-function normalizeForComparison(value: string): string {
+export function normalizeLiveV2TextForComparison(value: string): string {
   return value
     .toLocaleLowerCase("ru-RU")
     .normalize("NFKC")
@@ -593,7 +600,9 @@ function normalizeForComparison(value: string): string {
 }
 
 function normalizedContains(value: string, expectedSubstring: string): boolean {
-  return normalizeForComparison(value).includes(normalizeForComparison(expectedSubstring));
+  return normalizeLiveV2TextForComparison(value).includes(
+    normalizeLiveV2TextForComparison(expectedSubstring)
+  );
 }
 
 function invalid(code: LiveV2ValidationFailureCode): LiveV2ValidationResult {

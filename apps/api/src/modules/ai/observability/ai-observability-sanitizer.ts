@@ -29,7 +29,7 @@ const SAFE_MODEL_NAME = /^[A-Za-z0-9._:/@+-]{1,120}$/;
 const HEX_FINGERPRINT = /^[a-f0-9]{64}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const AI_RUN_IDEMPOTENCY_KEY =
-  /^ai-turn:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  /^(?:ai-turn:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?::attempt:[1-9][0-9]{0,9})?|ai-window:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}:(?:0|[1-9][0-9]{0,15}):[1-9][0-9]{0,15}:(?:direct_openai|mastra_openai_api)(?::attempt:[1-9][0-9]{0,9})?)$/i;
 const SENSITIVE_VALUE =
   /(?:^|[^a-z0-9])(?:sk-[a-z0-9_-]{8,}|bearer\s+|postgres(?:ql)?:\/\/|api[_-]?key|authorization)(?:$|[^a-z0-9])/i;
 const POSTGRES_INTEGER_MAX = 2_147_483_647;
@@ -38,6 +38,7 @@ const LEGACY_ALLOWED_AI_METADATA_KEYS = new Set([
   "ai_disclosure_shown",
   "ai_disclosure_version",
   "ai_input_fingerprint",
+  "applied_patch_count",
   "catalog_content_hash",
   "catalog_references",
   "catalog_schema_version",
@@ -52,6 +53,7 @@ const LEGACY_ALLOWED_AI_METADATA_KEYS = new Set([
   "handoff_reason",
   "deterministic_policy_version",
   "fallback_reason",
+  "final_text_hash",
   "inbound_public_message_id",
   "knowledge_version",
   "latency_ms",
@@ -72,11 +74,14 @@ const LEGACY_ALLOWED_AI_METADATA_KEYS = new Set([
   "repair_applied",
   "response_window_epoch",
   "responds_through_sequence",
+  "dropped_patch_count",
+  "dropped_recommendation_count",
   "requirement_verdict_count",
   "render_reason",
   "reply_renderer",
   "safe_handoff_reply",
   "slot_verdict_count",
+  "turn_contract",
   "verifier_contract_issues",
   "verifier_model_name",
   "verifier_response_id",
@@ -86,6 +91,9 @@ const LEGACY_ALLOWED_AI_METADATA_KEYS = new Set([
   "verifier_violations"
 ]);
 const BOUNDED_OPERATIONAL_INTEGER_METADATA = new Map([
+  ["applied_patch_count", 0],
+  ["dropped_patch_count", 0],
+  ["dropped_recommendation_count", 0],
   ["queue_wait_ms", 0],
   ["response_window_epoch", 0],
   ["responds_through_sequence", 1]
@@ -109,7 +117,13 @@ export function sanitizeAiObservabilityMetadata(
     }
 
     const minimumInteger = BOUNDED_OPERATIONAL_INTEGER_METADATA.get(
-      key as "queue_wait_ms" | "response_window_epoch" | "responds_through_sequence"
+      key as
+        | "applied_patch_count"
+        | "dropped_patch_count"
+        | "dropped_recommendation_count"
+        | "queue_wait_ms"
+        | "response_window_epoch"
+        | "responds_through_sequence"
     );
     if (minimumInteger !== undefined) {
       if (

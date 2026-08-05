@@ -4,9 +4,9 @@
 current-main repair PR2 получил свежий independent `accept` и опубликован
 в `origin/main` commit `ca1cdb798829674e40b4eab7e4e948476e71d61c`. CONV-1
 получил свежий independent `accept` и опубликован в `origin/main` commit
-`aff347bb00d07f8ee40f86203bd27a6a99b5b40f`. Активный срез — CONV-2,
-остановленный до рабочего кода на обязательном owner stop-gate точного output
-contract.
+`aff347bb00d07f8ee40f86203bd27a6a99b5b40f`. CONV-2 получил свежий
+independent `accept`; публикация accepted diff выполняется по протоколу раздела
+8, после чего активным станет CONV-3.
 
 Goal ID: `AI-RUNTIME-CONVERGENCE`.
 
@@ -142,6 +142,19 @@ model turn через прямой OpenAI adapter без Mastra и без изм
 Один результат: default direct runtime проходит единый pipeline
 `ModelTurnOutput -> ValidatedTurnPlan -> CommittedTurn`, а итоговый клиентский
 текст не переписывается legacy renderer после validation.
+
+Owner decision от 2026-08-05: полный baseline CONV-2 и предыдущие развилки
+утверждены; целевая модель — `gpt-5.6-luna` с
+reasoning `medium` вместо ранее предложенной `gpt-5.6-sol`. Это рабочая гипотеза
+владельца, а не утверждение о доказанно лучшем качестве. Официальная карточка
+подтверждает model ID, Responses API и Structured Outputs, но позиционирует Luna
+как вариант для экономичных высоконагруженных сценариев:
+<https://developers.openai.com/api/docs/models/gpt-5.6-luna>. Отдельный длинный
+слой проверок из-за этой замены не добавляется; применяются обычные критерии
+приёмки CONV-2, без неявной подмены на Sol.
+
+Точная compact card реализации:
+`docs/tasks/AI_RUNTIME_CONVERGENCE_CONV_2_TURN_CONTRACT_RU.md`.
 
 Разрешено после отдельного owner stop-gate для точного output contract:
 

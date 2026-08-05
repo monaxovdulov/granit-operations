@@ -1,5 +1,10 @@
 import type { AiTurnExecutionContext, AiTurnInput, AiTurnResult } from "../ai-turn.js";
 import type {
+  AiHandoffReason,
+  AiRequirementUpdate,
+  AiSlotUpdate
+} from "../ai-dialog-contract.js";
+import type {
   AiRunTerminalCompletion,
   RunningAiRunRecord,
   TerminalAiRunRecord
@@ -14,8 +19,16 @@ export type RecordedAiPersistReplyInput = {
   executionContext: AiTurnExecutionContext;
   action: RecordedAiReplyAction;
   replyDraft: string;
+  finalTextHash?: string;
   metadata: Record<string, unknown>;
   agentAllowedToReplyAfterSend?: boolean;
+  slotUpdates?: AiSlotUpdate[];
+  requirementUpdates?: AiRequirementUpdate[];
+  handoff?: {
+    reason: AiHandoffReason;
+    summary: string;
+    slotsSnapshot: Record<string, unknown>;
+  };
 };
 
 export type RecordedAiPersistReplyResult =

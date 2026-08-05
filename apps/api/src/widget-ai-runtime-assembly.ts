@@ -4,17 +4,15 @@ import {
   createMastraOpenAiLiveV2DecisionGenerator,
   type RealMastraBoundaryConfig
 } from "./modules/ai/adapters/mastra-live-v2-decision-generator.js";
+import { OpenAiLiveV2DecisionGenerator } from "./modules/ai/adapters/openai-live-v2-decision-generator.js";
 import type {
   LiveV2RuntimeFailureCategory,
   ObservedLiveV2DecisionGenerator
 } from "./modules/ai/ports/live-v2-runtime.js";
-import { OpenAiWidgetAssistantProvider } from "./modules/ai/adapters/openai-widget-assistant-provider.js";
-import { OpenAiWidgetSemanticVerifier } from "./modules/ai/adapters/openai-widget-semantic-verifier.js";
 import {
   selectLiveV2ApprovedAssets,
   type SelectedLiveV2ApprovedAssets
 } from "./modules/ai/assets/approved-ai-assets.js";
-import { FileCatalogKnowledgeProvider } from "./modules/ai/catalog/file-catalog-knowledge-provider.js";
 import type { AiRunRepository } from "./modules/ai/repositories/ai-run-repository.js";
 import { isSafeWidgetAiModelName } from "./modules/ai/widget-ai-model-name.js";
 
@@ -24,6 +22,12 @@ type RuntimeAssemblyDependencies = {
     onSanitizedFailure?: (category: LiveV2RuntimeFailureCategory) => void;
   }) => Promise<ObservedLiveV2DecisionGenerator>;
   selectLiveV2Assets?: () => Promise<SelectedLiveV2ApprovedAssets>;
+  createDirectGenerator?: (input: {
+    apiKey: string;
+    model: string;
+    timeoutMs: number;
+    onSanitizedFailure?: (category: LiveV2RuntimeFailureCategory) => void;
+  }) => ObservedLiveV2DecisionGenerator;
 };
 
 export async function buildConfiguredWidgetAiAssembly(input: {
@@ -36,33 +40,38 @@ export async function buildConfiguredWidgetAiAssembly(input: {
 
   if (config.widgetAi.runtimeMode === "direct_openai") {
     const modelIsSafe = isSafeWidgetAiModelName(config.widgetAi.openAiModel);
-    const provider = config.widgetAi.openAiApiKey && modelIsSafe
-      ? new OpenAiWidgetAssistantProvider({
-          apiKey: config.widgetAi.openAiApiKey,
-          model: config.widgetAi.openAiModel,
-          timeoutMs: config.widgetAi.generatorTimeoutMs
-        })
+    const assets = config.widgetAi.enabled
+      ? await (input.dependencies?.selectLiveV2Assets ?? selectLiveV2ApprovedAssets)()
       : undefined;
-    const verifier = config.widgetAi.openAiApiKey && modelIsSafe
-      ? new OpenAiWidgetSemanticVerifier({
-          apiKey: config.widgetAi.openAiApiKey,
-          model: config.widgetAi.verifierModel,
-          timeoutMs: config.widgetAi.verifierTimeoutMs
-        })
-      : undefined;
+    const createDirectGenerator =
+      input.dependencies?.createDirectGenerator ??
+      ((options) => new OpenAiLiveV2DecisionGenerator(options));
+    const generator =
+      config.widgetAi.openAiApiKey && modelIsSafe
+        ? createDirectGenerator({
+            apiKey: config.widgetAi.openAiApiKey,
+            model: config.widgetAi.openAiModel,
+            timeoutMs: config.widgetAi.generatorTimeoutMs,
+            ...(input.onSanitizedFailure
+              ? { onSanitizedFailure: input.onSanitizedFailure }
+              : {})
+          })
+        : undefined;
 
     return {
       enabled: config.widgetAi.enabled,
       runtimeMode: "direct_openai",
-      groundedMode: config.widgetAi.groundedMode,
-      provider,
-      groundedProvider: provider,
-      verifier,
-      catalog: new FileCatalogKnowledgeProvider(),
       modelName: config.widgetAi.openAiModel,
-      verifierModelName: config.widgetAi.verifierModel,
-      deadlineMs: config.widgetAi.deadlineMs,
       runRepository,
+      ...(assets
+        ? {
+            directLiveV2: {
+              generator,
+              modelName: config.widgetAi.openAiModel,
+              approvedFacts: assets.factsSnapshot
+            }
+          }
+        : {}),
       jobWorker: config.widgetAi.jobWorker
     };
   }

@@ -18,6 +18,7 @@ const archiveDir = resolve(repositoryRoot, "packages/db/migration-archive/mastra
 const reconciliationMigration = "0017_ai_schema_reconciliation.sql";
 const turnIdentityMigration = "0018_widget_ai_turn_identity.sql";
 const latestWinsMigration = "0019_widget_ai_latest_wins.sql";
+const directLiveV2Migration = "0020_direct_live_v2_turn_contract.sql";
 const narrowThrough0016 = [
   "0001_s01_intake.sql",
   "0002_s02_manager_auth.sql",
@@ -66,7 +67,7 @@ describe.sequential("PR0b canonical AI schema migration reconciliation", () => {
     await container?.stop({ remove: true, removeVolumes: true });
   });
 
-  it("applies the exact fresh narrow 0001..0019 root chain", async () => {
+  it("applies the exact fresh narrow 0001..0020 root chain", async () => {
     await withDatabase("fresh_narrow", async (database) => {
       const rootMigrations = (await readdir(migrationsDir))
         .filter((file) => file.endsWith(".sql"))
@@ -75,7 +76,8 @@ describe.sequential("PR0b canonical AI schema migration reconciliation", () => {
         ...narrowThrough0016,
         reconciliationMigration,
         turnIdentityMigration,
-        latestWinsMigration
+        latestWinsMigration,
+        directLiveV2Migration
       ]);
 
       await applyMigrations(database, migrationsDir, rootMigrations);
@@ -132,7 +134,8 @@ describe.sequential("PR0b canonical AI schema migration reconciliation", () => {
       await applyMigrations(database, migrationsDir, [
         reconciliationMigration,
         turnIdentityMigration,
-        latestWinsMigration
+        latestWinsMigration,
+        directLiveV2Migration
       ]);
       await expectInventory(database, { runs: 2, spans: 0, quality: 1 });
       const rows = await database.client.unsafe<
@@ -236,7 +239,8 @@ describe.sequential("PR0b canonical AI schema migration reconciliation", () => {
       await applyMigrations(database, migrationsDir, [
         reconciliationMigration,
         turnIdentityMigration,
-        latestWinsMigration
+        latestWinsMigration,
+        directLiveV2Migration
       ]);
       await expectInventory(database, { runs: 1, spans: 1, quality: 1 });
       const [row] = await database.client.unsafe<
@@ -296,7 +300,8 @@ describe.sequential("PR0b canonical AI schema migration reconciliation", () => {
       await applyMigrations(database, migrationsDir, [
         reconciliationMigration,
         turnIdentityMigration,
-        latestWinsMigration
+        latestWinsMigration,
+        directLiveV2Migration
       ]);
 
       const [conversation] = await database.client.unsafe<
@@ -333,6 +338,47 @@ describe.sequential("PR0b canonical AI schema migration reconciliation", () => {
         expected_generation_epoch: 0,
         responds_through_sequence: 2
       });
+    });
+  }, 120_000);
+
+  it("enables only the approved direct live_v2 runtime linkage", async () => {
+    await withDatabase("direct_live_v2_contract", async (database) => {
+      await applyMigrations(database, migrationsDir, [
+        ...narrowThrough0016,
+        reconciliationMigration,
+        turnIdentityMigration,
+        latestWinsMigration,
+        directLiveV2Migration
+      ]);
+
+      const constraints = await database.client.unsafe<
+        Array<{ conname: string; definition: string }>
+      >(`
+        SELECT conname, pg_get_constraintdef(oid) AS definition
+        FROM pg_constraint
+        WHERE conrelid = 'ai_runs'::regclass
+          AND conname IN (
+            'ai_runs_runtime_linkage_check',
+            'ai_runs_runtime_profile_check'
+          )
+        ORDER BY conname
+      `);
+      const definitions = new Map(
+        constraints.map(({ conname, definition }) => [conname, normalizeSql(definition)])
+      );
+
+      expect(definitions.get("ai_runs_runtime_linkage_check")).toContain(
+        "decision_profile = 'live_v2'"
+      );
+      expect(definitions.get("ai_runs_runtime_linkage_check")).toContain(
+        "runtime_run_id IS NULL"
+      );
+      expect(definitions.get("ai_runs_runtime_profile_check")).toContain(
+        "runtime_mode = 'direct_openai'"
+      );
+      expect(definitions.get("ai_runs_runtime_profile_check")).toContain(
+        "'legacy_s05'::text, 'live_v2'::text"
+      );
     });
   }, 120_000);
 

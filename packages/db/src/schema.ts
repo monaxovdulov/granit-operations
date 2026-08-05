@@ -568,7 +568,7 @@ export const aiRuns = pgTable(
     ),
     runtimeLinkageCheck: check(
       "ai_runs_runtime_linkage_check",
-      sql`${table.runtimeMode} = 'mastra_openai_api' OR ${table.runtimeRunId} IS NULL`
+      sql`${table.decisionProfile} = 'live_v2' OR ${table.runtimeRunId} IS NULL`
     ),
     decisionProfileCheck: check(
       "ai_runs_decision_profile_check",
@@ -577,7 +577,7 @@ export const aiRuns = pgTable(
     runtimeProfileCheck: check(
       "ai_runs_runtime_profile_check",
       sql`(${table.recordingContract} = 'native_recorded'
-          AND ((${table.runtimeMode} = 'direct_openai' AND ${table.decisionProfile} = 'legacy_s05')
+          AND ((${table.runtimeMode} = 'direct_openai' AND ${table.decisionProfile} IN ('legacy_s05', 'live_v2'))
             OR (${table.runtimeMode} = 'mastra_openai_api' AND ${table.decisionProfile} = 'live_v2')))
         OR (${table.recordingContract} IN ('native_grounded', 'legacy_narrow')
           AND ${table.runtimeMode} = 'direct_openai'

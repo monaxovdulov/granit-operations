@@ -1,10 +1,10 @@
 import {
-  LIVE_V2_OPENAI_MODEL,
-  LIVE_V2_OPENAI_REASONING_EFFORT
+  DIRECT_LIVE_V2_OPENAI_MODEL,
+  DIRECT_LIVE_V2_OPENAI_REASONING_EFFORT
 } from "../../../config.js";
 import {
-  LIVE_V2_PROVIDER_CANDIDATE_JSON_SCHEMA
-} from "../profiles/live-v2/live-v2-validator.js";
+  MODEL_TURN_OUTPUT_JSON_SCHEMA
+} from "../profiles/live-v2/model-turn-validator.js";
 import type { LiveV2GeneratorInput } from "../profiles/live-v2/live-v2-orchestrator.js";
 import {
   LIVE_V2_MAX_OUTPUT_TOKENS,
@@ -48,7 +48,7 @@ export class OpenAiLiveV2DecisionGenerator implements ObservedLiveV2DecisionGene
     if (
       !options.apiKey ||
       !isSafeWidgetAiModelName(options.model) ||
-      options.model !== LIVE_V2_OPENAI_MODEL
+      options.model !== DIRECT_LIVE_V2_OPENAI_MODEL
     ) {
       throw new Error("Direct live_v2 OpenAI boundary is not safely configured");
     }
@@ -70,14 +70,15 @@ export class OpenAiLiveV2DecisionGenerator implements ObservedLiveV2DecisionGene
         timeoutMs: this.options.timeoutMs ?? LIVE_V2_PROVIDER_TIMEOUT_MS,
         instructions: modelRequest.instructions,
         input: modelRequest.serializedInput,
-        formatName: "granit_live_v2_candidate",
-        schema: LIVE_V2_PROVIDER_CANDIDATE_JSON_SCHEMA,
+        formatName: "granit_model_turn",
+        schema: MODEL_TURN_OUTPUT_JSON_SCHEMA,
         metadata: {
           channel: "site_widget",
-          decision_profile: "live_v2"
+          decision_profile: "live_v2",
+          turn_contract: "granit_model_turn.v1"
         },
         maxOutputTokens: LIVE_V2_MAX_OUTPUT_TOKENS,
-        reasoningEffort: LIVE_V2_OPENAI_REASONING_EFFORT,
+        reasoningEffort: DIRECT_LIVE_V2_OPENAI_REASONING_EFFORT,
         signal: invocation.signal
       });
       const rejectedObservation = toRejectedLiveV2RuntimeObservation({

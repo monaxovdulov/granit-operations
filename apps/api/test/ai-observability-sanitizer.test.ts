@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { sanitizeAiObservabilityMetadata } from "../src/modules/ai/observability/ai-observability-sanitizer.js";
+import {
+  sanitizeAiObservabilityMetadata,
+  sanitizeAiRunStart
+} from "../src/modules/ai/observability/ai-observability-sanitizer.js";
 
 describe("AI observability metadata sanitizer", () => {
   it("keeps approved operational metadata and drops raw sensitive fields", () => {
@@ -67,5 +70,43 @@ describe("AI observability metadata sanitizer", () => {
         responds_through_sequence: 0
       })
     ).toEqual({});
+  });
+
+  it("accepts the bounded durable-worker attempt identity and rejects attempt zero", () => {
+    const input = {
+      traceId: "550e8400-e29b-41d4-a716-446655440001",
+      leadId: "550e8400-e29b-41d4-a716-446655440002",
+      conversationId: "550e8400-e29b-41d4-a716-446655440003",
+      inboundMessageId: "550e8400-e29b-41d4-a716-446655440004",
+      channel: "site_widget",
+      runtimeMode: "direct_openai",
+      decisionProfile: "live_v2",
+      idempotencyKey: "ai-turn:550e8400-e29b-41d4-a716-446655440005:attempt:1",
+      inputFingerprint: "a".repeat(64),
+      versions: {
+        policyVersion: "policy.v1",
+        promptVersion: "prompt.v1",
+        toolVersion: "tools.v1",
+        disclosureVersion: "disclosure.v1",
+        modelProfileVersion: "model.v1"
+      },
+      model: {
+        modelProvider: "openai",
+        requestedModelName: "gpt-5.6-luna",
+        reasoningEffort: "medium"
+      },
+      startedAt: new Date("2026-08-05T00:00:00.000Z")
+    };
+
+    expect(sanitizeAiRunStart(input)).toMatchObject({
+      idempotencyKey: input.idempotencyKey,
+      decisionProfile: "live_v2"
+    });
+    expect(() =>
+      sanitizeAiRunStart({
+        ...input,
+        idempotencyKey: "ai-turn:550e8400-e29b-41d4-a716-446655440005:attempt:0"
+      })
+    ).toThrow();
   });
 });

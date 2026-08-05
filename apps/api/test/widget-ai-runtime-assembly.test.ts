@@ -21,7 +21,7 @@ afterEach(async () => {
 });
 
 describe("M3 widget AI runtime assembly", () => {
-  it("keeps direct rollback isolated from Mastra assets and generator construction", async () => {
+  it("keeps disabled direct runtime isolated from assets and generator construction", async () => {
     const repository = new MemoryIntakeRepository();
     const selectLiveV2Assets = vi.fn(async () => {
       throw new Error("direct rollback must not load live_v2 assets");
@@ -39,9 +39,54 @@ describe("M3 widget AI runtime assembly", () => {
     expect(assembly).toMatchObject({
       enabled: false,
       runtimeMode: "direct_openai",
-      modelName: "gpt-5.5"
+      modelName: "gpt-5.6-luna"
     });
     expect(selectLiveV2Assets).not.toHaveBeenCalled();
+    expect(createMastraGenerator).not.toHaveBeenCalled();
+  });
+
+  it("assembles the enabled direct model-turn boundary without constructing Mastra", async () => {
+    const repository = new MemoryIntakeRepository();
+    const generateDecision = vi.fn();
+    const createDirectGenerator = vi.fn(() => ({ generateDecision }));
+    const createMastraGenerator = vi.fn();
+    const selectLiveV2Assets = vi.fn(async () => ({
+      manifest: loadApprovedAiAssetManifest().liveV2,
+      prompt: LIVE_V2_PROMPT_ASSET,
+      tone: LIVE_V2_TONE_ASSET,
+      factsSnapshot: TEST_LIVE_V2_FACTS,
+      facts: toLiveV2ModelFactsAsset(TEST_LIVE_V2_FACTS)
+    }));
+    const config = loadConfig({
+      DATABASE_URL: "postgres://m3.invalid/granit",
+      AI_WIDGET_ENABLED: "true",
+      OPENAI_API_KEY: "direct-test-not-a-real-key"
+    });
+
+    const assembly = await buildConfiguredWidgetAiAssembly({
+      config,
+      runRepository: repository,
+      dependencies: {
+        selectLiveV2Assets,
+        createDirectGenerator,
+        createMastraGenerator
+      }
+    });
+
+    expect(assembly).toMatchObject({
+      enabled: true,
+      runtimeMode: "direct_openai",
+      modelName: "gpt-5.6-luna",
+      directLiveV2: {
+        modelName: "gpt-5.6-luna",
+        approvedFacts: TEST_LIVE_V2_FACTS
+      }
+    });
+    expect(createDirectGenerator).toHaveBeenCalledWith({
+      apiKey: "direct-test-not-a-real-key",
+      model: "gpt-5.6-luna",
+      timeoutMs: 10_000
+    });
     expect(createMastraGenerator).not.toHaveBeenCalled();
   });
 

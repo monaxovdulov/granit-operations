@@ -209,7 +209,7 @@ export class PostgresAiRunRepository implements AiRunRepository {
     const runtimeRunId =
       row.runtimeRunId === null ? undefined : checkedSafeIdentifier(row.runtimeRunId, 200);
 
-    if (runtimeRunId !== undefined && row.runtimeMode !== "mastra_openai_api") {
+    if (runtimeRunId !== undefined && row.decisionProfile !== "live_v2") {
       throw new AiRunCompletionConflictError();
     }
 
@@ -360,7 +360,8 @@ export async function completeAiRunInTransaction(
 
 function assertRuntimeProfilePair(input: BeginAiRunInput): void {
   const validPair =
-    (input.runtimeMode === "direct_openai" && input.decisionProfile === "legacy_s05") ||
+    (input.runtimeMode === "direct_openai" &&
+      (input.decisionProfile === "legacy_s05" || input.decisionProfile === "live_v2")) ||
     (input.runtimeMode === "mastra_openai_api" && input.decisionProfile === "live_v2");
 
   if (!validPair) {
@@ -481,7 +482,7 @@ function assertCompletionShape(
   checkedOptionalCount(completion.usage?.outputTokens);
   checkedOptionalCount(completion.usage?.totalTokens);
   if (completion.runtimeRunId !== undefined) {
-    if (run.runtimeMode !== "mastra_openai_api") {
+    if (run.decisionProfile !== "live_v2") {
       throw new AiRunCompletionConflictError();
     }
     checkedSafeIdentifier(completion.runtimeRunId, 200);

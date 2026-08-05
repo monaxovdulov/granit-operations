@@ -39,6 +39,10 @@ export class RecordedPublicWidgetAiTurnExecutor implements PublicWidgetAiTurnExe
       signal: input.signal,
       replyApplier: {
         persistReplyAndCompleteRun: async ({ run, reply, completionPlan }) => {
+          if (reply.finalTextHash && sha256Hex(reply.replyDraft) !== reply.finalTextHash) {
+            throw new Error("validated final text hash mismatch before commit");
+          }
+
           const publicMessageId = this.idGenerator();
           const metadata = recordedReplyMetadata({
             run,
@@ -65,6 +69,9 @@ export class RecordedPublicWidgetAiTurnExecutor implements PublicWidgetAiTurnExe
               responds_through_sequence: input.outbound.respondsThroughSequence,
               runtime_mode: input.outbound.runtimeMode,
               body: reply.replyDraft,
+              slot_updates: reply.slotUpdates ?? [],
+              requirement_updates: reply.requirementUpdates ?? [],
+              handoff: reply.handoff ?? null,
               metadata
             })
           );
@@ -106,6 +113,8 @@ export class RecordedPublicWidgetAiTurnExecutor implements PublicWidgetAiTurnExe
 
 const ALLOWED_HANDOFF_REASONS = new Set([
   "manager_requested",
+  "final_quote_pressure",
+  "lead_ready",
   "out_of_scope_legal_funeral_inheritance",
   "price_requires_approved_source",
   "deadline_requires_manager_confirmation",
@@ -125,6 +134,12 @@ function recordedReplyMetadata(input: {
   respondsThroughSequence?: number;
 }): Record<string, unknown> {
   const handoffReason = input.candidateMetadata.handoff_reason;
+  const turnContract = input.candidateMetadata.turn_contract;
+  const finalTextHash = input.candidateMetadata.final_text_hash;
+  const appliedPatchCount = input.candidateMetadata.applied_patch_count;
+  const droppedPatchCount = input.candidateMetadata.dropped_patch_count;
+  const droppedRecommendationCount =
+    input.candidateMetadata.dropped_recommendation_count;
   const usage = input.completion.usage;
 
   return {
@@ -156,6 +171,21 @@ function recordedReplyMetadata(input: {
     ...(typeof handoffReason === "string" && ALLOWED_HANDOFF_REASONS.has(handoffReason)
       ? { handoff_reason: handoffReason }
       : {}),
+    ...(turnContract === "granit_model_turn.v1"
+      ? { turn_contract: turnContract }
+      : {}),
+    ...(typeof finalTextHash === "string" && /^[a-f0-9]{64}$/.test(finalTextHash)
+      ? { final_text_hash: finalTextHash }
+      : {}),
+    ...(isNonNegativeInteger(appliedPatchCount)
+      ? { applied_patch_count: appliedPatchCount }
+      : {}),
+    ...(isNonNegativeInteger(droppedPatchCount)
+      ? { dropped_patch_count: droppedPatchCount }
+      : {}),
+    ...(isNonNegativeInteger(droppedRecommendationCount)
+      ? { dropped_recommendation_count: droppedRecommendationCount }
+      : {}),
     ...(usage?.inputTokens === undefined ? {} : { input_tokens: usage.inputTokens }),
     ...(usage?.outputTokens === undefined ? {} : { output_tokens: usage.outputTokens }),
     ...(usage?.totalTokens === undefined ? {} : { total_tokens: usage.totalTokens }),
@@ -163,4 +193,8 @@ function recordedReplyMetadata(input: {
     ...(input.run.versions.toneVersion ? { tone_version: input.run.versions.toneVersion } : {}),
     ...(input.run.versions.factsVersion ? { facts_version: input.run.versions.factsVersion } : {})
   };
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return Number.isInteger(value) && typeof value === "number" && value >= 0;
 }

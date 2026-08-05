@@ -9,15 +9,21 @@ import {
   aiQualityEvents,
   aiRunSpans,
   aiRuns,
+  conversationHandoffs,
   conversationMessages,
+  conversationRequirements,
+  conversationSlots,
   conversations,
   managerTelegramBindings,
   managerUsers,
   widgetAiJobs
 } from "@granit/db";
+import { sha256Hex } from "@granit/shared";
 import { and, asc, count, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
+import { buildAppContext } from "../src/app-context.js";
+import type { ObservedLiveV2DecisionGenerator } from "../src/modules/ai/ports/live-v2-runtime.js";
 import {
   ShadowWidgetAiReplyGenerator,
   type WidgetAiShadowObservation
@@ -36,6 +42,7 @@ import { PostgresIntakeRepository } from "../src/modules/conversations/repositor
 import { WidgetAiJobWorker } from "../src/modules/intake/services/widget-ai-job-worker.js";
 import { PublicWidgetIntakeService } from "../src/modules/intake/use-cases/public-widget-intake-service.js";
 import { validTelegramInbound } from "./helpers/telegram-fixtures.js";
+import { TEST_LIVE_V2_FACTS } from "./fixtures/live-v2-synthetic.v1.js";
 import {
   resetPostgresWidgetAiState,
   startPostgresWidgetAiTestHarness,
@@ -695,6 +702,148 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
         reasonCode: "model_error",
         managerVisible: true
       }
+    ]);
+  });
+
+  it("atomically commits the direct model-turn body, hash, patches, handoff, run and job", async () => {
+    const repository = new PostgresIntakeRepository(harness.db);
+    const finalText = "Подберём подходящий вариант.";
+    const generator: ObservedLiveV2DecisionGenerator = {
+      async generateDecision() {
+        return {
+          candidate: {
+            version: "granit_model_turn.v1",
+            message: { answerText: finalText, question: null },
+            statePatches: [
+              {
+                operation: "set_slot",
+                name: "material",
+                value: "чёрный гранит",
+                confidence: 0.96,
+                evidence: { quote: "чёрный гранит" }
+              },
+              {
+                operation: "upsert_requirement",
+                category: "decoration",
+                mode: "avoidance",
+                value: "золото",
+                confidence: 0.9,
+                evidence: { quote: "без золота" }
+              }
+            ],
+            recommendationIds: [],
+            handoffIntent: { reason: "customer_ready_to_order" }
+          },
+          observation: {
+            observedModelProvider: "openai",
+            observedModelName: "gpt-5.6-luna",
+            runtimeRunId: "resp_postgres_model_turn_001",
+            usage: { inputTokens: 80, outputTokens: 20, totalTokens: 100 }
+          }
+        };
+      }
+    };
+    const runRepository = new PostgresAiRunRepository(harness.db);
+    const context = buildAppContext({
+      repository,
+      widgetAi: {
+        enabled: true,
+        runtimeMode: "direct_openai",
+        runRepository,
+        directLiveV2: {
+          generator,
+          modelName: "gpt-5.6-luna",
+          approvedFacts: TEST_LIVE_V2_FACTS
+        },
+        jobWorker: {
+          enabled: true,
+          pollIntervalMs: 10,
+          leaseMs: 5_000,
+          retryBackoffMs: 10,
+          maxAttempts: 3
+        }
+      }
+    });
+    const worker = new WidgetAiJobWorker(repository, context.publicIntake.siteWidget, {
+      pollIntervalMs: 10,
+      leaseMs: 5_000,
+      retryBackoffMs: 10
+    });
+
+    await accept(
+      context.publicIntake.siteWidget,
+      widgetRequest("direct-model-turn-postgres", {
+        text: "Нужен памятник: чёрный гранит, без золота"
+      })
+    );
+    const [queuedJob] = await harness.db
+      .select({ availableAt: widgetAiJobs.availableAt })
+      .from(widgetAiJobs);
+    if (!queuedJob) throw new Error("expected queued direct model-turn job");
+    expect(await worker.runOnce(new Date(queuedJob.availableAt.getTime() + 1))).toBe(true);
+    expect(await jobRows()).toEqual([
+      { status: "replied", attemptCount: 1, terminalReason: "handoff" }
+    ]);
+
+    const [outbound] = await harness.db
+      .select({
+        id: conversationMessages.id,
+        publicMessageId: conversationMessages.publicMessageId,
+        body: conversationMessages.body,
+        metadata: conversationMessages.metadata
+      })
+      .from(conversationMessages)
+      .where(eq(conversationMessages.senderRole, "ai_assistant"));
+    const [run] = await harness.db.select().from(aiRuns);
+    const [slot] = await harness.db.select().from(conversationSlots);
+    const [requirement] = await harness.db.select().from(conversationRequirements);
+    const [handoff] = await harness.db.select().from(conversationHandoffs);
+    const [conversation] = await harness.db.select().from(conversations);
+
+    expect(outbound).toMatchObject({
+      body: finalText,
+      metadata: {
+        turn_contract: "granit_model_turn.v1",
+        final_text_hash: sha256Hex(finalText),
+        applied_patch_count: 2
+      }
+    });
+    expect(run).toMatchObject({
+      status: "handed_off",
+      runtimeMode: "direct_openai",
+      decisionProfile: "live_v2",
+      runtimeRunId: "resp_postgres_model_turn_001",
+      configuredModelName: "gpt-5.6-luna",
+      reasoningEffort: "medium",
+      outboundMessageId: outbound?.id,
+      outboundPublicMessageId: outbound?.publicMessageId,
+      sendGateResult: "allowed"
+    });
+    expect(slot).toMatchObject({
+      name: "material",
+      value: "чёрный гранит",
+      evidenceQuote: "чёрный гранит",
+      confidencePermille: 960
+    });
+    expect(requirement).toMatchObject({
+      category: "decoration",
+      mode: "avoidance",
+      value: "золото",
+      evidenceQuote: "без золота",
+      confidencePermille: 900
+    });
+    expect(handoff).toMatchObject({
+      reason: "lead_ready",
+      summary: "Нужен памятник: чёрный гранит, без золота",
+      outboundPublicMessageId: outbound?.publicMessageId,
+      status: "active"
+    });
+    expect(conversation).toMatchObject({
+      aiState: "needs_manager",
+      agentAllowedToReply: false
+    });
+    expect(await jobRows()).toMatchObject([
+      { status: "replied", attemptCount: 1, terminalReason: "handoff" }
     ]);
   });
 

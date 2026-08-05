@@ -4,23 +4,17 @@ import {
   OpenAiLiveV2DecisionGenerator
 } from "../src/modules/ai/adapters/openai-live-v2-decision-generator.js";
 import {
-  MastraLiveV2DecisionGenerator
-} from "../src/modules/ai/adapters/mastra-live-v2-decision-generator.js";
-import {
   LIVE_V2_MAX_OUTPUT_TOKENS,
   LIVE_V2_PROVIDER_TIMEOUT_MS,
   LiveV2GenerationError
 } from "../src/modules/ai/ports/live-v2-runtime.js";
-import { LIVE_V2_PROMPT_ASSET } from "../src/modules/ai/profiles/live-v2/assets/prompt.v1.js";
+import { MODEL_TURN_PROMPT_ASSET } from "../src/modules/ai/profiles/live-v2/assets/model-turn-prompt.v1.js";
 import { LIVE_V2_TONE_ASSET } from "../src/modules/ai/profiles/live-v2/assets/tone.v1.js";
 import { toLiveV2ModelFactsAsset } from "../src/modules/ai/profiles/live-v2/live-v2-assets.js";
 import { buildLiveV2TurnView } from "../src/modules/ai/profiles/live-v2/live-v2-context.js";
-import {
-  LIVE_V2_PROVIDER_CANDIDATE_JSON_SCHEMA
-} from "../src/modules/ai/profiles/live-v2/live-v2-validator.js";
+import { MODEL_TURN_OUTPUT_JSON_SCHEMA } from "../src/modules/ai/profiles/live-v2/model-turn-validator.js";
 import {
   TEST_LIVE_V2_FACTS,
-  answerCandidate,
   buildLiveV2TestTurn
 } from "./fixtures/live-v2-synthetic.v1.js";
 
@@ -29,45 +23,39 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("CONV-1 direct OpenAI live_v2 adapter", () => {
-  it("matches the existing Mastra adapter candidate and observation contract", async () => {
-    const candidate = answerCandidate();
-    const runtimeResult = {
-      candidate,
-      modelProvider: "openai",
-      providerModelName: "gpt-5.6-sol",
-      runtimeRunId: "runtime-parity-001",
-      usage: { inputTokens: 40, outputTokens: 20, totalTokens: 60 }
-    };
+describe("CONV-2 direct OpenAI model-turn adapter", () => {
+  it("returns the provider-neutral model-turn output with trusted observation", async () => {
+    const candidate = modelTurnOutput();
     const direct = new OpenAiLiveV2DecisionGenerator(
-      { apiKey: "test-direct-live-v2-key", model: "gpt-5.6-sol" },
+      { apiKey: "test-direct-live-v2-key", model: "gpt-5.6-luna" },
       async () => ({
-        id: runtimeResult.runtimeRunId,
-        model: runtimeResult.providerModelName,
+        id: "runtime-direct-001",
+        model: "gpt-5.6-luna",
         outputText: JSON.stringify(candidate),
-        usage: runtimeResult.usage
+        usage: { inputTokens: 40, outputTokens: 20, totalTokens: 60 }
       })
-    );
-    const mastra = new MastraLiveV2DecisionGenerator(
-      { generate: vi.fn(async () => runtimeResult) },
-      "openai",
-      "gpt-5.6-sol"
     );
     const invocation = {
       appTraceId: "00000000-0000-4000-8000-000000000200"
     };
 
-    await expect(direct.generateDecision(generatorInput(), invocation)).resolves.toEqual(
-      await mastra.generateDecision(generatorInput(), invocation)
-    );
+    await expect(direct.generateDecision(generatorInput(), invocation)).resolves.toEqual({
+      candidate,
+      observation: {
+        observedModelProvider: "openai",
+        observedModelName: "gpt-5.6-luna",
+        runtimeRunId: "runtime-direct-001",
+        usage: { inputTokens: 40, outputTokens: 20, totalTokens: 60 }
+      }
+    });
   });
 
   it("sends the exact bounded live_v2 Responses request and returns trusted observation", async () => {
-    const candidate = answerCandidate();
+    const candidate = modelTurnOutput();
     const fetchMock = vi.fn<typeof fetch>(async () =>
       response({
         id: "resp_live_v2_001",
-        model: "gpt-5.6-sol",
+        model: "gpt-5.6-luna",
         output: [
           {
             content: [
@@ -99,19 +87,23 @@ describe("CONV-1 direct OpenAI live_v2 adapter", () => {
     });
     const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
     expect(body).toMatchObject({
-      model: "gpt-5.6-sol",
+      model: "gpt-5.6-luna",
       store: false,
-      instructions: LIVE_V2_PROMPT_ASSET.instructions.join("\n"),
+      instructions: MODEL_TURN_PROMPT_ASSET.instructions.join("\n"),
       max_output_tokens: LIVE_V2_MAX_OUTPUT_TOKENS,
       reasoning: { effort: "medium" },
-      metadata: { channel: "site_widget", decision_profile: "live_v2" },
+      metadata: {
+        channel: "site_widget",
+        decision_profile: "live_v2",
+        turn_contract: "granit_model_turn.v1"
+      },
       text: {
         verbosity: "low",
         format: {
           type: "json_schema",
-          name: "granit_live_v2_candidate",
+          name: "granit_model_turn",
           strict: true,
-          schema: LIVE_V2_PROVIDER_CANDIDATE_JSON_SCHEMA
+          schema: MODEL_TURN_OUTPUT_JSON_SCHEMA
         }
       }
     });
@@ -123,14 +115,14 @@ describe("CONV-1 direct OpenAI live_v2 adapter", () => {
     expect(serializedInput).not.toContain("00000000-0000-4000-8000-000000000201");
     expect(serializedInput).not.toContain("publicMessageId");
     expect(serializedInput).not.toContain("blobSha");
-    expect(LIVE_V2_PROVIDER_CANDIDATE_JSON_SCHEMA.type).toBe("object");
-    expect(LIVE_V2_PROVIDER_CANDIDATE_JSON_SCHEMA).not.toHaveProperty("anyOf");
+    expect(MODEL_TURN_OUTPUT_JSON_SCHEMA.type).toBe("object");
+    expect(MODEL_TURN_OUTPUT_JSON_SCHEMA).not.toHaveProperty("anyOf");
     expect(LIVE_V2_PROVIDER_TIMEOUT_MS).toBe(15_000);
     expect(result).toEqual({
       candidate,
       observation: {
         observedModelProvider: "openai",
-        observedModelName: "gpt-5.6-sol",
+        observedModelName: "gpt-5.6-luna",
         runtimeRunId: "resp_live_v2_001",
         usage: { inputTokens: 120, outputTokens: 45, totalTokens: 165 }
       }
@@ -240,7 +232,10 @@ describe("CONV-1 direct OpenAI live_v2 adapter", () => {
               content: [
                 {
                   type: "output_text",
-                  text: JSON.stringify({ ...answerCandidate(), replyDraft: rawCanary })
+                  text: JSON.stringify({
+                    ...modelTurnOutput(),
+                    message: { answerText: rawCanary, question: null }
+                  })
                 }
               ]
             }
@@ -259,7 +254,7 @@ describe("CONV-1 direct OpenAI live_v2 adapter", () => {
       failureCategory: "runtime_error",
       observation: undefined
     });
-    expect(JSON.stringify(thrown)).not.toContain("gpt-5.6-sol");
+    expect(JSON.stringify(thrown)).not.toContain("gpt-5.6-luna");
     expect(JSON.stringify(thrown)).not.toContain(rawCanary);
   });
 
@@ -270,7 +265,7 @@ describe("CONV-1 direct OpenAI live_v2 adapter", () => {
       vi.fn<typeof fetch>(async () =>
         response({
           id: "resp_live_v2_bad_json",
-          model: "gpt-5.6-sol",
+          model: "gpt-5.6-luna",
           output: [{ content: [{ type: "output_text", text: `{${rawCanary}` }] }]
         })
       )
@@ -336,7 +331,7 @@ function createGenerator(
 ) {
   return new OpenAiLiveV2DecisionGenerator({
     apiKey: "test-direct-live-v2-key",
-    model: "gpt-5.6-sol",
+    model: "gpt-5.6-luna",
     ...overrides
   });
 }
@@ -350,10 +345,23 @@ function generatorInput() {
       })
     ),
     assets: {
-      prompt: LIVE_V2_PROMPT_ASSET,
+      prompt: MODEL_TURN_PROMPT_ASSET,
       tone: LIVE_V2_TONE_ASSET,
       facts: toLiveV2ModelFactsAsset(TEST_LIVE_V2_FACTS)
     }
+  };
+}
+
+function modelTurnOutput() {
+  return {
+    version: "granit_model_turn.v1" as const,
+    message: {
+      answerText: "В каталоге представлены вертикальные памятники.",
+      question: null
+    },
+    statePatches: [],
+    recommendationIds: [],
+    handoffIntent: null
   };
 }
 

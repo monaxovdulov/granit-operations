@@ -117,7 +117,7 @@ describe.sequential("P2 PostgreSQL AI observability atomicity", () => {
     expect(eventRows).toHaveLength(0);
   });
 
-  it("fails closed before a custom recorded generator when PostgreSQL lacks the capability", async () => {
+  it("supersedes the stale run when manager takeover advances the PostgreSQL turn fence", async () => {
     if (!database) throw new Error("expected test database");
     const repository = new PostgresIntakeRepository(database.db);
     const runRepository = new PostgresAiRunRepository(database.db);
@@ -153,7 +153,7 @@ describe.sequential("P2 PostgreSQL AI observability atomicity", () => {
     const history = await waitForTerminalHistory(app, response);
     expect(response.json()).toMatchObject({ automation: { status: "processing" } });
     expect(history.messages[0]).toMatchObject({
-      automation: { status: "blocked", reason: "ai_persistence_unconfirmed" }
+      automation: { status: "superseded", reason: "turn_not_current" }
     });
     const [runRows, outboundRows, spanRows, eventRows] = await Promise.all([
       database.db.select().from(aiRuns),
@@ -161,7 +161,14 @@ describe.sequential("P2 PostgreSQL AI observability atomicity", () => {
       database.db.select().from(aiRunSpans),
       database.db.select().from(aiQualityEvents)
     ]);
-    expect(runRows).toHaveLength(0);
+    expect(runRows).toMatchObject([
+      {
+        status: "running",
+        outcomeReason: null,
+        failureCode: null,
+        sendGateResult: "not_checked"
+      }
+    ]);
     expect(outboundRows).toHaveLength(0);
     expect(spanRows).toHaveLength(0);
     expect(eventRows).toHaveLength(0);
@@ -205,7 +212,7 @@ describe.sequential("P2 PostgreSQL AI observability atomicity", () => {
     ).toHaveLength(0);
   });
 
-  it("does not call a custom recorded generator before a later global stop", async () => {
+  it("records a blocked run when a later global stop closes the PostgreSQL send gate", async () => {
     if (!database) throw new Error("expected test database");
     const repository = new PostgresIntakeRepository(database.db);
     const runRepository = new PostgresAiRunRepository(database.db);
@@ -239,9 +246,16 @@ describe.sequential("P2 PostgreSQL AI observability atomicity", () => {
     const history = await waitForTerminalHistory(app, response);
     expect(response.json()).toMatchObject({ automation: { status: "processing" } });
     expect(history.messages[0]).toMatchObject({
-      automation: { status: "blocked", reason: "ai_persistence_unconfirmed" }
+      automation: { status: "superseded", reason: "agent_reply_blocked" }
     });
-    expect(await database.db.select().from(aiRuns)).toHaveLength(0);
+    expect(await database.db.select().from(aiRuns)).toMatchObject([
+      {
+        status: "blocked",
+        outcomeReason: "agent_reply_blocked",
+        failureCode: "send_gate_blocked",
+        sendGateResult: "blocked"
+      }
+    ]);
     expect(
       await database.db
         .select()
@@ -250,7 +264,7 @@ describe.sequential("P2 PostgreSQL AI observability atomicity", () => {
     ).toHaveLength(0);
   });
 
-  it("does not reach recorded terminal triggers without the PostgreSQL capability", async () => {
+  it("rolls back the outbound and records a sanitized terminal failure", async () => {
     if (!database) throw new Error("expected test database");
     await database.client.unsafe(`
       CREATE FUNCTION p2_reject_persisted_ai_run() RETURNS trigger
@@ -306,8 +320,18 @@ describe.sequential("P2 PostgreSQL AI observability atomicity", () => {
     expect(conversationRows).toMatchObject([
       { agentAllowedToReply: true, aiState: "ai_collecting_info" }
     ]);
-    expect(runRows).toHaveLength(0);
-    expect(eventRows).toHaveLength(0);
+    expect(runRows).toMatchObject([
+      {
+        status: "failed",
+        outcomeReason: "ai_persistence_unconfirmed",
+        failureCode: "persistence_failure",
+        sendGateResult: "not_checked"
+      }
+    ]);
+    expect(spanRows.length).toBeGreaterThan(0);
+    expect(eventRows).toMatchObject([
+      { eventType: "runtime_failure", reasonCode: "ai_persistence_unconfirmed" }
+    ]);
     expect(timelineRows).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({ eventType: "conversation.ai_manager_review_required" })
@@ -321,7 +345,7 @@ describe.sequential("P2 PostgreSQL AI observability atomicity", () => {
     );
   });
 
-  it("does not execute recorded collision setup without the PostgreSQL capability", async () => {
+  it("preserves a visitor collision without terminalizing the stale PostgreSQL run", async () => {
     if (!database) throw new Error("expected test database");
     const repository = new PostgresIntakeRepository(database.db);
     const runRepository = new PostgresAiRunRepository(database.db);
@@ -385,7 +409,9 @@ describe.sequential("P2 PostgreSQL AI observability atomicity", () => {
 
     const history = await waitForTerminalHistory(app, response);
     expect(response.json()).toMatchObject({ automation: { status: "processing" } });
-    expect(history.messages[0]?.automation?.status).toMatch(/blocked|superseded|failed/);
+    expect(history.messages[0]).toMatchObject({
+      automation: { status: "superseded", reason: "turn_not_current" }
+    });
     const [runRows, messageRows, conversationRows, timelineRows] = await Promise.all([
       database.db.select().from(aiRuns),
       database.db.select().from(conversationMessages),
@@ -395,9 +421,18 @@ describe.sequential("P2 PostgreSQL AI observability atomicity", () => {
     const collisionRows = messageRows.filter((message) =>
       message.idempotencyKey.startsWith("ai:")
     );
-    expect(collisionRows).toHaveLength(0);
+    expect(collisionRows).toMatchObject([
+      { senderRole: "visitor", body: "Visitor collision canary" }
+    ]);
     expect(messageRows.filter((message) => message.senderRole === "ai_assistant")).toHaveLength(0);
-    expect(runRows).toHaveLength(0);
+    expect(runRows).toMatchObject([
+      {
+        status: "running",
+        outcomeReason: null,
+        failureCode: null,
+        sendGateResult: "not_checked"
+      }
+    ]);
     expect(conversationRows).toMatchObject([
       { agentAllowedToReply: true, aiState: "ai_collecting_info" }
     ]);
@@ -422,6 +457,16 @@ describe.sequential("P2 PostgreSQL AI observability atomicity", () => {
       url: "/public/intake/site-widget/messages",
       payload: widgetRequest("p2-runtime-profile-pairs-0002")
     });
+    await app.inject({
+      method: "POST",
+      url: "/public/intake/site-widget/messages",
+      payload: widgetRequest("p2-runtime-profile-pairs-0003")
+    });
+    await app.inject({
+      method: "POST",
+      url: "/public/intake/site-widget/messages",
+      payload: widgetRequest("p2-runtime-profile-pairs-0004")
+    });
     const inboundRows = await database.db
       .select({
         id: conversationMessages.id,
@@ -432,8 +477,10 @@ describe.sequential("P2 PostgreSQL AI observability atomicity", () => {
       .from(conversationMessages)
       .where(eq(conversationMessages.direction, "inbound"));
 
-    const [directInbound, mastraInbound] = inboundRows;
-    if (!directInbound || !mastraInbound) throw new Error("expected two accepted inbound messages");
+    const [directInbound, mastraInbound, directLiveInbound, mastraLegacyInbound] = inboundRows;
+    if (!directInbound || !mastraInbound || !directLiveInbound || !mastraLegacyInbound) {
+      throw new Error("expected four accepted inbound messages");
+    }
 
     const runRepository = new PostgresAiRunRepository(database.db);
     const directLegacy = p2BeginRunInput(directInbound, "direct_openai", "legacy_s05");
@@ -448,28 +495,30 @@ describe.sequential("P2 PostgreSQL AI observability atomicity", () => {
       run: { runtimeMode: "mastra_openai_api", decisionProfile: "live_v2" }
     });
 
-    const directLive = p2BeginRunInput(directInbound, "direct_openai", "live_v2");
-    const mastraLegacy = p2BeginRunInput(mastraInbound, "mastra_openai_api", "legacy_s05");
-
-    await expect(runRepository.beginOrReplay(directLive)).rejects.toBeInstanceOf(
-      AiRunInputInvariantError
+    const directLive = p2BeginRunInput(directLiveInbound, "direct_openai", "live_v2");
+    const mastraLegacy = p2BeginRunInput(
+      mastraLegacyInbound,
+      "mastra_openai_api",
+      "legacy_s05"
     );
+
+    await expect(runRepository.beginOrReplay(directLive)).resolves.toMatchObject({
+      kind: "started",
+      run: { runtimeMode: "direct_openai", decisionProfile: "live_v2" }
+    });
     await expect(runRepository.beginOrReplay(mastraLegacy)).rejects.toBeInstanceOf(
       AiRunInputInvariantError
     );
     await expect(
-      database.db.insert(aiRuns).values(p2RunInsert(directLive, directInbound.publicMessageId))
-    ).rejects.toMatchObject({
-      cause: { constraint_name: "ai_runs_runtime_profile_check" }
-    });
-    await expect(
-      database.db.insert(aiRuns).values(p2RunInsert(mastraLegacy, mastraInbound.publicMessageId))
+      database.db
+        .insert(aiRuns)
+        .values(p2RunInsert(mastraLegacy, mastraLegacyInbound.publicMessageId))
     ).rejects.toMatchObject({
       cause: { constraint_name: "ai_runs_runtime_profile_check" }
     });
   });
 
-  it("fails closed before Mastra generation when PostgreSQL lacks recorded reply capability", async () => {
+  it("persists and replays one recorded Mastra reply through PostgreSQL", async () => {
     if (!database) throw new Error("expected test database");
     const repository = new PostgresIntakeRepository(database.db);
     const runRepository = new PostgresAiRunRepository(database.db);
@@ -500,6 +549,7 @@ describe.sequential("P2 PostgreSQL AI observability atomicity", () => {
       url: "/public/intake/site-widget/messages",
       payload
     });
+    const history = await waitForTerminalHistory(app, first);
     const replay = await app.inject({
       method: "POST",
       url: "/public/intake/site-widget/messages",
@@ -514,18 +564,29 @@ describe.sequential("P2 PostgreSQL AI observability atomicity", () => {
       database.db.select().from(aiRunSpans)
     ]);
 
-    expect(first.json()).toMatchObject({ automation: { status: "disabled" } });
+    expect(first.json()).toMatchObject({ automation: { status: "processing" } });
+    expect(history.messages[0]).toMatchObject({ automation: { status: "replied" } });
     expect(replay.json()).toMatchObject({
       status: "replayed",
-      automation: { status: "disabled" }
+      automation: { status: "replied" }
     });
-    expect(generate).not.toHaveBeenCalled();
-    expect(outboundRows).toHaveLength(0);
-    expect(runRows).toHaveLength(0);
-    expect(spanRows).toHaveLength(0);
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(outboundRows).toHaveLength(1);
+    expect(runRows).toMatchObject([
+      {
+        runtimeMode: "mastra_openai_api",
+        decisionProfile: "live_v2",
+        status: "persisted",
+        runtimeRunId: "mastra-local-pg-run-001",
+        observedModelProvider: "fake",
+        observedModelName: "mastra-local-pg-fixture-v1",
+        outboundMessageId: outboundRows[0]?.id
+      }
+    ]);
+    expect(spanRows.length).toBeGreaterThan(0);
   });
 
-  it("does not call Mastra for controlled no-reply without recorded PostgreSQL capability", async () => {
+  it("records a controlled Mastra no-reply once through PostgreSQL", async () => {
     if (!database) throw new Error("expected test database");
     const repository = new PostgresIntakeRepository(database.db);
     const runRepository = new PostgresAiRunRepository(database.db);
@@ -555,9 +616,28 @@ describe.sequential("P2 PostgreSQL AI observability atomicity", () => {
       url: "/public/intake/site-widget/messages",
       payload: widgetRequest("m2-postgres-controlled-no-reply-0001")
     });
-    expect(response.json()).toMatchObject({ automation: { status: "disabled" } });
-    expect(generate).not.toHaveBeenCalled();
-    expect(await database.db.select().from(aiRuns)).toHaveLength(0);
+    const history = await waitForTerminalHistory(app, response);
+    expect(response.json()).toMatchObject({ automation: { status: "processing" } });
+    expect(history.messages[0]).toMatchObject({
+      automation: { status: "blocked", reason: "missing_approved_fact" }
+    });
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(await database.db.select().from(aiRuns)).toMatchObject([
+      {
+        runtimeMode: "mastra_openai_api",
+        decisionProfile: "live_v2",
+        status: "fallback_unavailable",
+        outcomeReason: "missing_approved_fact",
+        sendGateResult: "not_checked",
+        runtimeRunId: "mastra-local-pg-no-reply-001"
+      }
+    ]);
+    expect(
+      await database.db
+        .select()
+        .from(conversationMessages)
+        .where(eq(conversationMessages.senderRole, "ai_assistant"))
+    ).toHaveLength(0);
   });
 
   it("persists and replays allowlisted externally precomputed cost evidence", async () => {

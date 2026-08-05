@@ -19,6 +19,7 @@ import type {
   RunningAiRunRecord,
   TerminalAiRunRecord
 } from "../../src/modules/ai/repositories/ai-run-repository.js";
+import type { PersistRecordedSiteWidgetAiReplyInput } from "../../src/modules/ai/repositories/recorded-site-widget-ai-reply-repository.js";
 import type {
   AiKnownSlots,
   AiSlotName
@@ -425,25 +426,7 @@ export class MemoryIntakeRepository implements IntakeRepository {
     return completed;
   }
 
-  async persistRecordedSiteWidgetAiReply(input: {
-    run: RunningAiRunRecord;
-    reply: { replyDraft: string; action?: string };
-    completionPlan: {
-      allowed: AiRunTerminalCompletion;
-      agentReplyBlocked: AiRunTerminalCompletion;
-      persistenceUnconfirmed: AiRunTerminalCompletion;
-    };
-    publicMessageId: string;
-    inboundPublicMessageId: string;
-    idempotencyKey: string;
-    requestFingerprint: string;
-    sourcePageUrl: string;
-    metadata: Record<string, unknown>;
-    expectedGenerationEpoch?: number;
-    respondsThroughSequence?: number;
-    runtimeMode?: "direct_openai" | "mastra_openai_api";
-    jobCommit?: { jobId: string; attemptCount: number };
-  }) {
+  async persistRecordedSiteWidgetAiReply(input: PersistRecordedSiteWidgetAiReplyInput) {
     let saved:
       | {
           publicMessageId: string;
@@ -473,6 +456,9 @@ export class MemoryIntakeRepository implements IntakeRepository {
         sourcePageUrl: input.sourcePageUrl,
         agentAllowedToReplyAfterSend:
           input.reply.action === "handoff_to_manager" ? false : undefined,
+        slotUpdates: input.reply.slotUpdates,
+        requirementUpdates: input.reply.requirementUpdates,
+        handoff: input.reply.handoff,
         metadata: input.metadata
       });
       const completedRun = await this.completeWithoutReply({

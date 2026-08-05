@@ -5,13 +5,13 @@ import { loadConfig } from "../src/config.js";
 const DATABASE_URL = "postgres://config-test.invalid/granit";
 
 describe("M1 Mastra runtime config", () => {
-  it("keeps the direct legacy runtime and unknown deployment tier as safe defaults", () => {
+  it("keeps the direct live_v2 runtime and unknown deployment tier as safe defaults", () => {
     const config = loadConfig({ DATABASE_URL });
 
     expect(config.deploymentTier).toBe("unknown");
     expect(config.widgetAi).toMatchObject({
       runtimeMode: "direct_openai",
-      openAiModel: "gpt-5.5"
+      openAiModel: "gpt-5.6-luna"
     });
   });
 
@@ -28,7 +28,7 @@ describe("M1 Mastra runtime config", () => {
     expect(config.deploymentTier).toBe("staging");
     expect(config.widgetAi).toMatchObject({
       runtimeMode: "mastra_openai_api",
-      openAiModel: "gpt-5.5",
+      openAiModel: "gpt-5.6-luna",
       mastra: {
         openAiApiKey: "m1-config-test-key",
         model: "gpt-5.6-sol",
@@ -119,7 +119,7 @@ describe("M1 Mastra runtime config", () => {
 
     expect(config.widgetAi).toMatchObject({
       runtimeMode: "direct_openai",
-      openAiModel: "gpt-5.5"
+      openAiModel: "gpt-5.6-luna"
     });
     expect(config.widgetAi.openAiApiKey).toBeUndefined();
   });

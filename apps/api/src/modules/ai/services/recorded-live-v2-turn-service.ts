@@ -17,7 +17,18 @@ import {
   type LiveV2TurnOutcome
 } from "../profiles/live-v2/live-v2-orchestrator.js";
 import type { LiveV2Candidate } from "../profiles/live-v2/live-v2-contract.js";
+import {
+  executeModelTurn,
+  type ModelTurnApplyPlan,
+  type ModelTurnOutcome
+} from "../profiles/live-v2/model-turn-orchestrator.js";
+import type { ValidatedTurnPlan } from "../profiles/live-v2/model-turn-contract.js";
 import type {
+  AiRequirementUpdate,
+  AiSlotUpdate
+} from "../ai-dialog-contract.js";
+import type {
+  RecordedAiPersistReplyInput,
   RecordedAiPersistReplyResult,
   RecordedAiTurnOutcome,
   RecordedAiTurnResult,
@@ -31,6 +42,7 @@ import type {
   AiQualityEventWrite,
   AiRunModelConfig,
   AiRunRepository,
+  AiRunRuntimeMode,
   AiRunSpanErrorCode,
   AiRunSpanWrite,
   AiRunTerminalCompletion,
@@ -48,6 +60,8 @@ export type RecordedLiveV2TurnServiceOptions = {
   approvedFacts: LiveV2FactsSnapshot;
   versions: AiRunVersions;
   model: AiRunModelConfig;
+  runtimeMode?: AiRunRuntimeMode;
+  turnContract?: "legacy_live_v2_candidate" | "model_turn_v1";
   clock?: () => Date;
   idGenerator?: () => string;
 };
@@ -69,6 +83,12 @@ type TerminalState = Pick<
   | "sendGateResult"
   | "qualityEvents"
 >;
+
+type RecordedPipelineOutcome = LiveV2TurnOutcome | ModelTurnOutcome;
+type RecordedReplyDecision = {
+  action: "answer" | "ask_clarifying_question" | "handoff_to_manager";
+  reason: string;
+};
 
 export class RecordedLiveV2ExecutionError extends Error {
   constructor() {
@@ -105,7 +125,7 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
         conversationId: input.executionContext.internal.conversationId,
         inboundMessageId: input.executionContext.internal.inboundMessageId,
         channel: input.executionContext.channel,
-        runtimeMode: "mastra_openai_api",
+        runtimeMode: this.options.runtimeMode ?? "mastra_openai_api",
         decisionProfile: "live_v2",
         idempotencyKey: input.executionContext.turn.idempotencyKey,
         inputFingerprint,
@@ -166,7 +186,11 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
     let atomicCompletion: TerminalAiRunRecord | undefined;
 
     try {
-      const liveOutcome = await executeLiveV2Turn({
+      const executeTurn =
+        this.options.turnContract === "model_turn_v1"
+          ? executeModelTurn
+          : executeLiveV2Turn;
+      const liveOutcome: RecordedPipelineOutcome = await executeTurn({
         turnInput: input.turnInput,
         approvedFacts: this.options.approvedFacts,
         generator: {
@@ -223,13 +247,29 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
       if (liveOutcome.plan.kind === "persist_reply") {
         throwIfRecordedTurnAborted(input.signal);
         const action = liveOutcome.plan.action;
+        const decision = replyDecision(liveOutcome.plan);
+        const validatedPlan = modelTurnPlan(liveOutcome.plan);
+        const appliedPatches = validatedPlan
+          ? splitAppliedPatches(validatedPlan.appliedPatches)
+          : undefined;
+        const handoff = validatedPlan
+          ? buildRecordedHandoff(input.turnInput, validatedPlan, appliedPatches)
+          : undefined;
         const result = await input.replyApplier.persistReplyAndCompleteRun({
           run,
           reply: {
             executionContext: input.executionContext,
             action,
             replyDraft: liveOutcome.plan.replyDraft,
-            metadata: decisionMetadata(liveOutcome.plan.decision),
+            ...(validatedPlan ? { finalTextHash: validatedPlan.finalTextHash } : {}),
+            metadata: decisionMetadata(decision, validatedPlan),
+            ...(appliedPatches?.slotUpdates.length
+              ? { slotUpdates: appliedPatches.slotUpdates }
+              : {}),
+            ...(appliedPatches?.requirementUpdates.length
+              ? { requirementUpdates: appliedPatches.requirementUpdates }
+              : {}),
+            ...(handoff ? { handoff } : {}),
             ...(liveOutcome.plan.agentAllowedToReplyAfterSend === false
               ? { agentAllowedToReplyAfterSend: false }
               : {})
@@ -260,11 +300,12 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
         });
         atomicCompletion = result.completedRun;
         assertAtomicCompletion(action, result);
+        assertCommittedText(validatedPlan, result);
 
         return {
           kind: "executed",
           run: atomicCompletion,
-          outcome: persistedOutcome(liveOutcome.plan.decision, result)
+          outcome: persistedOutcome(decision, result)
         };
       }
 
@@ -330,7 +371,7 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
 
   private outcomeSpans(input: {
     startedAt: Date;
-    liveOutcome: LiveV2TurnOutcome;
+    liveOutcome: RecordedPipelineOutcome;
     generatorStartedAt?: Date;
     generatorCompletedAt?: Date;
     generatorSucceeded: boolean;
@@ -560,9 +601,9 @@ function persistenceUnconfirmedState(
   };
 }
 
-function terminalStateFor(outcome: LiveV2TurnOutcome): TerminalState {
-  const normalizedAction =
-    outcome.validation?.ok === true ? outcome.validation.decision.action : "no_reply";
+function terminalStateFor(outcome: RecordedPipelineOutcome): TerminalState {
+  const decision = validatedDecision(outcome);
+  const normalizedAction = decision?.action ?? "no_reply";
 
   if (outcome.plan.kind === "blocked" && outcome.plan.reason === "gate_closed") {
     return {
@@ -590,14 +631,14 @@ function terminalStateFor(outcome: LiveV2TurnOutcome): TerminalState {
       normalizedAction: "no_reply",
       outcomeReason: "recorder_failure",
       failureCode: "recorder_failure",
-      validatorResult: outcome.validation.ok ? "passed" : "rejected",
+      validatorResult: outcome.validation?.ok ? "passed" : "rejected",
       sendGateResult: "not_checked",
       qualityEvents: [event("runtime_failure", "recorder_failed", "critical")]
     };
   }
 
-  if (outcome.validation?.ok === true && outcome.validation.decision.action === "no_reply") {
-    const reason = outcome.validation.decision.reason;
+  if (decision?.action === "no_reply") {
+    const reason = decision.reason as "no_safe_answer" | "missing_approved_fact";
 
     return {
       status: "fallback_unavailable",
@@ -652,17 +693,32 @@ function event(
   return { eventType, reasonCode, severity, managerVisible: true };
 }
 
-function decisionMetadata(decision: Exclude<LiveV2Candidate, { action: "no_reply" }>) {
+function decisionMetadata(
+  decision: RecordedReplyDecision,
+  plan?: ValidatedTurnPlan
+) {
   return {
     normalized_action: decision.action,
+    ...(plan
+      ? {
+          turn_contract: "granit_model_turn.v1",
+          final_text_hash: plan.finalTextHash,
+          applied_patch_count: plan.appliedPatches.length,
+          dropped_patch_count: plan.droppedPatches.length,
+          dropped_recommendation_count: plan.droppedRecommendationIds.length,
+          validation_results: plan.validationResults
+        }
+      : {}),
     ...(decision.action === "handoff_to_manager"
-      ? { handoff_reason: "manager_requested" }
+      ? {
+          handoff_reason: plan?.handoffAction?.reason ?? "manager_requested"
+        }
       : {})
   };
 }
 
 function persistedOutcome(
-  decision: Exclude<LiveV2Candidate, { action: "no_reply" }>,
+  decision: RecordedReplyDecision,
   result: RecordedAiPersistReplyResult
 ): RecordedAiTurnOutcome {
   if (result.status === "blocked") {
@@ -701,10 +757,10 @@ function persistedOutcome(
 }
 
 function terminalOutcome(
-  outcome: LiveV2TurnOutcome,
+  outcome: RecordedPipelineOutcome,
   run: TerminalAiRunRecord
 ): RecordedAiTurnOutcome {
-  const decision = outcome.validation?.ok ? outcome.validation.decision : undefined;
+  const decision = validatedDecision(outcome);
   const action = decision?.action ?? "no_reply";
 
   return {
@@ -740,6 +796,107 @@ function noReplyOutcome(reason: string): RecordedAiTurnOutcome {
       evidence: { decision_profile: "live_v2", normalized_action: "no_reply" }
     }
   };
+}
+
+function validatedDecision(outcome: RecordedPipelineOutcome):
+  | RecordedReplyDecision
+  | { action: "no_reply"; reason: string }
+  | undefined {
+  if (!outcome.validation?.ok) return undefined;
+
+  if ("decision" in outcome.validation) {
+    return {
+      action: outcome.validation.decision.action,
+      reason: outcome.validation.decision.reason
+    };
+  }
+
+  return {
+    action: outcome.validation.plan.action,
+    reason: outcome.validation.plan.reason
+  };
+}
+
+function replyDecision(
+  plan: Extract<RecordedPipelineOutcome["plan"], { kind: "persist_reply" }>
+): RecordedReplyDecision {
+  if ("validatedPlan" in plan) {
+    return { action: plan.action, reason: plan.validatedPlan.reason };
+  }
+
+  return { action: plan.action, reason: plan.decision.reason };
+}
+
+function modelTurnPlan(
+  plan: Extract<RecordedPipelineOutcome["plan"], { kind: "persist_reply" }>
+): ValidatedTurnPlan | undefined {
+  return "validatedPlan" in plan ? plan.validatedPlan : undefined;
+}
+
+function splitAppliedPatches(
+  patches: ValidatedTurnPlan["appliedPatches"]
+): { slotUpdates: AiSlotUpdate[]; requirementUpdates: AiRequirementUpdate[] } {
+  const slotUpdates: AiSlotUpdate[] = [];
+  const requirementUpdates: AiRequirementUpdate[] = [];
+
+  for (const patch of patches) {
+    if ("name" in patch) slotUpdates.push(patch);
+    else requirementUpdates.push(patch);
+  }
+
+  return { slotUpdates, requirementUpdates };
+}
+
+function buildRecordedHandoff(
+  turnInput: AiTurnInput,
+  plan: ValidatedTurnPlan,
+  patches:
+    | { slotUpdates: AiSlotUpdate[]; requirementUpdates: AiRequirementUpdate[] }
+    | undefined
+): RecordedAiPersistReplyInput["handoff"] {
+  if (!plan.handoffAction) return undefined;
+
+  const slotsSnapshot: Record<string, unknown> = {};
+  for (const [name, slot] of Object.entries(turnInput.knownSlots.values)) {
+    if (slot) slotsSnapshot[name] = slot.value;
+  }
+  for (const slot of patches?.slotUpdates ?? []) {
+    slotsSnapshot[slot.name] = slot.value;
+  }
+
+  const requirements = [
+    ...turnInput.knownRequirements,
+    ...(patches?.requirementUpdates ?? [])
+  ].map((requirement) => ({
+    category: requirement.category,
+    mode: requirement.mode,
+    value: requirement.value
+  }));
+  if (requirements.length > 0) slotsSnapshot.requirements = requirements;
+
+  const summaryUpdate = patches?.slotUpdates.find(
+    (slot) => slot.name === "questionSummary"
+  );
+  const summary = (summaryUpdate?.value ?? turnInput.inboundMessage.text)
+    .trim()
+    .slice(0, 900);
+
+  return {
+    reason: plan.handoffAction.reason,
+    summary,
+    slotsSnapshot
+  };
+}
+
+function assertCommittedText(
+  plan: ValidatedTurnPlan | undefined,
+  result: RecordedAiPersistReplyResult
+): void {
+  if (!plan || result.status !== "persisted") return;
+
+  if (result.body !== plan.finalText) {
+    throw new RecordedLiveV2ExecutionError();
+  }
 }
 
 function assertAtomicCompletion(

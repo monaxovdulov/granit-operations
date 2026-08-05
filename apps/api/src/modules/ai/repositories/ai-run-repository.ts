@@ -216,7 +216,7 @@ export type AiRunTerminalCompletion = {
   outcomeReason: AiRunOutcomeReason;
   failureCode?: AiRunFailureCode;
   validatorResult: AiRunValidatorResult;
-  /** Trusted runtime execution identifier; valid only for `mastra_openai_api` runs. */
+  /** Trusted provider/runtime execution identifier for the recorded live_v2 boundary. */
   runtimeRunId?: string;
   /**
    * Terminal provider truth captured by an app-owned adapter boundary. This is deliberately

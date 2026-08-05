@@ -9,6 +9,11 @@ import type {
   AiTurnIntent
 } from "../../ai/ai-dialog-contract.js";
 import type {
+  AiRunTerminalCompletion,
+  RunningAiRunRecord,
+  TerminalAiRunRecord
+} from "../../ai/repositories/ai-run-repository.js";
+import type {
   AiState,
   ChannelProvider,
   ConversationContentType,
@@ -172,6 +177,10 @@ export type PersistAiReplyWithSendGateInput = {
     summary: string;
     slotsSnapshot: Record<string, unknown>;
   };
+  recordedRun?: {
+    run: RunningAiRunRecord;
+    completion: AiRunTerminalCompletion;
+  };
 };
 
 export type SaveSiteWidgetAiMessageInput = Omit<
@@ -179,7 +188,10 @@ export type SaveSiteWidgetAiMessageInput = Omit<
   "channel" | "provider"
 >;
 
-export type SaveSiteWidgetAiMessageResult = SiteWidgetStoredAiReply;
+export type SaveSiteWidgetAiMessageResult = SiteWidgetStoredAiReply & {
+  internalMessageId?: string;
+  completedRun?: TerminalAiRunRecord;
+};
 
 export type SiteWidgetAiMessageLookupResult = SiteWidgetStoredAiReply & {
   requestFingerprint: string;

@@ -23,7 +23,10 @@ import { LIVE_V2_TONE_ASSET } from "./assets/tone.v1.js";
 export type LiveV2GeneratorInput = {
   turn: LiveV2TurnView;
   assets: {
-    prompt: typeof LIVE_V2_PROMPT_ASSET;
+    prompt: {
+      version: string;
+      instructions: readonly string[];
+    };
     tone: typeof LIVE_V2_TONE_ASSET;
     facts: LiveV2ModelFactsAsset;
   };

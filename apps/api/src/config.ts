@@ -12,9 +12,11 @@ export const DEPLOYMENT_TIERS = [
 ] as const;
 export type DeploymentTier = (typeof DEPLOYMENT_TIERS)[number];
 
-export const LIVE_V2_OPENAI_MODEL = "gpt-5.6-sol" as const;
+export const DIRECT_LIVE_V2_OPENAI_MODEL = "gpt-5.6-luna" as const;
+export const DIRECT_LIVE_V2_OPENAI_REASONING_EFFORT = "medium" as const;
+export const LIVE_V2_OPENAI_MODEL = DIRECT_LIVE_V2_OPENAI_MODEL;
 export const LIVE_V2_OPENAI_REASONING_EFFORT = "medium" as const;
-export const MASTRA_OPENAI_MODEL = LIVE_V2_OPENAI_MODEL;
+export const MASTRA_OPENAI_MODEL = "gpt-5.6-sol" as const;
 export const MASTRA_OPENAI_REASONING_EFFORT = LIVE_V2_OPENAI_REASONING_EFFORT;
 
 export type ApiConfig = {
@@ -102,6 +104,16 @@ export function loadConfig(env: NodeJS.ProcessEnv): ApiConfig {
     env.AI_TRACE_EXPORT_ENABLED
   );
   const mastra = loadMastraConfig(env, runtimeMode, deploymentTier, traceExportEnabled);
+  const widgetAiEnabled = env.AI_WIDGET_ENABLED === "true";
+
+  if (
+    widgetAiEnabled &&
+    runtimeMode === "direct_openai" &&
+    env.OPENAI_MODEL !== undefined &&
+    env.OPENAI_MODEL !== DIRECT_LIVE_V2_OPENAI_MODEL
+  ) {
+    throw new Error(`OPENAI_MODEL must be ${DIRECT_LIVE_V2_OPENAI_MODEL}`);
+  }
 
   return {
     host: env.HOST ?? "0.0.0.0",
@@ -112,11 +124,11 @@ export function loadConfig(env: NodeJS.ProcessEnv): ApiConfig {
       allowedOrigins: parsePublicIntakeAllowedOrigins(env.PUBLIC_INTAKE_ALLOWED_ORIGINS)
     },
     widgetAi: {
-      enabled: env.AI_WIDGET_ENABLED === "true",
+      enabled: widgetAiEnabled,
       runtimeMode,
       groundedMode: parseWidgetAiGroundedMode(env.AI_WIDGET_GROUNDED_MODE),
       openAiApiKey: env.OPENAI_API_KEY,
-      openAiModel: env.OPENAI_MODEL ?? "gpt-5.5",
+      openAiModel: env.OPENAI_MODEL ?? DIRECT_LIVE_V2_OPENAI_MODEL,
       verifierModel: env.OPENAI_VERIFIER_MODEL ?? env.OPENAI_MODEL ?? "gpt-5.5",
       generatorTimeoutMs: parseIntegerEnv(env.AI_WIDGET_GENERATOR_TIMEOUT_MS, {
         fallback: 10000,

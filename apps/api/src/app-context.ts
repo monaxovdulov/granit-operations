@@ -15,10 +15,16 @@ import {
   type MastraLiveV2AgentPort
 } from "./modules/ai/adapters/mastra-live-v2-decision-generator.js";
 import type { ObservedLiveV2DecisionGenerator } from "./modules/ai/ports/live-v2-runtime.js";
+import { LiveV2GenerationError } from "./modules/ai/ports/live-v2-runtime.js";
 import {
+  DIRECT_LIVE_V2_OPENAI_REASONING_EFFORT,
   MASTRA_OPENAI_MODEL,
   MASTRA_OPENAI_REASONING_EFFORT
 } from "./config.js";
+import {
+  MODEL_TURN_MODEL_PROFILE_VERSION,
+  MODEL_TURN_PROMPT_VERSION
+} from "./modules/ai/profiles/live-v2/model-turn-contract.js";
 import {
   parseLiveV2FactsSnapshot,
   type LiveV2FactsSnapshot
@@ -82,6 +88,11 @@ type DirectWidgetAiAssemblyOptions = {
   replyGenerator?: PublicWidgetAiReplyGenerator;
   runRepository?: AiRunRepository;
   jobWorker?: WidgetAiJobWorkerAssemblyOptions;
+  directLiveV2?: {
+    generator?: ObservedLiveV2DecisionGenerator;
+    modelName: string;
+    approvedFacts: LiveV2FactsSnapshot;
+  };
 };
 
 type MastraLocalFakeWidgetAiAssemblyOptions = {
@@ -285,6 +296,47 @@ function buildDirectWidgetAiTurnExecutor(
   runRepository: AiRunRepository,
   approvedAiAssets: ApprovedAiAssetManifest
 ) {
+  if (options.directLiveV2) {
+    if (!isRecordedSiteWidgetAiGateRepository(repository)) {
+      throw new Error("Direct live_v2 runtime requires an app-owned send gate repository");
+    }
+
+    const liveAssets = approvedAiAssets.liveV2;
+    const generator =
+      options.directLiveV2.generator ??
+      ({
+        async generateDecision() {
+          throw new LiveV2GenerationError(undefined, "auth_or_entitlement");
+        }
+      } satisfies ObservedLiveV2DecisionGenerator);
+    const turnService = new RecordedLiveV2TurnService({
+      repository: runRepository,
+      gateRepository: repository,
+      generator,
+      approvedFacts: parseLiveV2FactsSnapshot(options.directLiveV2.approvedFacts),
+      runtimeMode: "direct_openai",
+      turnContract: "model_turn_v1",
+      versions: {
+        policyVersion: liveAssets.policyVersion,
+        promptVersion: MODEL_TURN_PROMPT_VERSION,
+        toolVersion: liveAssets.toolVersion,
+        assetVersion: liveAssets.assetVersion,
+        toneVersion: liveAssets.toneVersion,
+        factsVersion: liveAssets.factsVersion,
+        disclosureVersion: liveAssets.disclosureVersion,
+        modelProfileVersion: MODEL_TURN_MODEL_PROFILE_VERSION,
+        runtimeVersion: `node.v${process.versions.node}`
+      },
+      model: {
+        modelProvider: options.directLiveV2.generator ? "openai" : "none",
+        requestedModelName: options.directLiveV2.modelName,
+        reasoningEffort: DIRECT_LIVE_V2_OPENAI_REASONING_EFFORT
+      }
+    });
+
+    return new RecordedPublicWidgetAiTurnExecutor(turnService, repository);
+  }
+
   if (options.provider && !options.replyGenerator) {
     return undefined;
   }

@@ -3,10 +3,12 @@ import {
   SITE_WIDGET_V2_CONTRACT_VERSION,
   type SiteWidgetMessageRequest
 } from "@granit/contracts";
+import { sha256Hex } from "@granit/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { buildApi } from "../src/app.js";
 import type { MastraLiveV2AgentPort } from "../src/modules/ai/adapters/mastra-live-v2-decision-generator.js";
+import type { ObservedLiveV2DecisionGenerator } from "../src/modules/ai/ports/live-v2-runtime.js";
 import {
   TEST_LIVE_V2_FACTS,
   answerCandidate,
@@ -25,6 +27,116 @@ afterEach(async () => {
 });
 
 describe("M2 app-owned live_v2 local/fake runtime", () => {
+  it("commits direct model-turn text/hash and state patches without invoking legacy", async () => {
+    const repository = new MemoryIntakeRepository();
+    const finalText = "Подберём подходящий вариант.";
+    const generateDecision = vi.fn<ObservedLiveV2DecisionGenerator["generateDecision"]>(
+      async () => ({
+        candidate: {
+          version: "granit_model_turn.v1",
+          message: { answerText: finalText, question: null },
+          statePatches: [
+            {
+              operation: "set_slot",
+              name: "material",
+              value: "чёрный гранит",
+              confidence: 0.96,
+              evidence: { quote: "чёрный гранит" }
+            },
+            {
+              operation: "upsert_requirement",
+              category: "decoration",
+              mode: "avoidance",
+              value: "золото",
+              confidence: 0.9,
+              evidence: { quote: "без золота" }
+            }
+          ],
+          recommendationIds: [],
+          handoffIntent: null
+        },
+        observation: {
+          observedModelProvider: "openai",
+          observedModelName: "gpt-5.6-luna",
+          runtimeRunId: "resp_direct_model_turn_001",
+          usage: { inputTokens: 80, outputTokens: 20, totalTokens: 100 }
+        }
+      })
+    );
+    const legacyGenerate = vi.fn();
+    const app = track(
+      buildApi({
+        repository,
+        widgetAi: {
+          enabled: true,
+          runtimeMode: "direct_openai",
+          replyGenerator: { generateReply: legacyGenerate },
+          directLiveV2: {
+            generator: { generateDecision },
+            modelName: "gpt-5.6-luna",
+            approvedFacts: TEST_LIVE_V2_FACTS
+          },
+          jobWorker: testJobWorkerOptions()
+        }
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/public/intake/site-widget/messages",
+      payload: widgetRequest(
+        "conv2-direct-model-turn-0001",
+        "Нужен памятник: чёрный гранит, без золота"
+      )
+    });
+    const history = await waitForTerminalHistory(app, response.json().public_session_id);
+
+    expect(history.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ sender_role: "ai_assistant", text: finalText })
+      ])
+    );
+    expect(generateDecision).toHaveBeenCalledTimes(1);
+    expect(generateDecision.mock.calls[0]?.[0].assets.prompt.version).toBe(
+      "granit_model_turn_prompt.v1"
+    );
+    expect(legacyGenerate).not.toHaveBeenCalled();
+    expect(repository.lastAiSaveInput).toMatchObject({
+      body: finalText,
+      slotUpdates: [
+        expect.objectContaining({ name: "material", value: "чёрный гранит" })
+      ],
+      requirementUpdates: [
+        expect.objectContaining({
+          category: "decoration",
+          mode: "avoidance",
+          value: "золото"
+        })
+      ],
+      metadata: {
+        turn_contract: "granit_model_turn.v1",
+        final_text_hash: sha256Hex(finalText),
+        applied_patch_count: 2
+      }
+    });
+    expect(repository.listAiRuns()[0]).toMatchObject({
+      status: "persisted",
+      runtimeMode: "direct_openai",
+      decisionProfile: "live_v2",
+      runtimeRunId: "resp_direct_model_turn_001",
+      model: {
+        modelProvider: "openai",
+        requestedModelName: "gpt-5.6-luna",
+        reasoningEffort: "medium"
+      },
+      versions: {
+        promptVersion: "granit_model_turn_prompt.v1",
+        modelProfileVersion: "granit_model_turn_openai_luna.v1"
+      },
+      outboundMessageId: expect.any(String)
+    });
+  });
+
   it("records honest fake truth, trusted runtime evidence and terminal replay", async () => {
     const repository = new MemoryIntakeRepository();
     const fetchSpy = vi.fn();
@@ -767,7 +879,10 @@ async function waitForMemoryMessageCount(
   throw new Error(`timed out waiting for ${expected} memory messages`);
 }
 
-function widgetRequest(idempotencyKey: string): SiteWidgetMessageRequest {
+function widgetRequest(
+  idempotencyKey: string,
+  messageText = "Помогите выбрать памятник"
+): SiteWidgetMessageRequest {
   return {
     schema_version: SITE_WIDGET_V2_CONTRACT_VERSION,
     event_type: SITE_WIDGET_MESSAGE_EVENT_TYPE,
@@ -778,7 +893,7 @@ function widgetRequest(idempotencyKey: string): SiteWidgetMessageRequest {
       page_url: "https://granit.example/catalog/widget",
       widget_instance_id: "m2-local-fake-test"
     },
-    message: { role: "visitor", text: "Помогите выбрать памятник" },
+    message: { role: "visitor", text: messageText },
     consent: { privacy_policy: true }
   };
 }
