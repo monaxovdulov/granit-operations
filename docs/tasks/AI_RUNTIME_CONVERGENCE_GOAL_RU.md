@@ -2,8 +2,11 @@
 
 Статус: `implementing`; Goal запущена 2026-08-04. Обязательный
 current-main repair PR2 получил свежий independent `accept` и опубликован
-в `origin/main` commit `ca1cdb798829674e40b4eab7e4e948476e71d61c`. Активный
-технический срез — CONV-1.
+в `origin/main` commit `ca1cdb798829674e40b4eab7e4e948476e71d61c`. CONV-1
+получил свежий independent `accept` и опубликован в `origin/main` commit
+`aff347bb00d07f8ee40f86203bd27a6a99b5b40f`. Активный срез — CONV-2,
+остановленный до рабочего кода на обязательном owner stop-gate точного output
+contract.
 
 Goal ID: `AI-RUNTIME-CONVERGENCE`.
 

@@ -1,6 +1,6 @@
 # Карточка среза AI Runtime Convergence: CONV-1 — direct live-v2 adapter parity
 
-Статус: `accepted`; ожидает отдельный commit и публикацию.
+Статус: `accepted` и опубликован.
 
 Goal: `AI-RUNTIME-CONVERGENCE`.
 
@@ -9,7 +9,7 @@ Goal: `AI-RUNTIME-CONVERGENCE`.
 Ветка / base SHA / head SHA:
 `codex/ai-refactor-agent-governance-design` /
 `d91558c5ef5047a312ea0dffb4648aa2dac42253` /
-тот же SHA с uncommitted CONV-1 diff.
+`aff347bb00d07f8ee40f86203bd27a6a99b5b40f`.
 
 Фактическая модель Исполнителя: текущая Codex-модель, high reasoning.
 
@@ -189,6 +189,14 @@ review совпал:
 `d2adae764401ef765f09b703192f6e0540f3fa520f0480b4693c465b024229d7`.
 Staged diff был пуст, пользовательский `output/share/*` не менялся.
 
+Публикация: после `git fetch origin main` remote base остался
+`d91558c5ef5047a312ea0dffb4648aa2dac42253`. Accepted-срез зафиксирован commit
+`aff347bb00d07f8ee40f86203bd27a6a99b5b40f` (`AI convergence CONV-1: add
+direct live-v2 adapter`) и опубликован обычным fast-forward push в
+`origin/main`; итоговый remote `main` совпал с commit. Commit stat:
+`14 files changed, 1172 insertions(+), 239 deletions(-)`. Force-push, deploy,
+external DB и model call не выполнялись.
+
 ## 9. Repair
 
 Подтверждённое замечание первого Reviewer:
@@ -213,8 +221,8 @@ CONV-2, где действует отдельный output-contract stop-gate.
 ```text
 Goal: AI-RUNTIME-CONVERGENCE
 Текущий срез: CONV-1
-Статус: accepted; pending isolated commit/push
-Base/head SHA: d91558c5ef5047a312ea0dffb4648aa2dac42253 / тот же SHA с uncommitted CONV-1 diff
+Статус: accepted and published
+Base/head SHA: d91558c5ef5047a312ea0dffb4648aa2dac42253 / aff347bb00d07f8ee40f86203bd27a6a99b5b40f
 Результат: direct live-v2 adapter parity без runtime cutover
 Изменённые области: provider-neutral port, Mastra comparator, direct Responses adapter/client, provider schema, tests/docs/state
 Evidence: targeted 60/60; applicable matrix 161/161; PostgreSQL 39/39;
@@ -222,5 +230,5 @@ Evidence: targeted 60/60; applicable matrix 161/161; PostgreSQL 39/39;
 Непроверено: external model/staging/production/deploy/load
 Rollback: удалить CONV-1 diff; comparator/default runtime не меняются
 Verdict: second fresh independent Reviewer accept; no blocker/high/medium findings
-Следующий срез или stop-gate: после публикации CONV-1 — CONV-2 output-contract owner stop-gate
+Следующий срез или stop-gate: CONV-2 output-contract owner stop-gate
 ```
