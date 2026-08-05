@@ -10,6 +10,7 @@ export type OpenAiStructuredResponseRequest = {
   schema?: Record<string, unknown>;
   metadata: Record<string, string>;
   maxOutputTokens: number;
+  reasoningEffort?: "low" | "medium" | "high";
   signal?: AbortSignal;
 };
 
@@ -19,6 +20,13 @@ export type OpenAiStructuredResponse = {
   outputText: string;
   usage?: WidgetAiUsage;
 };
+
+export class OpenAiStructuredResponseError extends Error {
+  constructor(readonly status: number) {
+    super("OpenAI Responses request failed");
+    this.name = "OpenAiStructuredResponseError";
+  }
+}
 
 export async function requestOpenAiStructuredResponse(
   request: OpenAiStructuredResponseRequest
@@ -47,7 +55,7 @@ export async function requestOpenAiStructuredResponse(
         input: request.input,
         max_output_tokens: request.maxOutputTokens,
         reasoning: {
-          effort: "low"
+          effort: request.reasoningEffort ?? "low"
         },
         text: request.schema && request.formatName
           ? {
@@ -68,14 +76,17 @@ export async function requestOpenAiStructuredResponse(
     });
 
     if (!response.ok) {
-      throw new Error(`openai_responses_api_${response.status}`);
+      throw new OpenAiStructuredResponseError(response.status);
     }
 
     const body = (await response.json()) as OpenAiResponseBody;
+    if (typeof body.model !== "string") {
+      throw new Error("OpenAI Responses payload is missing model identity");
+    }
 
     return {
       id: typeof body.id === "string" ? body.id : undefined,
-      model: typeof body.model === "string" ? body.model : request.model,
+      model: body.model,
       outputText: extractOutputText(body),
       usage: readUsage(body.usage)
     };

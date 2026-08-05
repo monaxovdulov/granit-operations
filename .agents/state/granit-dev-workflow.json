@@ -1,27 +1,27 @@
 {
   "schema_version": 1,
   "repo": "granit-operations",
-  "updated_at": "2026-08-04T23:17:37Z",
-  "git_head": "ca1cdb798829674e40b4eab7e4e948476e71d61c",
+  "updated_at": "2026-08-05T00:13:08Z",
+  "git_head": "d91558c5ef5047a312ea0dffb4648aa2dac42253",
   "mode": "implementation",
-  "state": "ai_runtime_convergence_pr2_repair_published",
+  "state": "ai_runtime_convergence_conv1_accepted",
   "dirty_worktree": {
     "status": "dirty",
-    "summary": "PR2 pending and expired-processing backlog repair has fresh independent accept and is published at ca1cdb798829674e40b4eab7e4e948476e71d61c; pre-existing untracked output/ is intentionally untouched"
+    "summary": "CONV-1 direct live-v2 adapter parity is independently accepted on d91558c5ef5047a312ea0dffb4648aa2dac42253 and awaits isolated commit/push; pre-existing untracked output/ is intentionally untouched"
   },
   "context": {
-    "last_scan_at": "2026-08-04T23:17:37Z",
-    "fresh_until": "2026-08-05T23:17:37Z",
+    "last_scan_at": "2026-08-04T23:37:25Z",
+    "fresh_until": "2026-08-05T23:37:25Z",
     "source_hashes": {}
   },
   "rules": {
     "status": "current",
-    "last_refresh_at": "2026-08-04T23:17:37Z"
+    "last_refresh_at": "2026-08-04T23:37:25Z"
   },
   "task": {
-    "type": "ai-runtime-convergence-pr2-repair",
-    "summary": "PR2 repair terminalizes migrated non-latest pending/retrying jobs and expired processing jobs after worker loss; two real PostgreSQL regressions cover polling recovery.",
-    "source": "docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md and docs/tasks/AI_REF_PR2_LATEST_WINS_FRESH_TURN_RU.md"
+    "type": "ai-runtime-convergence-conv1",
+    "summary": "Add a direct OpenAI Responses adapter with parity to the existing bounded live-v2 Mastra boundary, without runtime cutover.",
+    "source": "docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md and docs/tasks/AI_RUNTIME_CONVERGENCE_CONV_1_DIRECT_LIVE_V2_ADAPTER_RU.md"
   },
   "checks": {
     "pr2_aggregate": {
@@ -43,7 +43,34 @@
       "session_id": "019fcf04-8f4c-7663-a4f9-91376542cf42",
       "status": "accepted",
       "reason": "fresh codex exec found no blocking findings; nine-suite matrix 120/120, typecheck/build and exact diff fingerprint passed"
+    },
+    "conv1_targeted": {
+      "command": "six-suite direct/Mastra/live-v2 parity matrix",
+      "status": "passed",
+      "reason": "60/60 including 9/9 direct adapter request, parity, failure, timeout, cancellation and missing observed model identity tests"
+    },
+    "conv1_applicable_matrix": {
+      "command": "thirteen-suite sequential vitest matrix",
+      "status": "passed",
+      "reason": "161/161 after identity repair, including disposable PostgreSQL runtime 24/24, migrations 5/5 and P2 10/10"
+    },
+    "conv1_build": {
+      "command": "npm run build",
+      "status": "passed",
+      "reason": "bounded API source and 56 tests, manager typecheck and Vite production build passed"
+    },
+    "conv1_modular_boundaries": {
+      "command": "vitest modular-boundaries",
+      "status": "baseline",
+      "reason": "12/14; same two pre-existing stale assertions for the existing live-v2/Mastra layer and old sanitizer constant name"
+    },
+    "conv1_independent_review": {
+      "session_id": "019fcf37-2b94-7250-af80-ae5a8a13b33e",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "high",
+      "status": "accepted",
+      "reason": "second fresh codex exec found no blocker/high/medium findings; independently reproduced the identity repair and passed 60/60 focused, 161/161 full, PostgreSQL 39/39, config 35/35, typecheck/build and exact diff fingerprint"
     }
   },
-  "next_action": "Create the CONV-1 compact card from current-main baseline before any working-code change."
+  "next_action": "Create and normally push the Goal-authorized isolated CONV-1 commit, then stop at the CONV-2 output-contract owner gate."
 }

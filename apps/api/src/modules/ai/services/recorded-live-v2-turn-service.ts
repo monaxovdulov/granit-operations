@@ -6,11 +6,11 @@ import {
   type AiTurnInput
 } from "../ai-turn.js";
 import {
-  MastraLiveV2GenerationError,
+  LiveV2GenerationError,
   type RejectedLiveV2RuntimeObservation,
   type ObservedLiveV2DecisionGenerator,
   type TrustedLiveV2RuntimeObservation
-} from "../adapters/mastra-live-v2-decision-generator.js";
+} from "../ports/live-v2-runtime.js";
 import type { LiveV2FactsSnapshot } from "../profiles/live-v2/live-v2-assets.js";
 import {
   executeLiveV2Turn,
@@ -184,7 +184,7 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
               return generation.candidate;
             } catch (error) {
               if (
-                error instanceof MastraLiveV2GenerationError &&
+                error instanceof LiveV2GenerationError &&
                 error.observation
               ) {
                 observation = toTrustedObservation(error.observation);

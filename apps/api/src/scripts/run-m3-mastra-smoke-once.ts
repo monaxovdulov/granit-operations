@@ -17,7 +17,7 @@ import { buildApi } from "../app.js";
 import { loadConfig } from "../config.js";
 import { PostgresAiRunRepository } from "../modules/ai/repositories/postgres-ai-run-repository.js";
 import { isRecordedSiteWidgetAiReplyRepository } from "../modules/ai/repositories/recorded-site-widget-ai-reply-repository.js";
-import type { LiveV2RuntimeFailureCategory } from "../modules/ai/adapters/mastra-live-v2-decision-generator.js";
+import type { LiveV2RuntimeFailureCategory } from "../modules/ai/ports/live-v2-runtime.js";
 import { PostgresIntakeRepository } from "../modules/conversations/repositories/postgres-intake-repository.js";
 import { buildConfiguredWidgetAiAssembly } from "../widget-ai-runtime-assembly.js";
 import {

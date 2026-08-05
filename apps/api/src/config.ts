@@ -12,8 +12,10 @@ export const DEPLOYMENT_TIERS = [
 ] as const;
 export type DeploymentTier = (typeof DEPLOYMENT_TIERS)[number];
 
-export const MASTRA_OPENAI_MODEL = "gpt-5.6-sol" as const;
-export const MASTRA_OPENAI_REASONING_EFFORT = "medium" as const;
+export const LIVE_V2_OPENAI_MODEL = "gpt-5.6-sol" as const;
+export const LIVE_V2_OPENAI_REASONING_EFFORT = "medium" as const;
+export const MASTRA_OPENAI_MODEL = LIVE_V2_OPENAI_MODEL;
+export const MASTRA_OPENAI_REASONING_EFFORT = LIVE_V2_OPENAI_REASONING_EFFORT;
 
 export type ApiConfig = {
   host: string;

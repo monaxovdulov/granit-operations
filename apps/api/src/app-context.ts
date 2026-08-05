@@ -12,9 +12,9 @@ import {
 } from "./modules/ai/repositories/recorded-site-widget-ai-reply-repository.js";
 import {
   MastraLiveV2DecisionGenerator,
-  type MastraLiveV2AgentPort,
-  type ObservedLiveV2DecisionGenerator
+  type MastraLiveV2AgentPort
 } from "./modules/ai/adapters/mastra-live-v2-decision-generator.js";
+import type { ObservedLiveV2DecisionGenerator } from "./modules/ai/ports/live-v2-runtime.js";
 import {
   MASTRA_OPENAI_MODEL,
   MASTRA_OPENAI_REASONING_EFFORT

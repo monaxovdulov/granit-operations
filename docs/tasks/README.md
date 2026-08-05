@@ -10,6 +10,10 @@ docs/tasks/TEMPLATE_RU.md
 
 Current task records:
 
+- `AI_RUNTIME_CONVERGENCE_CONV_1_DIRECT_LIVE_V2_ADAPTER_RU.md` - independently
+  `accepted` card: direct OpenAI Responses parity adapter for the existing
+  provider-neutral live-v2 pipeline, without runtime cutover or model call;
+  isolated commit/publication is pending.
 - `AI_RUNTIME_CONVERGENCE_GOAL_RU.md` - active multi-slice Goal for direct
   live-v2 convergence, Mastra/legacy removal, active-doc reduction and
   anti-clutter guardrails; prerequisite PR2 backlog repair is independently

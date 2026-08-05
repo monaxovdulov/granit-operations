@@ -9,62 +9,36 @@ import {
 } from "../../../config.js";
 import type { LiveV2GeneratorInput } from "../profiles/live-v2/live-v2-orchestrator.js";
 import { liveV2ProviderCandidateSchema } from "../profiles/live-v2/live-v2-validator.js";
+import {
+  LIVE_V2_MAX_OUTPUT_TOKENS,
+  LIVE_V2_PROVIDER_TIMEOUT_MS,
+  LiveV2GenerationError,
+  buildLiveV2ModelRequest,
+  classifyLiveV2RuntimeFailure,
+  isSafeLiveV2RuntimeRunId,
+  reportLiveV2SanitizedFailure,
+  toLiveV2RuntimeUsage,
+  toRejectedLiveV2RuntimeObservation,
+  toSafeLiveV2RuntimeRunId,
+  type LiveV2RuntimeFailureCategory,
+  type LiveV2RuntimeGeneration,
+  type LiveV2RuntimeInvocation,
+  type LiveV2RuntimeProvider,
+  type ObservedLiveV2DecisionGenerator,
+  type RejectedLiveV2RuntimeObservation
+} from "../ports/live-v2-runtime.js";
 import { isSafeWidgetAiModelName } from "../widget-ai-model-name.js";
 
-export const MASTRA_LIVE_V2_MAX_INPUT_CHARACTERS = 64_000;
-export const MASTRA_LIVE_V2_MAX_OUTPUT_TOKENS = 4_000;
-export const MASTRA_LIVE_V2_PROVIDER_TIMEOUT_MS = 15_000;
+export const MASTRA_LIVE_V2_MAX_OUTPUT_TOKENS = LIVE_V2_MAX_OUTPUT_TOKENS;
+export const MASTRA_LIVE_V2_PROVIDER_TIMEOUT_MS = LIVE_V2_PROVIDER_TIMEOUT_MS;
 
-export type LiveV2RuntimeProvider = "openai" | "fake";
-
-export type LiveV2RuntimeFailureCategory =
-  | "auth_or_entitlement"
-  | "identity_mismatch"
-  | "invalid_request"
-  | "provider_rate_limited"
-  | "provider_unavailable"
-  | "provider_sdk_error"
-  | "runtime_error"
-  | "timeout_or_abort";
-
-export type LiveV2RuntimeUsage = {
-  inputTokens?: number;
-  outputTokens?: number;
-  totalTokens?: number;
-  reasoningTokens?: number;
-  cachedInputTokens?: number;
-};
-
-export type TrustedLiveV2RuntimeObservation = {
-  observedModelProvider: LiveV2RuntimeProvider;
-  observedModelName: string;
-  runtimeRunId?: string;
-  usage?: LiveV2RuntimeUsage;
-};
-
-export type RejectedLiveV2RuntimeObservation = {
-  observedModelProvider: LiveV2RuntimeProvider | "none";
-  observedModelName?: string;
-  runtimeRunId?: string;
-  usage?: LiveV2RuntimeUsage;
-};
-
-export type LiveV2RuntimeGeneration = {
-  candidate: unknown;
-  observation: TrustedLiveV2RuntimeObservation;
-};
-
-export type LiveV2RuntimeInvocation = {
-  appTraceId: string;
-  signal?: AbortSignal;
-};
-
-export interface ObservedLiveV2DecisionGenerator {
-  generateDecision(
-    input: LiveV2GeneratorInput,
-    invocation: LiveV2RuntimeInvocation
-  ): Promise<LiveV2RuntimeGeneration>;
-}
+export {
+  classifyLiveV2RuntimeFailure,
+  type LiveV2RuntimeFailureCategory,
+  type LiveV2RuntimeProvider,
+  type ObservedLiveV2DecisionGenerator,
+  type RejectedLiveV2RuntimeObservation
+} from "../ports/live-v2-runtime.js";
 
 export type RealMastraBoundaryConfig = {
   deploymentTier: DeploymentTier;
@@ -115,12 +89,12 @@ export interface MastraLiveV2AgentPort {
   ): Promise<MastraLiveV2AgentResult>;
 }
 
-export class MastraLiveV2GenerationError extends Error {
+export class MastraLiveV2GenerationError extends LiveV2GenerationError {
   constructor(
     readonly observation?: RejectedLiveV2RuntimeObservation,
     readonly failureCategory?: LiveV2RuntimeFailureCategory
   ) {
-    super("Mastra live_v2 generation failed");
+    super(observation, failureCategory);
     this.name = "MastraLiveV2GenerationError";
   }
 }
@@ -137,13 +111,13 @@ export class MastraLiveV2DecisionGenerator implements ObservedLiveV2DecisionGene
     invocation: LiveV2RuntimeInvocation
   ): Promise<LiveV2RuntimeGeneration> {
     try {
-      const content = serializeModelInput(input);
+      const modelRequest = buildLiveV2ModelRequest(input);
       const result = await this.agent.generate(
-        [{ role: "user", content }],
-        buildGenerateOptions(input, invocation)
+        [{ role: "user", content: modelRequest.serializedInput }],
+        buildGenerateOptions(modelRequest.instructions, invocation)
       );
 
-      const rejectedObservation = toRejectedObservation(result);
+      const rejectedObservation = toRejectedLiveV2RuntimeObservation(result);
 
       if (
         result.modelProvider !== this.expectedProvider ||
@@ -153,8 +127,8 @@ export class MastraLiveV2DecisionGenerator implements ObservedLiveV2DecisionGene
         throw new MastraLiveV2GenerationError(rejectedObservation, "identity_mismatch");
       }
 
-      const runtimeRunId = toSafeRuntimeRunId(result.runtimeRunId);
-      const usage = toTrustedUsage(result.usage);
+      const runtimeRunId = toSafeLiveV2RuntimeRunId(result.runtimeRunId);
+      const usage = toLiveV2RuntimeUsage(result.usage);
 
       return {
         candidate: result.candidate,
@@ -169,39 +143,16 @@ export class MastraLiveV2DecisionGenerator implements ObservedLiveV2DecisionGene
       if (error instanceof MastraLiveV2GenerationError) {
         throw error;
       }
+      if (error instanceof LiveV2GenerationError) {
+        throw new MastraLiveV2GenerationError(
+          error.observation,
+          error.failureCategory
+        );
+      }
 
       throw new MastraLiveV2GenerationError();
     }
   }
-}
-
-function toRejectedObservation(
-  result: MastraLiveV2AgentResult
-): RejectedLiveV2RuntimeObservation {
-  const provider =
-    result.modelProvider === "openai" || result.modelProvider === "fake"
-      ? result.modelProvider
-      : "none";
-  const modelName = isSafeWidgetAiModelName(result.providerModelName)
-    ? result.providerModelName
-    : undefined;
-  const runtimeRunId = toSafeRuntimeRunId(result.runtimeRunId);
-  const usage = toTrustedUsage(result.usage);
-
-  if (provider === "none" || !modelName) {
-    return {
-      observedModelProvider: "none",
-      ...(runtimeRunId ? { runtimeRunId } : {}),
-      ...(usage ? { usage } : {})
-    };
-  }
-
-  return {
-    observedModelProvider: provider,
-    observedModelName: modelName,
-    ...(runtimeRunId ? { runtimeRunId } : {}),
-    ...(usage ? { usage } : {})
-  };
 }
 
 export async function createMastraOpenAiLiveV2DecisionGenerator(input: {
@@ -249,13 +200,13 @@ export async function createMastraOpenAiLiveV2DecisionGenerator(input: {
         });
       } catch (error) {
         const category = classifyLiveV2RuntimeFailure(error);
-        reportSanitizedFailure(input.onSanitizedFailure, category);
+        reportLiveV2SanitizedFailure(input.onSanitizedFailure, category);
         throw new MastraLiveV2GenerationError(undefined, category);
       }
 
       if (result.error) {
         const category = classifyLiveV2RuntimeFailure(result.error);
-        reportSanitizedFailure(input.onSanitizedFailure, category);
+        reportLiveV2SanitizedFailure(input.onSanitizedFailure, category);
         throw new MastraLiveV2GenerationError(undefined, category);
       }
 
@@ -280,79 +231,11 @@ export function canonicalizePinnedMastraOpenAiProvider(
     : undefined;
 }
 
-export function classifyLiveV2RuntimeFailure(
-  error: unknown
-): LiveV2RuntimeFailureCategory {
-  const status = findHttpStatus(error);
-
-  if (status === 400 || status === 422) return "invalid_request";
-  if (status === 401 || status === 403 || status === 404) {
-    return "auth_or_entitlement";
-  }
-  if (status === 408) return "timeout_or_abort";
-  if (status === 429) return "provider_rate_limited";
-  if (status !== undefined && status >= 500 && status <= 599) {
-    return "provider_unavailable";
-  }
-
-  const name = findErrorName(error);
-  if (name === "AbortError" || name === "TimeoutError") return "timeout_or_abort";
-  if (name === "APICallError") return "provider_sdk_error";
-
-  return "runtime_error";
-}
-
-function reportSanitizedFailure(
-  callback: ((category: LiveV2RuntimeFailureCategory) => void) | undefined,
-  category: LiveV2RuntimeFailureCategory
-): void {
-  try {
-    callback?.(category);
-  } catch {
-    // Diagnostic reporting cannot change the fail-closed runtime outcome.
-  }
-}
-
-function findHttpStatus(value: unknown, depth = 0): number | undefined {
-  if (!isRecord(value) || depth > 4) return undefined;
-
-  for (const key of ["status", "statusCode"]) {
-    const candidate = value[key];
-    if (
-      typeof candidate === "number" &&
-      Number.isInteger(candidate) &&
-      candidate >= 100 &&
-      candidate <= 599
-    ) {
-      return candidate;
-    }
-  }
-
-  for (const key of ["cause", "details", "error", "originalError"]) {
-    const nested = findHttpStatus(value[key], depth + 1);
-    if (nested !== undefined) return nested;
-  }
-
-  return undefined;
-}
-
-function findErrorName(value: unknown, depth = 0): string | undefined {
-  if (!isRecord(value) || depth > 4) return undefined;
-  if (typeof value.name === "string") return value.name;
-
-  for (const key of ["cause", "details", "error", "originalError"]) {
-    const nested = findErrorName(value[key], depth + 1);
-    if (nested) return nested;
-  }
-
-  return undefined;
-}
-
 function buildGenerateOptions(
-  input: LiveV2GeneratorInput,
+  instructions: string,
   invocation: LiveV2RuntimeInvocation
 ): MastraLiveV2GenerateOptions {
-  if (!isSafeRuntimeRunId(invocation.appTraceId)) {
+  if (!isSafeLiveV2RuntimeRunId(invocation.appTraceId)) {
     throw new MastraLiveV2GenerationError();
   }
 
@@ -364,7 +247,7 @@ function buildGenerateOptions(
           AbortSignal.timeout(MASTRA_LIVE_V2_PROVIDER_TIMEOUT_MS)
         ])
       : AbortSignal.timeout(MASTRA_LIVE_V2_PROVIDER_TIMEOUT_MS),
-    instructions: input.assets.prompt.instructions.join("\n"),
+    instructions,
     maxSteps: 1,
     maxProcessorRetries: 0,
     modelSettings: {
@@ -382,21 +265,6 @@ function buildGenerateOptions(
       schema: liveV2ProviderCandidateSchema
     }
   };
-}
-
-function serializeModelInput(input: LiveV2GeneratorInput): string {
-  const content = JSON.stringify({
-    decisionProfile: "live_v2",
-    turn: input.turn,
-    tone: input.assets.tone,
-    facts: input.assets.facts
-  });
-
-  if (content.length > MASTRA_LIVE_V2_MAX_INPUT_CHARACTERS) {
-    throw new MastraLiveV2GenerationError();
-  }
-
-  return content;
 }
 
 function assertRealMastraBoundary(
@@ -425,41 +293,4 @@ function assertRealMastraBoundary(
   ) {
     throw new Error("Mastra provider boundary is not safely configured");
   }
-}
-
-function toSafeRuntimeRunId(value: string | undefined): string | undefined {
-  return value && isSafeRuntimeRunId(value) ? value : undefined;
-}
-
-function isSafeRuntimeRunId(value: string): boolean {
-  return /^[A-Za-z0-9._:-]{1,120}$/.test(value);
-}
-
-function toTrustedUsage(value: unknown): LiveV2RuntimeUsage | undefined {
-  if (!isRecord(value)) {
-    return undefined;
-  }
-
-  const usage = {
-    inputTokens: toTokenCount(value.inputTokens),
-    outputTokens: toTokenCount(value.outputTokens),
-    totalTokens: toTokenCount(value.totalTokens),
-    reasoningTokens: toTokenCount(value.reasoningTokens),
-    cachedInputTokens: toTokenCount(value.cachedInputTokens)
-  };
-  const presentUsage = Object.fromEntries(
-    Object.entries(usage).filter((entry): entry is [string, number] => entry[1] !== undefined)
-  ) as LiveV2RuntimeUsage;
-
-  return Object.keys(presentUsage).length > 0 ? presentUsage : undefined;
-}
-
-function toTokenCount(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
-    ? value
-    : undefined;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

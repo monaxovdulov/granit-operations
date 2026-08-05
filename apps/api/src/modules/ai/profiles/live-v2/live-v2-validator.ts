@@ -113,6 +113,104 @@ export const liveV2ProviderCandidateSchema = z
   })
   .strict();
 
+export const LIVE_V2_PROVIDER_CANDIDATE_JSON_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "schemaVersion",
+    "decisionProfile",
+    "signals",
+    "evidence",
+    "action",
+    "replyDraft",
+    "reason",
+    "missingSlots"
+  ],
+  properties: {
+    schemaVersion: {
+      type: "string",
+      const: LIVE_V2_CANDIDATE_VERSION
+    },
+    decisionProfile: {
+      type: "string",
+      const: LIVE_V2_DECISION_PROFILE
+    },
+    signals: {
+      type: "object",
+      additionalProperties: false,
+      required: ["managerRequest", "mixedIntent"],
+      properties: {
+        managerRequest: {
+          type: "string",
+          enum: ["absent", "negated", "explicit"]
+        },
+        mixedIntent: { type: "boolean" }
+      }
+    },
+    evidence: {
+      type: "object",
+      additionalProperties: false,
+      required: ["basis", "usedFactIds"],
+      properties: {
+        basis: {
+          type: "array",
+          minItems: 1,
+          maxItems: 4,
+          items: {
+            type: "string",
+            enum: ["current_message", "recent_context", "known_slots", "approved_facts"]
+          }
+        },
+        usedFactIds: {
+          type: "array",
+          maxItems: 20,
+          items: {
+            type: "string",
+            pattern: "^P1Q-(?:TYPE|MAT|DECOR|PROC)-[0-9]{3}$"
+          }
+        }
+      }
+    },
+    action: {
+      type: "string",
+      enum: ["answer", "ask_clarifying_question", "handoff_to_manager", "no_reply"]
+    },
+    replyDraft: {
+      anyOf: [
+        { type: "string", minLength: 1, maxLength: 900 },
+        { type: "null" }
+      ]
+    },
+    reason: {
+      type: "string",
+      enum: [
+        "answer_ready",
+        "missing_required_slot",
+        "explicit_manager_request",
+        "manager_required",
+        "no_safe_answer",
+        "missing_approved_fact"
+      ]
+    },
+    missingSlots: {
+      type: "array",
+      maxItems: 1,
+      items: {
+        type: "string",
+        enum: [
+          "city",
+          "preferred_contact",
+          "contact_method",
+          "memorial_type",
+          "material",
+          "decoration",
+          "installation_site"
+        ]
+      }
+    }
+  }
+} as const satisfies Record<string, unknown>;
+
 /**
  * P1Q validates a provider-neutral candidate's shape and deterministic safety invariants.
  * It intentionally does not claim to infer the visitor's intent from prose or prove semantic

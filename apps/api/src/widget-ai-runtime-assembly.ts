@@ -2,10 +2,12 @@ import type { ApiConfig } from "./config.js";
 import type { WidgetAiAssemblyOptions } from "./app-context.js";
 import {
   createMastraOpenAiLiveV2DecisionGenerator,
-  type LiveV2RuntimeFailureCategory,
-  type ObservedLiveV2DecisionGenerator,
   type RealMastraBoundaryConfig
 } from "./modules/ai/adapters/mastra-live-v2-decision-generator.js";
+import type {
+  LiveV2RuntimeFailureCategory,
+  ObservedLiveV2DecisionGenerator
+} from "./modules/ai/ports/live-v2-runtime.js";
 import { OpenAiWidgetAssistantProvider } from "./modules/ai/adapters/openai-widget-assistant-provider.js";
 import { OpenAiWidgetSemanticVerifier } from "./modules/ai/adapters/openai-widget-semantic-verifier.js";
 import {
