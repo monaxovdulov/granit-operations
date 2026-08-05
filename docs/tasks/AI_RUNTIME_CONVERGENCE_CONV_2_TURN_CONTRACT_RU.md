@@ -72,8 +72,9 @@ runtime model identifier интерфейсом не раскрыт. Reviewer н
 
 Base SHA: `b678a37bfa7bbba66c9b416aa0c44743b9b51495`.
 
-Технический head до commit: тот же Git SHA при проверенном незакоммиченном diff;
-итоговый commit SHA и remote `main` фиксируются после публикации.
+Итоговый commit и remote `main`:
+`4d567d8acfef3718d92358c3980430539aea367d`; ordinary fast-forward push
+`b678a37..4d567d8`, без force-push, deploy и внешней runtime-активации.
 
 Прямое влияние: direct production assembly теперь использует
 `granit_model_turn.v1`, Luna/medium, deterministic validator/composer и общую
@@ -98,7 +99,7 @@ cancellation, latest-wins и manager takeover.
   direct assembly через `RecordedLiveV2TurnService`, общий recorded executor и
   две repository implementations (PostgreSQL и тестовая memory).
 
-Состав стабильного diff: `34 files changed, 2437 insertions(+), 200 deletions(-)`.
+Состав commit diff: `34 files changed, 2435 insertions(+), 200 deletions(-)`.
 
 Полный список затронутых файлов:
 
@@ -148,4 +149,4 @@ Mastra остаются только явными comparator paths, implicit fal
 Итоговый independent verdict: `accept`. Повторный проход стабильного fingerprint
 не нашёл блокирующих дефектов по callers, failure paths, concurrency/replay,
 migration/schema, privacy/sanitization, send gate, takeover и false-green tests.
-Следующий срез — `CONV-3` после отдельного commit/push и фиксации remote SHA.
+Следующий срез — `CONV-3`; commit/push и remote SHA зафиксированы.

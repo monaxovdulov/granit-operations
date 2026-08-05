@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
   "repo": "granit-operations",
-  "updated_at": "2026-08-05T05:25:05Z",
-  "git_head": "b678a37bfa7bbba66c9b416aa0c44743b9b51495",
-  "mode": "independent_review",
-  "state": "ai_runtime_convergence_conv2_accepted_pending_publication",
+  "updated_at": "2026-08-05T05:30:17Z",
+  "git_head": "4d567d8acfef3718d92358c3980430539aea367d",
+  "mode": "planning",
+  "state": "ai_runtime_convergence_conv3_planned",
   "dirty_worktree": {
-    "status": "dirty",
-    "summary": "accepted CONV-2 code, tests, migration and evidence are pending a separate commit/push; pre-existing untracked output/ remains intentionally untouched"
+    "status": "clean_tracked",
+    "summary": "accepted CONV-2 is published at 4d567d8; only pre-existing untracked output/ remains intentionally untouched"
   },
   "context": {
     "last_scan_at": "2026-08-04T23:37:25Z",
@@ -120,7 +120,13 @@
       "model": "GPT-5 (exact runtime identifier unavailable)",
       "status": "accepted",
       "reason": "repeated fresh non-author review of the stable fingerprint found no blocker across callers, failure paths, concurrency/replay, schema/migration, privacy/sanitization, send gate, takeover and false-green tests"
+    },
+    "conv2_publication": {
+      "commit": "4d567d8acfef3718d92358c3980430539aea367d",
+      "remote_main": "4d567d8acfef3718d92358c3980430539aea367d",
+      "status": "published",
+      "reason": "ordinary fast-forward push from the reviewed b678a37 base; force-push, deploy and external runtime activation were not used"
     }
   },
-  "next_action": "Publish accepted CONV-2 by ordinary commit/push, record remote SHA, then begin CONV-3 without deploy or paid provider calls."
+  "next_action": "Create the compact CONV-3 card and audit Mastra/legacy production callers before any code removal."
 }

@@ -5,8 +5,9 @@ current-main repair PR2 получил свежий independent `accept` и оп
 в `origin/main` commit `ca1cdb798829674e40b4eab7e4e948476e71d61c`. CONV-1
 получил свежий independent `accept` и опубликован в `origin/main` commit
 `aff347bb00d07f8ee40f86203bd27a6a99b5b40f`. CONV-2 получил свежий
-independent `accept`; публикация accepted diff выполняется по протоколу раздела
-8, после чего активным станет CONV-3.
+independent `accept` и опубликован в `origin/main` commit
+`4d567d8acfef3718d92358c3980430539aea367d`. Активный срез — запланированный
+CONV-3; до рабочего кода требуется его компактная карточка и baseline callers.
 
 Goal ID: `AI-RUNTIME-CONVERGENCE`.
 
