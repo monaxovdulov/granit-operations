@@ -1,254 +1,219 @@
-# granit-operations
+# Granit Operations
 
-Статус: рабочий `main` для backend operations и staging-кандидат website widget AI. Это не production approval.
+`granit-operations` - серверная часть системы для обработки обращений клиентов проекта «Гранит».
 
-Этот README — входная точка для следующего агента. Если задача звучит как “выкатить AI на staging”, “включить AI-агента в виджете”, “подключить каталог/RAG для ответов”, сначала читать этот файл, затем идти по индексу ниже.
+Система принимает заявки с сайта и Telegram. Она хранит данные в PostgreSQL и показывает их в защищённой панели менеджера.
 
-## 1. Что это за репозиторий
+ИИ может отвечать в виджете сайта по сведениям из проверенного каталога.
 
-`granit-operations` владеет операционной частью бизнеса:
+Статус: активная разработка. Код ещё не одобрен для рабочего развёртывания. ИИ и Telegram выключены по умолчанию.
 
-- public intake API для формы и виджета сайта;
-- Postgres operational state: leads, channel identities, conversations, messages, manager takeover, AI runs, AI quality events;
-- manager backend и manager panel;
-- app-owned website widget AI runtime;
-- Telegram inbound / manager delivery path;
-- CORS, migrations, smoke/evidence, evals and release docs.
+## Что умеет система
 
-Этот репозиторий не владеет текущим customer-facing лендингом.
+- принимает заявки из формы сайта;
+- сохраняет сообщения виджета до ответа клиенту;
+- показывает менеджеру заявки, контакты, переписку и историю изменений;
+- позволяет менеджеру менять статус заявки и брать диалог под свой контроль;
+- может готовить ответы ИИ по отобранным сведениям из каталога;
+- принимает сообщения Telegram и ставит ответы менеджера в очередь на отправку;
+- скрывает внутренние идентификаторы, ошибки и служебные данные от публичного API.
 
-## 2. Не перепутать репозитории
+## Варианты использования
 
-| Что | Источник истины сейчас |
+| Задача | Как это работает | Состояние |
+|---|---|---|
+| Получить заявку с сайта | Форма отправляет данные в `POST /public/intake/site-form`. Система проверяет и сохраняет заявку, затем возвращает подтверждение. | Есть в коде |
+| Подключить диалоговый виджет | Виджет отправляет сообщение в `POST /public/intake/site-widget/messages`. Клиент получает историю диалога отдельным запросом. | Есть в коде, формат `site_widget.v2` |
+| Организовать работу менеджера | Панель `/manager` показывает заявки и диалоги после входа через Яндекс ID. Менеджер управляет статусом заявки и ответами ИИ. | Есть в коде, нужна настройка входа |
+| Добавить ответы ИИ | Отдельный обработчик читает задания из PostgreSQL. Ответ проходит проверки и сохраняется вместе с результатом задания. | Есть в коде, выключено по умолчанию |
+| Работать через Telegram | Система принимает сообщения бота. Привязанный менеджер может подготовить ответ в Telegram после перехода диалога под его контроль. | Есть в коде, выключено по умолчанию |
+
+Это прикладная система для проекта «Гранит», а не готовая универсальная CRM. Для другого бизнеса потребуются свои формы, каталог и правила обработки.
+
+## Как проходит обращение
+
+1. Сайт или Telegram отправляет обращение в API.
+2. API проверяет формат и сохраняет данные в PostgreSQL.
+3. Панель менеджера читает сохранённую заявку после проверки доступа.
+4. При включённом ИИ обработчик получает задание из очереди.
+5. Перед записью ответа система повторно проверяет состояние диалога.
+6. Если менеджер взял диалог, система не отправляет новый ответ ИИ.
+
+Повтор запроса с тем же `idempotency_key` не создаёт вторую заявку. Система возвращает ранее созданный публичный идентификатор.
+
+## Что входит в репозиторий
+
+| Каталог | Назначение |
 |---|---|
-| Operations backend, AI runtime, DB, manager, CORS | этот repo: `monaxovdulov/granit-operations` |
-| Текущий customer-facing лендинг и browser widget/form integration | `monaxovdulov/landing-granit-static`, локально `/home/devuser/ai-projects/landing-granit-static` |
-| Старый/отдельный Astro/CMS baseline | `granit-site-cms`; не использовать как текущий лендинг для AI/widget staging без новой ADR/task |
+| `apps/api` | API, правила обработки, вход менеджера и подключения внешних каналов |
+| `apps/manager` | Панель менеджера на React |
+| `packages/contracts` | Проверяемые форматы публичных запросов и ответов |
+| `packages/db` | Описание таблиц PostgreSQL и последовательные изменения базы |
+| `docs` | Внутренние решения, инструкции по эксплуатации и отчёты проверок |
 
-Решение зафиксировано в [ADR-011](docs/adr/ADR-011-CUSTOMER_FACING_LANDING_SOURCE_RU.md).
+Публичный сайт клиента находится в отдельном проекте. Этот репозиторий предоставляет API и панель менеджера.
 
-Перед staging smoke агент обязан перепроверить актуальную ветку и SHA `landing-granit-static`, а не полагаться на исторические упоминания `granit-site-cms`.
+## Быстрый запуск
 
-## 3. Текущее состояние AI в `main`
+Понадобятся Node.js с npm, PostgreSQL и команда `psql`.
 
-В `main` уже есть app-owned website widget AI runtime на durable PostgreSQL
-очереди:
+1. Установите зависимости.
 
-```text
-PublicWidgetIntakeService
-  -> сохраняет inbound и durable job в Postgres
-  -> supersede/coalescing для устаревших pending jobs
-  -> WidgetAiJobWorker claim-ит актуальный response window
-  -> fresh assembler читает текущее состояние разговора
-  -> direct OpenAI boundary по умолчанию
-  -> app-owned validator / send gate / manager takeover
-  -> атомарно сохраняет outbound и terminal job state
-  -> пишет ai_runs / ai_quality_events
-  -> показывает менеджеру sanitized quality summary
-```
+   ```bash
+   npm ci
+   ```
 
-Важно:
+2. Создайте пустую базу PostgreSQL.
 
-- AI для website widget по умолчанию выключен: `AI_WIDGET_ENABLED=false` или env отсутствует.
-- Когда `AI_WIDGET_ENABLED=true`, режим задаёт `AI_WIDGET_GROUNDED_MODE`.
-- Допустимые режимы: `off`, `shadow`, `enforce`.
-- Отсутствующий, пустой или неизвестный `AI_WIDGET_GROUNDED_MODE` трактуется как `off`; неизвестное значение также пишет sanitized startup error без самого env value. Для customer-visible grounded AI режим `shadow` или `enforce` должен быть задан явно.
-- OpenAI ключ — только server-side: `OPENAI_API_KEY`; он не должен попасть в лендинг, frontend, docs или логи.
-- Primary runtime и orchestration принадлежат приложению: PostgreSQL queue,
-  fresh context, validation, commit fence и send gate.
-- `direct_openai` является runtime mode по умолчанию. Существующий
-  `mastra_openai_api` разрешён только как bounded staging adapter и не владеет
-  очередью, business state, send gate или roadmap.
-- Актуальное owner-решение об источниках истины и роли runtime зафиксировано в
-  [ADR-012](docs/adr/ADR-012-REPO_LOCAL_AI_SOURCE_OF_TRUTH_RU.md).
+   ```bash
+   createdb granit_operations
+   ```
 
-## 4. Текущее состояние знаний / RAG
+3. Передайте адрес базы через окружение процесса.
 
-Каталог подключён как детерминированный versioned snapshot из проверенных артефактов `pdf-analiz`. Runtime не читает HTML и не использует память модели как источник бизнес-фактов.
+   ```bash
+   export DATABASE_URL='postgres://postgres:postgres@localhost:5432/granit_operations'
+   ```
 
-Смотреть код:
+4. Примените файлы изменения базы по порядку.
 
-- `apps/api/src/modules/ai/catalog/catalog-knowledge-port.ts` — app-owned `CatalogKnowledgePort`;
-- `apps/api/src/modules/ai/catalog/file-catalog-knowledge-provider.ts` — production-shaped in-process provider с published-only retrieval;
-- `apps/api/src/modules/ai/catalog/snapshots/catalog-knowledge.v1.json` — воспроизводимый snapshot с version/content hash;
-- `apps/api/src/scripts/build-catalog-knowledge.ts` — детерминированная сборка snapshot из reviewed JSON/JSONL;
-- `apps/api/src/modules/ai/services/grounded-widget-ai-service.ts` — где runtime запрашивает snapshot/search и передаёт selected catalog records в prompt/verifier;
-- `apps/api/src/app-context.ts` — сборка AI runtime принимает `catalog?: CatalogKnowledgePort`;
-- `apps/api/src/index.ts` — server assembly передаёт `FileCatalogKnowledgeProvider`; `empty.v1` остаётся только явным безопасным fallback для изолированных тестов/rollback-кода.
+   ```bash
+   for migration in packages/db/migrations/*.sql; do
+     psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$migration"
+   done
+   ```
 
-Текущий snapshot: `granit-cha.catalog.2026-07-20.v1`, 481 запись (465 published, 16 draft по `review.required=true`). Коммерческие условия по-прежнему можно отвечать только при наличии отдельной явной published-записи; их отсутствие означает честное ограничение или передачу менеджеру.
+5. Соберите проект.
 
-HTML сайта не является автоматическим источником истины. Если данные берутся из сайта, их надо превратить в reviewed catalog records с `id`, `revision`, `status`, `validFrom/validUntil` при необходимости, provenance and owner approval.
+   ```bash
+   npm run build
+   ```
 
-## 5. Индекс: куда идти следующему агенту
+6. Запустите API.
 
-Для AI-задач читать в таком порядке:
+   ```bash
+   npm run dev:api
+   ```
 
-1. [Этот README](README.md) — текущая карта и маршрут.
-2. [source-of-truth.md](docs/source-of-truth.md) — repo-local hierarchy, runtime и boundaries.
-3. [ADR-012](docs/adr/ADR-012-REPO_LOCAL_AI_SOURCE_OF_TRUTH_RU.md) — owner-решение: code-first facts, app-owned queue, direct runtime и roadmap `PR0a-PR9`.
-4. [AI_LIVE_AGENT_REFACTOR_FINAL_OWNER_REVIEW_RU.md](docs/architecture/AI_LIVE_AGENT_REFACTOR_FINAL_OWNER_REVIEW_RU.md) — подробный актуальный план.
-5. [AI_REFACTOR_MINIMAL_GOAL_GOVERNANCE_RU.md](docs/architecture/AI_REFACTOR_MINIMAL_GOAL_GOVERNANCE_RU.md) — порядок срезов `PR0a-PR9`.
-6. Текущая карточка среза из `docs/tasks/AI_REF_*.md` и её exact-SHA evidence.
-7. [ADR-011](docs/adr/ADR-011-CUSTOMER_FACING_LANDING_SOURCE_RU.md) — настоящий лендинг: `landing-granit-static`.
-8. [ENVIRONMENT.md](docs/ENVIRONMENT.md) — env names без secret values.
-9. [SMOKE_TESTS.md](docs/SMOKE_TESTS.md) — smoke expectations.
-10. [BACKUP_RESTORE_ROLLBACK.md](docs/BACKUP_RESTORE_ROLLBACK.md) и [STAGING_GO_LIVE_READINESS_RU.md](docs/tasks/STAGING_GO_LIVE_READINESS_RU.md) — staging safety gates.
-11. [release evidence index](docs/release/evidence/README.md) — куда писать новую evidence после smoke.
+7. Проверьте ответ сервера.
 
-Исторический план [SERIOUS_AI_LAYER_RU.md](docs/tasks/SERIOUS_AI_LAYER_RU.md) можно читать как background, но он не является актуальным статусом runtime.
+   ```bash
+   curl http://localhost:3001/health
+   ```
 
-## 6. Маршрут выполнения: staging AI + catalog/RAG
+   Ожидаемый ответ:
 
-Следующий агент должен идти небольшими проверяемыми шагами.
+   ```json
+   {"ok":true,"service":"granit-operations-api"}
+   ```
 
-### Шаг 0. Read-only audit
+Приложение читает настройки из окружения процесса. Оно само не загружает файл `.env`.
 
-Минимум:
+## Пример заявки с сайта
+
+После локального запуска отправьте запрос:
 
 ```bash
-git status -sb
-git rev-parse HEAD
-git rev-parse origin/main
-git -C /home/devuser/ai-projects/landing-granit-static status -sb
-git -C /home/devuser/ai-projects/landing-granit-static rev-parse HEAD
+curl -X POST http://localhost:3001/public/intake/site-form \
+  -H 'content-type: application/json' \
+  -d '{
+    "schema_version": "site_form.v1",
+    "event_type": "site_form.submitted",
+    "idempotency_key": "example-form-0001",
+    "submitted_at": "2026-08-05T12:00:00Z",
+    "source": {
+      "channel": "site_form",
+      "page_url": "https://example.ru/catalog",
+      "form_kind": "catalog_request"
+    },
+    "contact": {
+      "name": "Иван Иванов",
+      "email": "ivan@example.ru"
+    },
+    "request": {
+      "message": "Нужна консультация по каталогу"
+    },
+    "consent": {
+      "privacy_policy": true
+    }
+  }'
 ```
 
-Если `main` изменился, использовать актуальное состояние.
+Успешный запрос получает код `202`. Ответ содержит `public_submission_id`, но не содержит внутренний номер заявки.
 
-### Шаг 1. Локальная проверка `granit-operations`
+Полные схемы находятся в [`packages/contracts/schemas`](packages/contracts/schemas).
 
-Перед staging-действиями:
+## Дополнительные возможности
+
+### Панель менеджера
+
+Для входа через Яндекс ID задайте эти переменные:
+
+- `SESSION_SECRET`;
+- `YANDEX_OAUTH_CLIENT_ID`;
+- `YANDEX_OAUTH_CLIENT_SECRET`;
+- `YANDEX_OAUTH_REDIRECT_URI`.
+
+Добавьте разрешённого пользователя:
 
 ```bash
-npx vitest run --maxWorkers=1
+npm run seed:manager-user -- \
+  --email manager@yandex.ru \
+  --role owner \
+  --status active
+```
+
+Если настройка входа неполная, публичный приём заявок продолжает работать. Доступ к данным менеджера остаётся закрытым.
+
+### Ответы ИИ в виджете
+
+Для обработки сообщений виджета задайте:
+
+- `AI_WIDGET_ENABLED=true`;
+- `AI_WIDGET_JOB_WORKER_ENABLED=true`;
+- `OPENAI_API_KEY`.
+
+Ключ OpenAI должен оставаться на сервере. Не добавляйте его в сайт, код, документацию или журналы.
+
+Код использует одну прямую связь с OpenAI. Модель закреплена в настройках приложения, а ответы проходят проверку перед сохранением.
+
+### Telegram
+
+Для Telegram нужны отдельный бот и защищённый адрес приёма сообщений. Отправитель ответов настраивается отдельно.
+
+Основные переменные:
+
+- `TELEGRAM_BOT_ENABLED=true`;
+- `TELEGRAM_BOT_TOKEN`;
+- `TELEGRAM_BOT_PROVIDER_ACCOUNT_ID`;
+- `TELEGRAM_WEBHOOK_SECRET`;
+- `PUBLIC_MANAGER_BASE_URL`.
+
+Включение приёма сообщений не запускает отправителя. Для контролируемой отправки ответов менеджера служит команда `npm run deliver:telegram:once`.
+
+### Доступ из браузера
+
+Задайте `PUBLIC_INTAKE_ALLOWED_ORIGINS`, если сайт и API работают на разных адресах. Укажите точные адреса через запятую.
+
+Пустое значение не разрешает межсайтовые запросы браузера. Служебные запросы без заголовка `Origin` продолжают работать.
+
+## Проверки для разработчика
+
+```bash
+npm run typecheck
 npm run build
-npm run eval:widget-ai:dry-run
-git diff --check
+npm run smoke:api
+npm run eval:widget-ai:offline
 ```
 
-Если добавляются DB changes для catalog/RAG или observability, новая migration должна идти после уже существующих `0014` и `0015`, то есть начинать с `0016_*`. Старые альтернативные Mastra migrations `0010/0011` не переносить.
+Платная проверка с настоящей моделью запускается отдельной командой. Не запускайте её без ключа и явного разрешения на внешний вызов.
 
-### Шаг 2. Подключить catalog/RAG правильно
+## Ограничения
 
-Нельзя делать RAG так, чтобы модель сама считала HTML/веб/память модели источником бизнес-истины.
+- Репозиторий не содержит публичный сайт клиента.
+- Рабочее развёртывание, секреты и адреса внешних служб не входят в исходный код.
+- Для работы ИИ нужны два разрешающих переключателя и серверный ключ OpenAI.
+- Telegram не работает без явного включения и настройки бота.
+- В репозитории пока нет файла `LICENSE`.
 
-Правильная граница:
-
-```text
-owner-reviewed catalog source
-  -> app-owned CatalogKnowledgePort
-  -> selected records with id/revision/status/provenance
-  -> grounded prompt
-  -> semantic verifier checks every business claim
-  -> send-time gate
-  -> persisted safe answer
-```
-
-Минимальный implementation target:
-
-- provider реализует `CatalogKnowledgePort`;
-- `getSnapshot()` возвращает version/hash/schema;
-- `search()` возвращает только опубликованные и применимые records;
-- records имеют стабильные `id`, `revision`, `kind`, `status`, `aliases`, `searchText`, `qualifiers`, `data`;
-- verifier получает catalog references и блокирует claims без подтверждения;
-- eval corpus содержит cases по missing catalog, invalid reference, price/deadline/warranty/availability, manager handoff.
-
-### Шаг 3. Staging enablement
-
-Это уже внешняя runtime-операция, не docs-only изменение. Перед ней нужны явные staging credentials / server access и owner-approved scope.
-
-Env names смотреть в [ENVIRONMENT.md](docs/ENVIRONMENT.md). Значения секретов не записывать в repo, chat, PR, evidence или логи.
-
-Ключевые env для website widget AI staging:
-
-- `DATABASE_URL`
-- `PUBLIC_INTAKE_ALLOWED_ORIGINS` — точные origin лендинга, без wildcard;
-- `AI_WIDGET_ENABLED=true`
-- `AI_WIDGET_GROUNDED_MODE=enforce` для customer-visible grounded ответов;
-- `AI_WIDGET_GROUNDED_MODE=off` или `AI_WIDGET_ENABLED=false` как rollback;
-- `OPENAI_API_KEY`
-- `OPENAI_MODEL`
-- `OPENAI_VERIFIER_MODEL`
-- `AI_WIDGET_GENERATOR_TIMEOUT_MS`
-- `AI_WIDGET_VERIFIER_TIMEOUT_MS`
-- `AI_WIDGET_DEADLINE_MS`
-- `AI_WIDGET_JOB_WORKER_ENABLED` (default `false`; enable for `site_widget.v2` processing)
-- `AI_WIDGET_JOB_POLL_INTERVAL_MS`
-- `AI_WIDGET_JOB_LEASE_MS`
-- `AI_WIDGET_JOB_RETRY_BACKOFF_MS`
-- `AI_WIDGET_JOB_MAX_ATTEMPTS`
-
-Для первого preflight можно использовать `shadow`, но customer-visible grounded AI надо проверять именно в `enforce`.
-
-### Шаг 4. Paired smoke с настоящим лендингом
-
-Paired smoke делать с `landing-granit-static`, а не с `granit-site-cms`.
-
-Проверить:
-
-- browser widget отправляет запрос в staging `granit-operations`;
-- CORS разрешает exact origin лендинга;
-- inbound message сохраняется до AI;
-- public response не содержит internal ids/traces/eval labels;
-- AI disclosure показывается;
-- AI ответ сохраняется как outbound message до ответа виджету;
-- manager видит lead/conversation/message, slots/requirements/evidence, handoff/takeover state и safe quality summary;
-- manager takeover блокирует следующий AI reply;
-- fallback при provider/verifier/catalog ошибке не теряет inbound;
-- RAG answer содержит только подтверждённые catalog claims;
-- price/deadline/warranty/availability/final commercial terms уходят в safe limitation/handoff, если catalog не подтверждает точное условие.
-
-### Шаг 5. Evidence
-
-После staging smoke создать новый файл в `docs/release/evidence/` на базе [TEMPLATE_RU.md](docs/release/evidence/TEMPLATE_RU.md).
-
-Evidence должна содержать:
-
-- ветку/SHA `granit-operations`;
-- ветку/SHA `landing-granit-static`;
-- какие migrations применены на staging;
-- env names без values;
-- smoke commands/results;
-- sanitized request/response summary без PII/secrets;
-- manager-visible result;
-- rollback switch;
-- что осталось blocked.
-
-## 7. Что запрещено без отдельного явного разрешения
-
-- production deploy;
-- production migrations;
-- изменение secrets или production config;
-- broad CORS wildcard;
-- отправка `OPENAI_API_KEY` или DB credentials в frontend;
-- Telegram AI outbound;
-- Mastra как primary runtime/orchestrator;
-- удаление или переписывание release worktrees под `/srv/botops/releases/operations/`;
-- использование `granit-site-cms` как текущего landing smoke target без новой ADR/task;
-- выдавать исторические staging evidence за доказательство текущего runtime.
-
-## 8. Быстрые команды
-
-Основные проверки:
-
-```bash
-npx vitest run --maxWorkers=1
-npm run build
-npm run eval:widget-ai:dry-run
-git diff --check
-```
-
-Запуск API локально:
-
-```bash
-npm run dev:api
-```
-
-Live eval требует явного разрешения платных model calls:
-
-```bash
-AI_WIDGET_EVAL_LIVE=true npm run eval:widget-ai:live
-```
-
-Не запускать live eval без `OPENAI_API_KEY` и явного понимания, что это внешний платный вызов.
+Условия использования, изменения и распространения кода пока не определены. Перед открытым выпуском владелец должен выбрать лицензию.
