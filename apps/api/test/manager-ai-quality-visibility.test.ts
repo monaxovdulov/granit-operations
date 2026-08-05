@@ -6,7 +6,7 @@ import {
 import { afterEach, describe, expect, it } from "vitest";
 
 import { buildApi } from "../src/app.js";
-import type { PublicWidgetAiReplyGenerator } from "../src/modules/intake/ports/public-widget-ai-reply-generator.js";
+import { TEST_LIVE_V2_FACTS } from "./fixtures/live-v2-synthetic.v1.js";
 import { MemoryIntakeRepository } from "./helpers/memory-intake-repository.js";
 import {
   MemoryManagerAuthRepository,
@@ -23,27 +23,22 @@ describe("manager AI quality visibility", () => {
   it("surfaces degraded AI turns as safe manager summaries without raw observability", async () => {
     const repository = new MemoryIntakeRepository();
     const authRepository = new MemoryManagerAuthRepository("manager");
-    const replyGenerator: PublicWidgetAiReplyGenerator = {
-      async generateReply() {
-        return {
-          decision: "no_reply",
-          reason: "model_error",
-          metadata: {
-            model_name: "p3-manager-fake",
-            prompt_version: "p3_prompt.v1",
-            raw_error: "P3_RAW_PROVIDER_ERROR_MUST_NOT_REACH_MANAGER",
-            traceId: "trace-must-not-reach-manager",
-            spans: [{ name: "provider.call", raw: "provider-secret" }]
-          }
-        };
-      }
+    const generateDecision = async () => {
+      throw new Error(
+        "P3_RAW_PROVIDER_ERROR_MUST_NOT_REACH_MANAGER traceId spans provider-secret"
+      );
     };
     const app = track(
       buildApi({
         repository,
         widgetAi: {
           enabled: true,
-          replyGenerator
+          directLiveV2: {
+            generator: { generateDecision },
+            modelName: "gpt-5.6-luna",
+            approvedFacts: TEST_LIVE_V2_FACTS
+          },
+          jobWorker: testJobWorkerOptions()
         },
         managerAuth: {
           repository: authRepository,
@@ -62,11 +57,11 @@ describe("manager AI quality visibility", () => {
     expect(response.statusCode).toBe(202);
     expect(response.json()).toMatchObject({
       automation: {
-        status: "degraded",
-        reason: "model_error",
-        next_step: "retry_available"
+        status: "processing",
+        next_step: "poll_history"
       }
     });
+    await waitForTerminalHistory(app, response.json().public_session_id);
 
     const leadId = repository.onlyLead().leadId;
     const unauthenticated = await app.inject({
@@ -82,10 +77,10 @@ describe("manager AI quality visibility", () => {
     expect(unauthenticated.statusCode).toBe(401);
     expect(detail.statusCode).toBe(200);
     expect(detail.json().lead.conversations[0].latestUnresolvedAiQuality).toMatchObject({
-      eventType: "model_failure",
-      reasonCode: "model_error",
+      eventType: "runtime_failure",
+      reasonCode: "runtime_failed",
       severity: "critical",
-      runStatus: "degraded"
+      runStatus: "fallback_unavailable"
     });
     expect(
       Date.parse(detail.json().lead.conversations[0].latestUnresolvedAiQuality.createdAt)
@@ -99,6 +94,32 @@ describe("manager AI quality visibility", () => {
     expect(managerPayload).not.toContain("provider-secret");
   });
 });
+
+function testJobWorkerOptions() {
+  return {
+    enabled: true,
+    pollIntervalMs: 10,
+    leaseMs: 5_000,
+    retryBackoffMs: 10,
+    maxAttempts: 1
+  };
+}
+
+async function waitForTerminalHistory(
+  app: ReturnType<typeof buildApi>,
+  publicSessionId: string
+): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const response = await app.inject({
+      method: "GET",
+      url: `/public/intake/site-widget/sessions/${publicSessionId}/history?schema_version=site_widget.history.v2`
+    });
+    const status = response.json().messages?.[0]?.automation?.status;
+    if (status && !["pending", "processing", "retrying"].includes(status)) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("timed out waiting for degraded AI turn");
+}
 
 function track<T extends ReturnType<typeof buildApi>>(app: T): T {
   openApps.push(app);

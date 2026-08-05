@@ -6,8 +6,10 @@ current-main repair PR2 получил свежий independent `accept` и оп
 получил свежий independent `accept` и опубликован в `origin/main` commit
 `aff347bb00d07f8ee40f86203bd27a6a99b5b40f`. CONV-2 получил свежий
 independent `accept` и опубликован в `origin/main` commit
-`4d567d8acfef3718d92358c3980430539aea367d`. Активный срез — запланированный
-CONV-3; до рабочего кода требуется его компактная карточка и baseline callers.
+`4d567d8acfef3718d92358c3980430539aea367d`. Активный срез — CONV-3 по карточке
+`AI_RUNTIME_CONVERGENCE_CONV_3_RUNTIME_REMOVAL_RU.md`; baseline callers
+зафиксирован до рабочего кода. Владелец одобрил точную migration для
+attempt-scoped retry. CONV-3 технически завершён и передаётся свежему Reviewer.
 
 Goal ID: `AI-RUNTIME-CONVERGENCE`.
 
@@ -183,6 +185,17 @@ reasoning `medium` вместо ранее предложенной `gpt-5.6-sol
 После independent `accept` автоматически перейти к CONV-3.
 
 ### CONV-3: Mastra и executable legacy removal
+
+Точная compact card реализации:
+`docs/tasks/AI_RUNTIME_CONVERGENCE_CONV_3_RUNTIME_REMOVAL_RU.md`.
+
+Owner decision 2026-08-05: состояние `watching` остаётся reply-capable при
+`agentAllowedToReply=true`; явный manager takeover закрывает send gate.
+
+Owner decision 2026-08-05: unique индекс
+`ai_runs_inbound_public_message_id_idx` заменить обычным индексом, сохранив
+unique `ai_runs_idempotency_key_idx`. Это разрешает отдельную durable запись
+каждой lease attempt. Другие schema changes этим решением не разрешены.
 
 Один результат: production tree содержит один direct runtime без executable
 Mastra и legacy_s05 paths.

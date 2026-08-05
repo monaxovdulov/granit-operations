@@ -15,7 +15,5 @@ export const LIVE_V2_PROFILE = {
   toneVersion: LIVE_V2_TONE_VERSION,
   factsVersion: LIVE_V2_FACTS_VERSION,
   runtimeEnabledByDefault: false,
-  runtimeMode: "mastra_openai_api",
-  deploymentTier: "staging",
   provider: "openai"
 } as const;

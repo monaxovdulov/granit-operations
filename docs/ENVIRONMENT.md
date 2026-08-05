@@ -18,13 +18,10 @@ Future environment/config names:
 | `PUBLIC_INTAKE_ALLOWED_ORIGINS` | Comma-separated exact HTTP(S) origins allowed to call public intake endpoints through CORS; empty means no browser CORS allowlist | server only | Public intake CORS runtime |
 | `PUBLIC_INTAKE_CONTRACT_VERSION` | Published intake contract version | server/client config | documented as `site_form.v1` |
 | `AI_WIDGET_ENABLED` | Enables website widget AI replies only after S05 checks/staging smoke | server only | S05 runtime, default `false` |
-| `AI_WIDGET_GROUNDED_MODE` | Selects `off`, `shadow`, or `enforce`; missing/unknown values fail closed to `off`, and unknown values emit a sanitized startup error without logging the env value | server only | Grounded consultant runtime |
 | `OPENAI_API_KEY` | OpenAI Responses API access for website widget AI | server only | S05 runtime when AI enabled |
-| `OPENAI_MODEL` | OpenAI model for website widget AI, default `gpt-5.5` | server only | S05 runtime |
-| `OPENAI_VERIFIER_MODEL` | Independent semantic verifier model; defaults to `OPENAI_MODEL` | server only | Grounded consultant runtime |
-| `AI_WIDGET_GENERATOR_TIMEOUT_MS` | Generator request timeout, default `10000`, clamped `3000..25000` | server only | Grounded consultant runtime |
-| `AI_WIDGET_VERIFIER_TIMEOUT_MS` | Semantic verifier request timeout, default `6000`, clamped `3000..20000` | server only | Grounded consultant runtime |
-| `AI_WIDGET_DEADLINE_MS` | Shared generator/verifier/repair turn budget, default `18000`, clamped `5000..30000` | server only | Grounded consultant runtime |
+| `OPENAI_MODEL` | OpenAI model for the only website widget runtime; when AI is enabled it is pinned to `gpt-5.6-luna` | server only | Direct model-turn runtime |
+| `AI_WIDGET_GENERATOR_TIMEOUT_MS` | Direct generator request timeout, default `10000`, clamped `3000..25000` | server only | Direct model-turn runtime |
+| `OPENAI_VERIFIER_MODEL` | Optional model for the explicit offline/live eval script; does not select production runtime | server only | Evaluation only |
 | `AI_WIDGET_JOB_WORKER_ENABLED` | Enables durable `site_widget.v2` AI-job processing; default `false` | server only | Async widget rollout |
 | `AI_WIDGET_JOB_POLL_INTERVAL_MS` | Idle worker poll interval, default `250`, clamped `50..5000` | server only | Async widget worker |
 | `AI_WIDGET_JOB_LEASE_MS` | Job claim lease, default `45000`, clamped `5000..120000` | server only | Async widget worker |

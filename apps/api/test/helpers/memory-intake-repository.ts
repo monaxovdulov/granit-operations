@@ -60,7 +60,6 @@ import {
   type RecordManualContactInput,
   type RecordAiReviewLabelInput,
   type RecordSiteWidgetAiDegradationInput,
-  type RecordSiteWidgetAiShadowComparisonInput,
   type SaveAcceptedSiteFormSubmissionInput,
   type SaveAcceptedSiteFormSubmissionResult,
   type SaveAcceptedSiteWidgetMessageInput,
@@ -82,7 +81,6 @@ export class MemoryIntakeRepository implements IntakeRepository {
   saveCalls = 0;
   aiSaveCalls = 0;
   lastAiSaveInput?: SaveSiteWidgetAiMessageInput;
-  readonly shadowComparisons: RecordSiteWidgetAiShadowComparisonInput[] = [];
   private readonly managerReviewTransitions: Array<Record<string, unknown>> = [];
   private readonly recordedAiRuns: any[] = [];
   private managerAiControl: ManagerAiControl = {
@@ -397,6 +395,30 @@ export class MemoryIntakeRepository implements IntakeRepository {
           respondsThroughSequence: input.respondsThroughSequence,
           runtimeMode: input.runtimeMode,
           jobCommit: input.jobCommit
+        });
+      }
+
+      const managerQuality = input.completion.qualityEvents[0];
+      const qualityLead = this.leads.get(input.run.leadId);
+      if (managerQuality && qualityLead) {
+        const createdAt = input.completion.completedAt.toISOString();
+        this.leads.set(input.run.leadId, {
+          ...qualityLead,
+          conversations: qualityLead.conversations.map((conversation) =>
+            conversation.publicConversationId === input.publicConversationId
+              ? {
+                  ...conversation,
+                  latestUnresolvedAiQuality: {
+                    eventType: managerQuality.eventType,
+                    reasonCode: managerQuality.reasonCode,
+                    severity: managerQuality.severity,
+                    runStatus: input.completion.status,
+                    createdAt
+                  },
+                  updatedAt: createdAt
+                }
+              : conversation
+          )
         });
       }
 
@@ -1678,19 +1700,6 @@ export class MemoryIntakeRepository implements IntakeRepository {
     if (committedJob) {
       committedJob.status = "degraded";
       committedJob.terminalReason = input.reason;
-    }
-  }
-
-  async recordSiteWidgetAiShadowComparison(
-    input: RecordSiteWidgetAiShadowComparisonInput
-  ): Promise<void> {
-    if (
-      !this.shadowComparisons.some(
-        (comparison) =>
-          comparison.inboundPublicMessageId === input.inboundPublicMessageId
-      )
-    ) {
-      this.shadowComparisons.push(structuredClone(input));
     }
   }
 

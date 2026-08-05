@@ -1,4 +1,4 @@
-import type { WidgetAiUsage } from "../services/widget-ai-service.js";
+import type { WidgetAiUsage } from "../ports/widget-ai-usage.js";
 
 export type OpenAiStructuredResponseRequest = {
   apiKey: string;

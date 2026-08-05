@@ -49,7 +49,7 @@ export function liveV2GatePlan(turnView: LiveV2TurnView): LiveV2BlockedApplyPlan
 export function liveV2GateSnapshotPlan(gate: LiveV2Gate): LiveV2BlockedApplyPlan | null {
   if (
     !gate.agentAllowedToReply ||
-    gate.aiState !== "ai_collecting_info"
+    (gate.aiState !== "ai_collecting_info" && gate.aiState !== "watching")
   ) {
     return {
       kind: "blocked",

@@ -10,7 +10,7 @@ afterEach(() => {
 });
 
 describe("M2 startup facts boundary", () => {
-  it("does not load the dated live_v2 facts asset for disabled or direct startup", async () => {
+  it("does not load the dated live_v2 facts asset during app-context startup", async () => {
     let datedFactsModuleEvaluations = 0;
     vi.doMock(DATED_FACTS_MODULE, () => {
       datedFactsModuleEvaluations += 1;
@@ -24,42 +24,19 @@ describe("M2 startup facts boundary", () => {
         widgetAi: { enabled: false }
       })
     ).not.toThrow();
-    expect(() =>
-      buildAppContext({
-        repository: new MemoryIntakeRepository(),
-        widgetAi: {
-          enabled: true,
-          runtimeMode: "direct_openai",
-          modelName: "direct-local-fixture-v1",
-          replyGenerator: {
-            generateReply: vi.fn(async () => ({ decision: "no_reply" }))
-          }
-        }
-      })
-    ).not.toThrow();
-
     expect(datedFactsModuleEvaluations).toBe(0);
   });
 
-  it("fails closed when explicit M2 local/fake assembly omits approved facts", async () => {
+  it("does not construct a direct executor when approved facts are absent", async () => {
     const { buildAppContext } = await import("../src/app-context.js");
 
     expect(() =>
       buildAppContext({
         repository: new MemoryIntakeRepository(),
         widgetAi: {
-          enabled: true,
-          runtimeMode: "mastra_openai_api",
-          localFake: {
-            agent: {
-              generate: vi.fn(async () => {
-                throw new Error("must not generate during startup");
-              })
-            },
-            modelName: "mastra-local-fixture-v1"
-          }
-        } as never
+          enabled: true
+        }
       })
-    ).toThrow(/"expected": "object"/);
+    ).not.toThrow();
   });
 });

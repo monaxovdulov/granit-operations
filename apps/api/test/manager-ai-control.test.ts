@@ -6,6 +6,7 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { buildApi } from "../src/app.js";
+import { TEST_LIVE_V2_FACTS } from "./fixtures/live-v2-synthetic.v1.js";
 import { MemoryIntakeRepository } from "./helpers/memory-intake-repository.js";
 import {
   MemoryManagerAuthRepository,
@@ -63,13 +64,18 @@ describe("manager AI controls", () => {
   it("does not call the generator while the global control is stopped", async () => {
     const repository = new MemoryIntakeRepository();
     const authRepository = new MemoryManagerAuthRepository("manager");
-    const generateReply = vi.fn(async () => replyCandidate());
+    const generateDecision = vi.fn(async () => modelTurnResult());
     const app = track(
       buildApi({
         repository,
         widgetAi: {
           enabled: true,
-          replyGenerator: { generateReply }
+          directLiveV2: {
+            generator: { generateDecision },
+            modelName: "gpt-5.6-luna",
+            approvedFacts: TEST_LIVE_V2_FACTS
+          },
+          jobWorker: testJobWorkerOptions()
         },
         managerAuth: { repository: authRepository, config: testManagerAuthConfig() }
       })
@@ -92,12 +98,11 @@ describe("manager AI controls", () => {
     expect(response.statusCode).toBe(202);
     expect(response.json()).toMatchObject({
       automation: {
-        status: "fallback",
-        next_step: "manager_review",
-        reason: "agent_reply_blocked"
+        status: "disabled",
+        next_step: "manager_review"
       }
     });
-    expect(generateReply).not.toHaveBeenCalled();
+    expect(generateDecision).not.toHaveBeenCalled();
     expect(repository.onlyLead().conversations[0]?.agentAllowedToReply).toBe(true);
     expect(repository.onlyLead().conversations[0]?.messages).toHaveLength(1);
   });
@@ -110,18 +115,24 @@ describe("manager AI controls", () => {
         repository,
         widgetAi: {
           enabled: true,
-          replyGenerator: { async generateReply() { return replyCandidate(); } }
+          directLiveV2: {
+            generator: { async generateDecision() { return modelTurnResult(); } },
+            modelName: "gpt-5.6-luna",
+            approvedFacts: TEST_LIVE_V2_FACTS
+          },
+          jobWorker: testJobWorkerOptions()
         },
         managerAuth: { repository: authRepository, config: testManagerAuthConfig() }
       })
     );
     const cookie = authRepository.createSessionCookie();
 
-    await app.inject({
+    const intake = await app.inject({
       method: "POST",
       url: "/public/intake/site-widget/messages",
       payload: widgetRequest("manager-ai-control-dialog-0001")
     });
+    await waitForTerminalHistory(app, intake.json().public_session_id);
     const lead = repository.onlyLead();
     const conversation = lead.conversations[0];
 
@@ -208,16 +219,46 @@ function track<T extends ReturnType<typeof buildApi>>(app: T): T {
   return app;
 }
 
-function replyCandidate() {
+function modelTurnResult() {
   return {
-    decision: "reply_candidate" as const,
-    text: "Могу помочь собрать детали заявки.",
-    action: "answer" as const,
-    intent: "general_question" as const,
-    metadata: {
-      grounding_verified: true
+    candidate: {
+      version: "granit_model_turn.v1" as const,
+      message: { answerText: "Могу помочь собрать детали заявки.", question: null },
+      statePatches: [],
+      recommendationIds: [],
+      handoffIntent: null
+    },
+    observation: {
+      observedModelProvider: "openai" as const,
+      observedModelName: "gpt-5.6-luna"
     }
   };
+}
+
+function testJobWorkerOptions() {
+  return {
+    enabled: true,
+    pollIntervalMs: 10,
+    leaseMs: 5_000,
+    retryBackoffMs: 10,
+    maxAttempts: 3
+  };
+}
+
+async function waitForTerminalHistory(
+  app: ReturnType<typeof buildApi>,
+  publicSessionId: string
+): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const response = await app.inject({
+      method: "GET",
+      url: `/public/intake/site-widget/sessions/${publicSessionId}/history?schema_version=site_widget.history.v2`
+    });
+    const status = response.json().messages?.[0]?.automation?.status;
+    if (status && !["pending", "processing", "retrying"].includes(status)) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("timed out waiting for manager control AI turn");
 }
 
 function widgetRequest(idempotencyKey: string): SiteWidgetMessageRequest {

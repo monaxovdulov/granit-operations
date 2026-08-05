@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
   "repo": "granit-operations",
-  "updated_at": "2026-08-05T05:30:17Z",
-  "git_head": "4d567d8acfef3718d92358c3980430539aea367d",
-  "mode": "planning",
-  "state": "ai_runtime_convergence_conv3_planned",
+  "updated_at": "2026-08-05T19:12:00Z",
+  "git_head": "8351432916b91edabd014a9093adcbb41bc52813",
+  "mode": "review",
+  "state": "ai_runtime_convergence_conv3_technical_done",
   "dirty_worktree": {
-    "status": "clean_tracked",
-    "summary": "accepted CONV-2 is published at 4d567d8; only pre-existing untracked output/ remains intentionally untouched"
+    "status": "conv3_uncommitted",
+    "summary": "CONV-3 is technically complete and uncommitted pending fresh independent review; pre-existing untracked output/ remains intentionally untouched"
   },
   "context": {
     "last_scan_at": "2026-08-04T23:37:25Z",
@@ -19,9 +19,9 @@
     "last_refresh_at": "2026-08-04T23:37:25Z"
   },
   "task": {
-    "type": "ai-runtime-convergence-conv2",
-    "summary": "Implement the approved ModelTurnOutput to ValidatedTurnPlan to CommittedTurn direct cutover without implicit fallback.",
-    "source": "docs/tasks/AI_RUNTIME_CONVERGENCE_CONV_2_TURN_CONTRACT_RU.md; Goal remains docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md",
+    "type": "ai-runtime-convergence-conv3",
+    "summary": "Remove executable Mastra and legacy_s05 paths so production has one direct app-owned runtime.",
+    "source": "docs/tasks/AI_RUNTIME_CONVERGENCE_CONV_3_RUNTIME_REMOVAL_RU.md; Goal remains docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md",
     "owner_decisions": {
       "conv2_runtime_model": {
         "decided_at": "2026-08-05",
@@ -29,6 +29,11 @@
         "reasoning_effort": "medium",
         "basis": "owner hypothesis within the explicitly approved CONV-2 baseline, not a proven quality claim",
         "verification": "normal CONV-2 acceptance only; no extra verification layer and no implicit substitution to gpt-5.6-sol"
+      },
+      "conv3_ai_run_attempt_index": {
+        "decided_at": "2026-08-05",
+        "decision": "replace the unique ai_runs inbound public message index with a non-unique index while preserving unique idempotency_key",
+        "reason": "each reclaimed lease attempt needs its own fenced durable ai_run"
       }
     }
   },
@@ -128,5 +133,5 @@
       "reason": "ordinary fast-forward push from the reviewed b678a37 base; force-push, deploy and external runtime activation were not used"
     }
   },
-  "next_action": "Create the compact CONV-3 card and audit Mastra/legacy production callers before any code removal."
+  "next_action": "Run a fresh independent CONV-3 review over the exact staged fingerprint; repair only confirmed findings, then commit and publish after accept."
 }

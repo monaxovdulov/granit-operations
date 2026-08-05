@@ -21,7 +21,6 @@ import {
   aiReviewLabels,
   aiRuntimeControls,
   aiRuns,
-  aiShadowComparisons,
   channelIdentities,
   conversationAiMemory,
   conversationHandoffs,
@@ -154,7 +153,6 @@ import type {
   SaveAcceptedSiteWidgetMessageInput,
   SaveAcceptedSiteWidgetMessageResult,
   RecordSiteWidgetAiDegradationInput,
-  RecordSiteWidgetAiShadowComparisonInput,
   SiteWidgetHistoryResult,
   ClaimedSiteWidgetAiJob,
   FinishSiteWidgetAiJobInput,
@@ -1561,27 +1559,6 @@ export class PostgresIntakeRepository implements IntakeRepository {
         createdAt: now
       });
     });
-  }
-
-  async recordSiteWidgetAiShadowComparison(
-    input: RecordSiteWidgetAiShadowComparisonInput
-  ): Promise<void> {
-    await this.db
-      .insert(aiShadowComparisons)
-      .values({
-        publicConversationId: input.publicConversationId,
-        inboundPublicMessageId: input.inboundPublicMessageId,
-        version: input.version,
-        inputFingerprint: input.inputFingerprint ?? null,
-        legacyResult: input.legacyResult,
-        groundedResult: input.groundedResult ?? null,
-        groundedErrorCode: input.groundedErrorCode ?? null,
-        legacyLatencyMs: input.legacyLatencyMs,
-        groundedLatencyMs: input.groundedLatencyMs,
-        startedAt: new Date(input.startedAt),
-        completedAt: new Date(input.completedAt)
-      })
-      .onConflictDoNothing({ target: aiShadowComparisons.inboundPublicMessageId });
   }
 
   async claimSiteWidgetAiJob(input: {

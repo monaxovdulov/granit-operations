@@ -127,96 +127,62 @@ describe("ops-api modular monolith boundaries", () => {
     expect(timelineTree).not.toContain("telegram-delivery-service.js");
   });
 
-  it("keeps public widget intake behind a narrow AI reply generator boundary", () => {
+  it("keeps public widget intake behind the recorded model-turn executor boundary", () => {
     const appContextSource = readSource("app-context.ts");
     const publicWidgetIntakeServiceSource = readSource(
       "modules/intake/use-cases/public-widget-intake-service.ts"
     );
-    const widgetAiReplyGeneratorSource = readSource(
-      "modules/intake/ports/public-widget-ai-reply-generator.ts"
+    const widgetAiTurnExecutorSource = readSource(
+      "modules/intake/ports/public-widget-ai-turn-executor.ts"
     );
-    const widgetAiServiceSource = readSource("modules/ai/services/widget-ai-service.ts");
-    const widgetAiPolicySource = readSource("modules/ai/policy/widget-ai-policy.ts");
-    const widgetAiPromptSource = readSource("modules/ai/prompts/widget-ai-prompt.ts");
+    const recordedTurnServiceSource = readSource(
+      "modules/ai/services/recorded-live-v2-turn-service.ts"
+    );
+    const modelTurnOrchestratorSource = readSource(
+      "modules/ai/profiles/live-v2/model-turn-orchestrator.ts"
+    );
     const aiModuleSource = readTree("modules/ai");
 
-    expect(widgetAiReplyGeneratorSource).toContain("interface PublicWidgetAiReplyGenerator");
-    expect(widgetAiReplyGeneratorSource).toContain("AiTurnInput");
-    expect(widgetAiReplyGeneratorSource).not.toContain("SiteWidgetMessageRequest");
+    expect(widgetAiTurnExecutorSource).toContain("interface PublicWidgetAiTurnExecutor");
+    expect(widgetAiTurnExecutorSource).toContain("AiTurnInput");
+    expect(widgetAiTurnExecutorSource).not.toContain("SiteWidgetMessageRequest");
     expect(publicWidgetIntakeServiceSource).toContain(
-      "../ports/public-widget-ai-reply-generator.js"
+      "../ports/public-widget-ai-turn-executor.js"
     );
     expect(publicWidgetIntakeServiceSource).not.toMatch(
-      /\b(WidgetAiService|WidgetAiProvider|OpenAiWidgetAssistantProvider|provider|modelName)\b/
+      /\b(OpenAiLiveV2DecisionGenerator|RecordedLiveV2TurnService|provider|modelName)\b/
     );
-    expect(appContextSource).toContain("new WidgetAiService");
-    expect(appContextSource).toContain("replyGenerator");
-    expect(widgetAiServiceSource).toContain("implements PublicWidgetAiReplyGenerator");
-    expect(widgetAiServiceSource).toContain("../policy/widget-ai-policy.js");
-    expect(widgetAiServiceSource).toContain("../prompts/widget-ai-prompt.js");
-    expect(widgetAiPolicySource).toContain("buildWidgetAiPolicyReply");
-    expect(widgetAiPolicySource).toContain("unsafeWidgetAiModelReplyReason");
-    expect(widgetAiPolicySource).toContain("WIDGET_AI_POLICY_VERSION");
-    expect(widgetAiPromptSource).toContain("buildWidgetAiInstructions");
-    expect(widgetAiPromptSource).toContain("buildWidgetAiUserInput");
-    expect(widgetAiPromptSource).toContain("WIDGET_AI_PROMPT_VERSION");
-    expect(widgetAiServiceSource).not.toContain("price_requires_approved_source");
-    expect(widgetAiServiceSource).not.toContain("deadline_requires_manager_confirmation");
-    expect(widgetAiServiceSource).not.toContain("binding_terms_require_manager_confirmation");
-    expect(widgetAiServiceSource).not.toContain("out_of_scope_legal_funeral_inheritance");
-    expect(widgetAiServiceSource).not.toContain("price_amount_without_approved_source");
-    expect(widgetAiServiceSource).not.toContain("exact_deadline_promise");
-    expect(widgetAiServiceSource).not.toContain("binding_terms_promise");
-    expect(widgetAiServiceSource).not.toContain("legal_funeral_advice");
-    expect(widgetAiServiceSource).not.toContain("Ты AI-помощник компании Granit");
-    expect(widgetAiServiceSource).not.toContain("SiteWidgetMessageRequest");
+    expect(appContextSource).toContain("new RecordedLiveV2TurnService");
+    expect(appContextSource).toContain("new RecordedPublicWidgetAiTurnExecutor");
+    expect(appContextSource).not.toMatch(/WidgetAiService|ShadowWidget|Mastra/);
+    expect(recordedTurnServiceSource).toContain("implements RecordedAiTurnService");
+    expect(recordedTurnServiceSource).not.toMatch(/\bfetch\(/);
+    expect(modelTurnOrchestratorSource).not.toContain("@granit/db");
+    expect(modelTurnOrchestratorSource).not.toContain("modules/intake");
     expect(aiModuleSource).not.toContain("@granit/contracts");
     expect(aiModuleSource).not.toContain("SiteWidgetMessageRequest");
   });
 
-  it("keeps Mastra-like observability out of primary widget AI runtime assembly", () => {
+  it("keeps Mastra and legacy selectors out of the only production AI assembly", () => {
     const appContextSource = readSource("app-context.ts");
+    const runtimeAssemblySource = readSource("widget-ai-runtime-assembly.ts");
+    const configSource = readSource("config.ts");
     const publicWidgetIntakeServiceSource = readSource(
       "modules/intake/use-cases/public-widget-intake-service.ts"
     );
-    const widgetAiReplyGeneratorSource = readSource(
-      "modules/intake/ports/public-widget-ai-reply-generator.ts"
-    );
+    const aiModuleSource = readTree("modules/ai");
     const adrSource = readFileSync(
       path.join(process.cwd(), "docs/adr/ADR-010-AI_OBSERVABILITY_RUNTIME_BOUNDARY_RU.md"),
       "utf8"
     );
-    const disallowedRuntimeReferences: string[] = [];
 
-    for (const filePath of listFiles(apiSrc)) {
-      if (!filePath.endsWith(".ts")) {
-        continue;
-      }
-
-      const relativePath = path.relative(apiSrc, filePath);
-      const normalizedRelativePath = toPosixPath(relativePath).toLowerCase();
-      const source = readFileSync(filePath, "utf8");
-      const lowerSource = source.toLowerCase();
-
-      if (
-        (normalizedRelativePath.includes("mastra") ||
-          normalizedRelativePath.includes("live-v2") ||
-          normalizedRelativePath.includes("live_v2") ||
-          lowerSource.includes("mastra") ||
-          lowerSource.includes("live-v2") ||
-          lowerSource.includes("live_v2")) &&
-        !isAllowedOptionalAiIntegrationFile(relativePath)
-      ) {
-        disallowedRuntimeReferences.push(relativePath);
-      }
-    }
-
-    expect(disallowedRuntimeReferences).toEqual([]);
-    expect(appContextSource).not.toMatch(/mastra|live-v2|live_v2/i);
-    expect(publicWidgetIntakeServiceSource).not.toMatch(/mastra|live-v2|live_v2/i);
-    expect(widgetAiReplyGeneratorSource).toContain("interface PublicWidgetAiReplyGenerator");
+    expect(appContextSource).not.toMatch(/mastra|legacy_s05|WidgetAiService|ShadowWidget/i);
+    expect(runtimeAssemblySource).not.toMatch(/mastra|legacy_s05|runtimeSelector/i);
+    expect(configSource).not.toMatch(/mastra|legacy_s05|AI_RUNTIME_MODE|GROUNDED_MODE/i);
+    expect(publicWidgetIntakeServiceSource).not.toContain("PublicWidgetAiReplyGenerator");
+    expect(aiModuleSource).not.toContain('from "@mastra/core"');
     expect(adrSource).toContain("Primary AI runtime source of truth remains app-owned");
-    expect(adrSource).toContain("Mastra-like observability is allowed only as an optional integration layer");
+    expect(adrSource).toMatch(/Mastra-like\s+observability remains optional/);
   });
 
   it("keeps AI observability app-owned and manager-safe", () => {
@@ -250,7 +216,7 @@ describe("ops-api modular monolith boundaries", () => {
     expect(postgresRepositorySource).toContain("aiQualityEvents");
     expect(postgresRepositorySource).toContain("sanitizeAiObservabilityMetadata");
     expect(postgresRepositorySource).toContain("aiRuntimeControls");
-    expect(sanitizerSource).toContain("SENSITIVE_STRING");
+    expect(sanitizerSource).toContain("SENSITIVE_VALUE");
     expect(sanitizerSource).toContain("sanitizeAiObservabilityMetadata");
 
     expect(managerQualitySummarySource).toContain("eventType");
@@ -310,9 +276,11 @@ describe("ops-api modular monolith boundaries", () => {
   });
 
   it("keeps provider HTTP fetch implementations in adapter modules", () => {
-    const widgetServiceSource = readSource("modules/ai/services/widget-ai-service.ts");
+    const recordedTurnServiceSource = readSource(
+      "modules/ai/services/recorded-live-v2-turn-service.ts"
+    );
     const openAiAdapterSource = readSource(
-      "modules/ai/adapters/openai-widget-assistant-provider.ts"
+      "modules/ai/adapters/openai-live-v2-decision-generator.ts"
     );
     const openAiClientSource = readSource(
       "modules/ai/adapters/openai-structured-response-client.ts"
@@ -322,10 +290,10 @@ describe("ops-api modular monolith boundaries", () => {
       "modules/delivery/adapters/telegram-bot-api-delivery-provider.ts"
     );
 
-    expect(widgetServiceSource).not.toMatch(/\bfetch\(/);
-    expect(widgetServiceSource).not.toContain("OpenAiWidgetAssistantProvider");
+    expect(recordedTurnServiceSource).not.toMatch(/\bfetch\(/);
+    expect(recordedTurnServiceSource).not.toContain("OpenAiLiveV2DecisionGenerator");
     expect(openAiAdapterSource).not.toMatch(/\bfetch\(/);
-    expect(openAiAdapterSource).toContain("OpenAiWidgetAssistantProvider");
+    expect(openAiAdapterSource).toContain("OpenAiLiveV2DecisionGenerator");
     expect(openAiClientSource).toMatch(/\bfetch\(/);
     expect(deliveryServiceSource).not.toMatch(/\bfetch\(/);
     expect(deliveryServiceSource).not.toContain("TelegramBotApiDeliveryProvider");
@@ -415,16 +383,6 @@ function resolvesToCompatibilityExport(fromFilePath: string, specifier: string):
   return compatibilityExportDirs.has(relativePath.split(path.sep)[0] ?? "");
 }
 
-function isAllowedOptionalAiIntegrationFile(relativePath: string): boolean {
-  const normalizedPath = toPosixPath(relativePath);
-
-  return (
-    /^modules\/ai\/adapters\/mastra[-/]/.test(normalizedPath) ||
-    /^modules\/ai\/providers\/mastra[-/]/.test(normalizedPath) ||
-    /^modules\/ai\/observability\/sinks\/mastra[-/]/.test(normalizedPath)
-  );
-}
-
 function readSection(source: string, start: string, end: string): string {
   const startIndex = source.indexOf(start);
   const endIndex = source.indexOf(end, startIndex);
@@ -434,10 +392,6 @@ function readSection(source: string, start: string, end: string): string {
   }
 
   return source.slice(startIndex, endIndex);
-}
-
-function toPosixPath(value: string): string {
-  return value.split(path.sep).join("/");
 }
 
 function collectModuleSpecifiers(sourceFile: ts.SourceFile): string[] {

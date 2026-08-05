@@ -1,7 +1,5 @@
 import { z } from "zod";
 
-import { WIDGET_AI_POLICY_VERSION } from "../policy/widget-ai-policy.js";
-import { WIDGET_AI_PROMPT_VERSION } from "../prompts/widget-ai-prompt.js";
 import {
   LIVE_V2_PROMPT_ASSET,
   LIVE_V2_PROMPT_VERSION
@@ -20,15 +18,10 @@ import {
   LIVE_V2_DECISION_PROFILE,
   LIVE_V2_TURN_VIEW_VERSION
 } from "../profiles/live-v2/live-v2-contract.js";
-import { LEGACY_S05_DECISION_PROFILE } from "../profiles/legacy-s05/legacy-s05-decision.js";
 import { WIDGET_AI_DISCLOSURE_VERSION } from "../../intake/ports/public-widget-ai-reply-generator.js";
 
 export const APPROVED_AI_ASSET_MANIFEST_VERSION =
   "granit_ai_approved_assets_manifest.v1" as const;
-export const LEGACY_S05_ASSET_VERSION = "granit_widget_ai_assets.s05.v1" as const;
-export const LEGACY_S05_TOOL_VERSION = "granit_ai_tools.none.v1" as const;
-export const LEGACY_S05_MODEL_PROFILE_VERSION =
-  "granit_widget_ai_direct.s05.v1" as const;
 export const LIVE_V2_ASSET_VERSION = "granit_live_v2_assets.v1" as const;
 export const LIVE_V2_POLICY_VERSION = "granit_live_v2_policy.v1" as const;
 export const LIVE_V2_TOOL_VERSION = "granit_ai_tools.none.v1" as const;
@@ -40,18 +33,6 @@ const versionSchema = z
   .max(160)
   .regex(/^[A-Za-z0-9][A-Za-z0-9._:/@+-]+$/)
   .refine((value) => value.includes("."), "version must be explicitly versioned");
-
-const legacyS05ProfileSchema = z
-  .object({
-    decisionProfile: z.literal(LEGACY_S05_DECISION_PROFILE),
-    policyVersion: z.literal(WIDGET_AI_POLICY_VERSION),
-    promptVersion: z.literal(WIDGET_AI_PROMPT_VERSION),
-    toolVersion: z.literal(LEGACY_S05_TOOL_VERSION),
-    assetVersion: z.literal(LEGACY_S05_ASSET_VERSION),
-    disclosureVersion: z.literal(WIDGET_AI_DISCLOSURE_VERSION),
-    modelProfileVersion: z.literal(LEGACY_S05_MODEL_PROFILE_VERSION)
-  })
-  .strict();
 
 const liveV2ProfileSchema = z
   .object({
@@ -87,7 +68,6 @@ const liveV2ToneAssetSchema = z
 export const approvedAiAssetManifestSchema = z
   .object({
     version: z.literal(APPROVED_AI_ASSET_MANIFEST_VERSION),
-    legacyS05: legacyS05ProfileSchema,
     liveV2: liveV2ProfileSchema,
     liveV2Prompt: liveV2PromptAssetSchema,
     liveV2Tone: liveV2ToneAssetSchema
@@ -98,15 +78,6 @@ export type ApprovedAiAssetManifest = z.infer<typeof approvedAiAssetManifestSche
 
 const APPROVED_AI_ASSET_MANIFEST_INPUT = {
   version: APPROVED_AI_ASSET_MANIFEST_VERSION,
-  legacyS05: {
-    decisionProfile: LEGACY_S05_DECISION_PROFILE,
-    policyVersion: WIDGET_AI_POLICY_VERSION,
-    promptVersion: WIDGET_AI_PROMPT_VERSION,
-    toolVersion: LEGACY_S05_TOOL_VERSION,
-    assetVersion: LEGACY_S05_ASSET_VERSION,
-    disclosureVersion: WIDGET_AI_DISCLOSURE_VERSION,
-    modelProfileVersion: LEGACY_S05_MODEL_PROFILE_VERSION
-  },
   liveV2: {
     decisionProfile: LIVE_V2_DECISION_PROFILE,
     policyVersion: LIVE_V2_POLICY_VERSION,
@@ -129,8 +100,7 @@ export function parseApprovedAiAssetManifest(value: unknown): ApprovedAiAssetMan
 }
 
 /**
- * Synchronous startup validation is deliberately static: it does not import the dated facts
- * snapshot, perform I/O or make the frozen direct rollback depend on a live_v2 review window.
+ * Synchronous startup validation is deliberately static and performs no I/O.
  */
 export function loadApprovedAiAssetManifest(): ApprovedAiAssetManifest {
   return parseApprovedAiAssetManifest(APPROVED_AI_ASSET_MANIFEST_INPUT);
@@ -146,7 +116,7 @@ export type SelectedLiveV2ApprovedAssets = {
 
 /**
  * Runtime live_v2 selection is the only place that imports and date-validates the owner-approved
- * facts snapshot. Direct legacy startup never calls this function.
+ * facts snapshot.
  */
 export async function selectLiveV2ApprovedAssets(): Promise<SelectedLiveV2ApprovedAssets> {
   const registry = loadApprovedAiAssetManifest();

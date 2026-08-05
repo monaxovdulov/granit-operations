@@ -46,7 +46,6 @@ import type {
 import {
   WIDGET_AI_DISCLOSURE_TEXT,
   WIDGET_AI_DISCLOSURE_VERSION,
-  type PublicWidgetAiReplyGenerator,
   type PublicWidgetAiUnavailableReason
 } from "../ports/public-widget-ai-reply-generator.js";
 import type { PublicWidgetAiTurnExecutor } from "../ports/public-widget-ai-turn-executor.js";
@@ -167,11 +166,8 @@ export type PublicWidgetIntakeServiceOptions = {
   managerReviewRepository?: PublicWidgetManagerReviewRepository;
   ai?: {
     enabled: boolean;
-    replyGenerator?: PublicWidgetAiReplyGenerator;
     turnExecutor?: PublicWidgetAiTurnExecutor;
-    requiresRecordedExecutor?: boolean;
     jobMaxAttempts?: number;
-    runtimeMode?: "direct_openai" | "mastra_openai_api";
   };
 };
 
@@ -301,10 +297,8 @@ export class PublicWidgetIntakeService {
 
     const requestFingerprint = sha256Hex(stableStringify(parsed.data));
     const publicSessionId = parsed.data.public_session_id ?? randomUUID();
-    const aiReplyGenerator = this.options.ai?.replyGenerator;
     const aiTurnExecutor = this.options.ai?.turnExecutor;
-    const aiCanRun =
-      this.options.ai?.enabled === true && Boolean(aiReplyGenerator ?? aiTurnExecutor);
+    const aiCanRun = this.options.ai?.enabled === true && Boolean(aiTurnExecutor);
 
     try {
       const saved = await this.repository.saveAcceptedSiteWidgetMessage({
@@ -315,7 +309,7 @@ export class PublicWidgetIntakeService {
         requestFingerprint,
         enqueueAiJob: aiCanRun,
         aiJobMaxAttempts: this.options.ai?.jobMaxAttempts ?? 3,
-        aiJobRuntimeMode: this.options.ai?.runtimeMode ?? "direct_openai"
+        aiJobRuntimeMode: "direct_openai"
       });
 
       return v2AcceptedSuccess(saved, aiCanRun);
@@ -328,7 +322,6 @@ export class PublicWidgetIntakeService {
     saved: SaveAcceptedSiteWidgetMessageResult,
     signal?: AbortSignal
   ): Promise<InternalWidgetAiServiceResult> {
-      const aiReplyGenerator = this.options.ai?.replyGenerator;
       const aiTurnExecutor = this.options.ai?.turnExecutor;
 
       if (saved.aiReply) {
@@ -348,38 +341,11 @@ export class PublicWidgetIntakeService {
         return disabledSuccess(saved.replayed, saved.publicSessionId, saved.publicMessageId);
       }
 
-      if (!aiTurnExecutor && !aiReplyGenerator) {
-        if (this.options.ai?.requiresRecordedExecutor && this.options.managerReviewRepository) {
-          return this.transitionToManagerReviewOr503(
-            saved,
-            "ai_executor_unavailable",
-            "missing_openai_config"
-          );
-        }
-
-        await recordDegradationIfPossible(this.repository, saved, "missing_openai_config");
-        return fallbackSuccess(
-          saved.replayed,
-          saved.publicSessionId,
-          saved.publicMessageId,
-          "missing_openai_config"
-        );
-      }
-
-      if (!aiTurnExecutor && this.options.ai?.requiresRecordedExecutor) {
+      if (!aiTurnExecutor) {
         return this.transitionToManagerReviewOr503(
           saved,
           "ai_executor_unavailable",
-          "ai_persistence_unconfirmed"
-        );
-      }
-
-      if (!saved.agentAllowedToReply && !aiTurnExecutor) {
-        return fallbackSuccess(
-          saved.replayed,
-          saved.publicSessionId,
-          saved.publicMessageId,
-          "agent_reply_blocked"
+          "missing_openai_config"
         );
       }
 
@@ -387,27 +353,10 @@ export class PublicWidgetIntakeService {
       const turnIdentity = saved.turnIdentity;
 
       if (!isReplyCapableSiteWidgetTurn(aiTurnInput) || !turnIdentity) {
-        if (aiTurnExecutor) {
-          return this.transitionToManagerReviewOr503(
-            saved,
-            "ai_execution_context_invalid",
-            "ai_persistence_unconfirmed"
-          );
-        }
-        return fallbackSuccess(
-          saved.replayed,
-          saved.publicSessionId,
-          saved.publicMessageId,
+        return this.transitionToManagerReviewOr503(
+          saved,
+          "ai_execution_context_invalid",
           "ai_persistence_unconfirmed"
-        );
-      }
-
-      if (!aiTurnInput.conversation.agentAllowedToReply && !aiTurnExecutor) {
-        return fallbackSuccess(
-          saved.replayed,
-          saved.publicSessionId,
-          saved.publicMessageId,
-          "agent_reply_blocked"
         );
       }
 
@@ -420,7 +369,7 @@ export class PublicWidgetIntakeService {
         }
       };
 
-      if (aiTurnExecutor) {
+      {
         const executionContext = saved.aiTurnExecutionContext;
 
         if (!executionContext) {
@@ -512,236 +461,6 @@ export class PublicWidgetIntakeService {
         }
       }
 
-      if (!aiReplyGenerator) {
-        return this.transitionToManagerReviewOr503(
-          saved,
-          "ai_executor_unavailable",
-          "ai_persistence_unconfirmed"
-        );
-      }
-
-      const aiReply = validateAiReplyCandidate(
-        await aiReplyGenerator.generateReply(aiTurnInputWithFingerprint, { signal }),
-        aiTurnInputWithFingerprint
-      );
-      throwIfWidgetAiJobAborted(signal);
-
-      if (aiReply.status === "unavailable") {
-        const recordDegradation = this.repository.recordSiteWidgetAiDegradation;
-        if (!recordDegradation && saved.widgetAiJob) {
-          throw new Error("queued AI degradation persistence is unavailable");
-        }
-        await recordDegradation?.call(this.repository, {
-          leadId: saved.leadId,
-          conversationId: saved.conversationId,
-          inboundPublicMessageId: saved.publicMessageId,
-          inputFingerprint: aiInputFingerprint,
-          reason: aiReply.reason,
-          expectedGenerationEpoch: turnIdentity.expectedGenerationEpoch,
-          respondsThroughSequence: turnIdentity.respondsThroughSequence,
-          runtimeMode: saved.widgetAiJob?.runtimeMode ?? "direct_openai",
-          jobCommit: saved.widgetAiJob
-            ? {
-                jobId: saved.widgetAiJob.id,
-                attemptCount: saved.widgetAiJob.attemptCount
-              }
-            : undefined,
-          metadata: {
-            prompt_version: WIDGET_AI_PROMPT_VERSION,
-            policy_version: WIDGET_AI_POLICY_VERSION,
-            knowledge_version: APPROVED_WIDGET_KNOWLEDGE_VERSION,
-            ...aiReply.metadata,
-            ...(saved.widgetAiJob
-              ? {
-                  queue_wait_ms: saved.widgetAiJob.queueWaitMs,
-                  response_window_epoch: turnIdentity.expectedGenerationEpoch,
-                  responds_through_sequence: turnIdentity.respondsThroughSequence
-                }
-              : {})
-          }
-        }).catch((error: unknown) => {
-          if (saved.widgetAiJob) {
-            throw error;
-          }
-        });
-        return fallbackSuccess(
-          saved.replayed,
-          saved.publicSessionId,
-          saved.publicMessageId,
-          aiReply.reason
-        );
-      }
-
-      try {
-        const outboundFingerprint = sha256Hex(
-          stableStringify({
-            outbound_kind: "site_widget_ai_reply",
-            inbound_public_message_id: saved.publicMessageId,
-            public_conversation_id: saved.publicConversationId,
-            expected_generation_epoch: turnIdentity.expectedGenerationEpoch,
-            responds_through_sequence: turnIdentity.respondsThroughSequence,
-            runtime_mode: saved.widgetAiJob?.runtimeMode ?? "direct_openai",
-            body: aiReply.text,
-            metadata: aiReply.metadata,
-            slot_updates: aiReply.slotUpdates,
-            requirement_updates: aiReply.requirementUpdates
-          })
-        );
-        const persistedAiReply = await this.repository.saveSiteWidgetAiMessage({
-          leadId: saved.leadId,
-          conversationId: saved.conversationId,
-          publicMessageId: randomUUID(),
-          inboundPublicMessageId: saved.publicMessageId,
-          idempotencyKey: saved.widgetAiJob
-            ? buildWidgetAiTurnIdempotencyKey({
-                conversationId: saved.conversationId,
-                expectedGenerationEpoch: turnIdentity.expectedGenerationEpoch,
-                respondsThroughSequence: turnIdentity.respondsThroughSequence,
-                runtimeMode: saved.widgetAiJob.runtimeMode ?? "direct_openai"
-              })
-            : `ai:${saved.publicMessageId}`,
-          requestFingerprint: outboundFingerprint,
-          expectedGenerationEpoch: turnIdentity.expectedGenerationEpoch,
-          respondsThroughSequence: turnIdentity.respondsThroughSequence,
-          runtimeMode: saved.widgetAiJob?.runtimeMode ?? "direct_openai",
-          jobCommit: saved.widgetAiJob
-            ? {
-                jobId: saved.widgetAiJob.id,
-                attemptCount: saved.widgetAiJob.attemptCount
-              }
-            : undefined,
-          body: aiReply.text,
-          sourcePageUrl: aiTurnInputWithFingerprint.page.url,
-          agentAllowedToReplyAfterSend: aiReply.agentAllowedToReplyAfterSend,
-          slotUpdates: aiReply.slotUpdates,
-          requirementUpdates: aiReply.requirementUpdates,
-          aiRun:
-            aiReply.action && aiReply.intent
-              ? {
-                  inputFingerprint: aiInputFingerprint,
-                  action: aiReply.action,
-                  intent: aiReply.intent,
-                  promptVersion: readOptionalMetadataString(aiReply.metadata, "prompt_version"),
-                  policyVersion: readOptionalMetadataString(aiReply.metadata, "policy_version"),
-                  knowledgeVersion:
-                    readOptionalMetadataString(aiReply.metadata, "catalog_version") ??
-                    readOptionalMetadataString(aiReply.metadata, "knowledge_version") ??
-                    APPROVED_WIDGET_KNOWLEDGE_VERSION,
-                  modelVersion: readOptionalMetadataString(aiReply.metadata, "model_name"),
-                  generatorModelName: readOptionalMetadataString(
-                    aiReply.metadata,
-                    "model_name"
-                  ),
-                  verifierModelName: readOptionalMetadataString(
-                    aiReply.metadata,
-                    "verifier_model_name"
-                  ),
-                  verifierVersion: readOptionalMetadataString(
-                    aiReply.metadata,
-                    "verifier_version"
-                  ),
-                  verifierVerdict: readOptionalMetadataString(
-                    aiReply.metadata,
-                    "verifier_verdict"
-                  ),
-                  catalogVersion: readOptionalMetadataString(
-                    aiReply.metadata,
-                    "catalog_version"
-                  ),
-                  catalogContentHash: readOptionalMetadataString(
-                    aiReply.metadata,
-                    "catalog_content_hash"
-                  )
-                }
-              : undefined,
-          handoff:
-            aiReply.action === "handoff" && aiReply.handoffReason
-              ? {
-                  reason: aiReply.handoffReason,
-                  summary: buildHandoffSummary(aiTurnInputWithFingerprint, aiReply.slotUpdates),
-                  slotsSnapshot: buildSlotSnapshot(
-                    aiTurnInputWithFingerprint,
-                    aiReply.slotUpdates,
-                    aiReply.requirementUpdates
-                  )
-                }
-              : undefined,
-          metadata: {
-            ...aiReply.metadata,
-            channel: "site_widget",
-            public_session_id: saved.publicSessionId,
-            inbound_public_message_id: saved.publicMessageId,
-            ai_input_fingerprint: aiInputFingerprint,
-            ...(saved.widgetAiJob
-              ? {
-                  queue_wait_ms: saved.widgetAiJob.queueWaitMs,
-                  response_window_epoch: turnIdentity.expectedGenerationEpoch,
-                  responds_through_sequence: turnIdentity.respondsThroughSequence
-                }
-              : {})
-          }
-        });
-
-        return aiReplySuccess(
-          saved.replayed,
-          saved.publicSessionId,
-          saved.publicMessageId,
-          persistedAiReply.publicMessageId,
-          persistedAiReply.body,
-          aiReply.action === "handoff" ? "manager_pending" : "ai_active"
-        );
-      } catch (error) {
-        const fallbackReason =
-          error instanceof AgentReplyBlockedError
-            ? "agent_reply_blocked"
-            : "ai_persistence_unconfirmed";
-
-        if (fallbackReason === "ai_persistence_unconfirmed") {
-          const recordDegradation = this.repository.recordSiteWidgetAiDegradation;
-          if (!recordDegradation && saved.widgetAiJob) {
-            throw new Error("queued AI degradation persistence is unavailable");
-          }
-          await recordDegradation?.call(this.repository, {
-            leadId: saved.leadId,
-            conversationId: saved.conversationId,
-            inboundPublicMessageId: saved.publicMessageId,
-            inputFingerprint: aiInputFingerprint,
-            reason: fallbackReason,
-            expectedGenerationEpoch: turnIdentity.expectedGenerationEpoch,
-            respondsThroughSequence: turnIdentity.respondsThroughSequence,
-            runtimeMode: saved.widgetAiJob?.runtimeMode ?? "direct_openai",
-            jobCommit: saved.widgetAiJob
-              ? {
-                  jobId: saved.widgetAiJob.id,
-                  attemptCount: saved.widgetAiJob.attemptCount
-                }
-              : undefined,
-            metadata: {
-              prompt_version: WIDGET_AI_PROMPT_VERSION,
-              policy_version: WIDGET_AI_POLICY_VERSION,
-              knowledge_version: APPROVED_WIDGET_KNOWLEDGE_VERSION,
-              ...(saved.widgetAiJob
-                ? {
-                    queue_wait_ms: saved.widgetAiJob.queueWaitMs,
-                    response_window_epoch: turnIdentity.expectedGenerationEpoch,
-                    responds_through_sequence: turnIdentity.respondsThroughSequence
-                  }
-                : {})
-            }
-          }).catch((degradationError: unknown) => {
-            if (saved.widgetAiJob) {
-              throw degradationError;
-            }
-          });
-        }
-
-        return fallbackSuccess(
-          saved.replayed,
-          saved.publicSessionId,
-          saved.publicMessageId,
-          fallbackReason
-        );
-      }
   }
 
   private async toRecordedTurnResponse(

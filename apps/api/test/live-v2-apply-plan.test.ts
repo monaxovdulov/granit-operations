@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { buildLiveV2ApplyPlan } from "../src/modules/ai/profiles/live-v2/live-v2-apply-plan.js";
+import {
+  buildLiveV2ApplyPlan,
+  liveV2GateSnapshotPlan
+} from "../src/modules/ai/profiles/live-v2/live-v2-apply-plan.js";
 import { buildLiveV2TurnView } from "../src/modules/ai/profiles/live-v2/live-v2-context.js";
 import {
   executeLiveV2Turn,
@@ -26,6 +29,15 @@ import {
 } from "./fixtures/live-v2-synthetic.v1.js";
 
 describe("live_v2 deterministic apply plan", () => {
+  it("keeps the owner-approved watching gate reply-capable", () => {
+    expect(
+      liveV2GateSnapshotPlan({
+        aiState: "watching",
+        agentAllowedToReply: true
+      })
+    ).toBeNull();
+  });
+
   it("maps a valid answer to persistence without closing the AI gate", () => {
     const turnView = buildLiveV2TurnView(buildLiveV2TestTurn());
     const decision = answerCandidate();

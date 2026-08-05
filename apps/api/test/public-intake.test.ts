@@ -41,8 +41,7 @@ import {
   type SaveAcceptedSiteWidgetMessageInput,
   type SaveAcceptedSiteWidgetMessageResult
 } from "../src/repositories/intake-repository.js";
-import type { PublicWidgetAiReplyGenerator } from "../src/modules/intake/ports/public-widget-ai-reply-generator.js";
-import { FakeWidgetAiProvider } from "./helpers/fake-widget-ai-provider.js";
+import { TEST_LIVE_V2_FACTS } from "./fixtures/live-v2-synthetic.v1.js";
 import { MemoryIntakeRepository } from "./helpers/memory-intake-repository.js";
 import {
   MemoryManagerAuthRepository,
@@ -491,39 +490,36 @@ describe("public site_widget intake", () => {
     const generationGate = new Promise<void>((resolve) => {
       releaseGeneration = resolve;
     });
-    const replyGenerator: PublicWidgetAiReplyGenerator = {
-      async generateReply() {
+    const generateDecision = async () => {
         await generationGate;
         return {
-          decision: "reply_candidate",
-          text: "Подойдёт модель «Арфа». Откройте карточку, чтобы посмотреть детали.",
-          action: "answer",
-          intent: "product_selection",
-          requestedSlots: [],
-          slotUpdates: [],
-          requirementUpdates: [],
-          sourceEvidence: [],
-          metadata: {
-            grounding_verified: true,
-            catalog_references: [
-              {
-                kind: "catalog_item",
-                label: "Посмотреть «Арфа»",
-                title: "Арфа",
-                href: "/catalog.html?section=memorials&entity=ent_deadbeef#block-memorials",
-                entityId: "ent_deadbeef"
-              }
-            ]
+          candidate: {
+            version: "granit_model_turn.v1" as const,
+            message: {
+              answerText:
+                "Подойдёт модель «Арфа». Откройте карточку, чтобы посмотреть детали.",
+              question: null
+            },
+            statePatches: [],
+            recommendationIds: [],
+            handoffIntent: null
+          },
+          observation: {
+            observedModelProvider: "openai" as const,
+            observedModelName: "gpt-5.6-luna"
           }
         };
-      }
     };
     const app = track(
       buildApi({
         repository,
         widgetAi: {
           enabled: true,
-          replyGenerator,
+          directLiveV2: {
+            generator: { generateDecision },
+            modelName: "gpt-5.6-luna",
+            approvedFacts: TEST_LIVE_V2_FACTS
+          },
           jobWorker: {
             enabled: true,
             pollIntervalMs: 25,
@@ -852,10 +848,30 @@ describe("public site_widget intake", () => {
         repository,
         widgetAi: {
           enabled: true,
-          provider: new FakeWidgetAiProvider({
-            text: "Могу помочь с общими вариантами памятника. Какие детали важны?"
-          }),
-          modelName: "gpt-5.5"
+          directLiveV2: {
+            generator: {
+              async generateDecision() {
+                return {
+                  candidate: {
+                    version: "granit_model_turn.v1",
+                    message: {
+                      answerText: "Могу помочь с общими вариантами памятника.",
+                      question: { text: "Какие детали важны?", target: "material" }
+                    },
+                    statePatches: [],
+                    recommendationIds: [],
+                    handoffIntent: null
+                  },
+                  observation: {
+                    observedModelProvider: "openai",
+                    observedModelName: "gpt-5.6-luna"
+                  }
+                };
+              }
+            },
+            modelName: "gpt-5.6-luna",
+            approvedFacts: TEST_LIVE_V2_FACTS
+          }
         },
         managerAuth: {
           repository: managerAuthRepository,

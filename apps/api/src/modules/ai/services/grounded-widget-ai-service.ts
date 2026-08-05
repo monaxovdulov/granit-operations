@@ -48,7 +48,7 @@ import {
   validateWidgetAiVerification,
   type WidgetAiVerificationContractIssue
 } from "../verification/widget-ai-verification-validator.js";
-import type { WidgetAiUsage } from "./widget-ai-service.js";
+import type { WidgetAiUsage } from "../ports/widget-ai-usage.js";
 
 export const GROUNDED_WIDGET_AI_POLICY_VERSION =
   "granit_widget_ai_policy.semantic_verifier.v2";

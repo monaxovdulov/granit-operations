@@ -114,20 +114,6 @@ export type RecordSiteWidgetAiDegradationInput = {
   };
 };
 
-export type RecordSiteWidgetAiShadowComparisonInput = {
-  version: string;
-  publicConversationId: string;
-  inboundPublicMessageId: string;
-  inputFingerprint?: string;
-  startedAt: string;
-  completedAt: string;
-  legacyLatencyMs: number;
-  groundedLatencyMs: number;
-  legacyResult: Record<string, unknown>;
-  groundedResult?: Record<string, unknown>;
-  groundedErrorCode?: string;
-};
-
 export type SiteWidgetHistoryResult = {
   publicSessionId: string;
   publicConversationId: string;
@@ -159,9 +145,6 @@ export interface PublicIntakeRepository {
     inboundPublicMessageId: string
   ): Promise<SiteWidgetStoredAiReply | null>;
   recordSiteWidgetAiDegradation?(input: RecordSiteWidgetAiDegradationInput): Promise<void>;
-  recordSiteWidgetAiShadowComparison?(
-    input: RecordSiteWidgetAiShadowComparisonInput
-  ): Promise<void>;
   getSiteWidgetHistory?(publicSessionId: string): Promise<SiteWidgetHistoryResult | null>;
   claimSiteWidgetAiJob?(input: {
     leaseMs: number;

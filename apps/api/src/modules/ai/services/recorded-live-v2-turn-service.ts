@@ -125,7 +125,7 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
         conversationId: input.executionContext.internal.conversationId,
         inboundMessageId: input.executionContext.internal.inboundMessageId,
         channel: input.executionContext.channel,
-        runtimeMode: this.options.runtimeMode ?? "mastra_openai_api",
+        runtimeMode: this.options.runtimeMode ?? "direct_openai",
         decisionProfile: "live_v2",
         idempotencyKey: input.executionContext.turn.idempotencyKey,
         inputFingerprint,

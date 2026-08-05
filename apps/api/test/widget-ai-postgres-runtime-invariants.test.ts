@@ -24,10 +24,6 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { buildAppContext } from "../src/app-context.js";
 import type { ObservedLiveV2DecisionGenerator } from "../src/modules/ai/ports/live-v2-runtime.js";
-import {
-  ShadowWidgetAiReplyGenerator,
-  type WidgetAiShadowObservation
-} from "../src/modules/ai/services/shadow-widget-ai-reply-generator.js";
 import type {
   AiRunTerminalCompletion,
   BeginAiRunInput
@@ -132,12 +128,6 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
         return replyWithAiRun("Этот draft должен быть заблокирован takeover.");
       }
     });
-    const saveReply = repository.saveSiteWidgetAiMessage.bind(repository);
-    let saveAttemptHadAiRun = false;
-    repository.saveSiteWidgetAiMessage = async (input) => {
-      saveAttemptHadAiRun = Boolean(input.aiRun);
-      return saveReply(input);
-    };
     await accept(service, widgetRequest("manager-takeover"));
 
     const running = worker.runOnce(readyNow());
@@ -151,7 +141,6 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
     gate.release();
 
     expect(await running).toBe(true);
-    expect(saveAttemptHadAiRun).toBe(true);
     expect(await countMessagesByRole("ai_assistant")).toBe(0);
     expect(await jobRows()).toMatchObject([
       { status: "superseded", attemptCount: 1, terminalReason: "turn_not_current" }
@@ -164,7 +153,14 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
       .from(conversations)
       .where(eq(conversations.publicConversationId, publicConversationId));
     expect(takenOver?.generationEpoch).toBe(2);
-    expect(await countAiRuns()).toBe(0);
+    expect(await aiRunRows()).toMatchObject([
+      {
+        recordingContract: "native_recorded",
+        status: "running",
+        outboundLinked: false,
+        sendGateResult: "not_checked"
+      }
+    ]);
   });
 
   it("recovers exactly one outbound after reply commit succeeds but job finish fails", async () => {
@@ -512,7 +508,7 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
     expect(await jobRows()).toMatchObject([{ status: "replied" }]);
     await expect(aiRunRows()).resolves.toMatchObject([
       {
-        recordingContract: "native_grounded",
+        recordingContract: "native_recorded",
         status: "persisted",
         inboundPublicMessageId: accepted.public_message_id,
         outboundLinked: true,
@@ -542,31 +538,27 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
     ]);
     expect(runRows).toMatchObject([
       {
-        recordingContract: "native_grounded",
+        recordingContract: "native_recorded",
         status: "fallback_unavailable",
         decisionAction: "no_reply",
-        outcomeReason: "turn_timeout",
-        failureCode: "model_failure",
+        outcomeReason: "generator_failed",
+        failureCode: "runtime_failure",
         inboundPublicMessageId: accepted.public_message_id,
-        traceId: null,
-        configuredModelProvider: "none",
-        configuredModelName: null,
+        traceId: expect.any(String),
+        configuredModelProvider: "openai",
+        configuredModelName: "gpt-5.6-luna",
         observedModelProvider: "none",
         observedModelName: null,
-        metadata: {
-          queue_wait_ms: expect.any(Number),
-          response_window_epoch: 1,
-          responds_through_sequence: 1
-        }
+        metadata: {}
       }
     ]);
     expect(eventRows).toMatchObject([
       {
         aiRunId: runRows[0]!.id,
         messageId: runRows[0]!.inboundMessageId,
-        eventType: "model_failure",
-        reasonCode: "turn_timeout",
-        severity: "error",
+        eventType: "runtime_failure",
+        reasonCode: "runtime_failed",
+        severity: "critical",
         managerVisible: true,
         resolutionStatus: "open"
       }
@@ -748,7 +740,6 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
       repository,
       widgetAi: {
         enabled: true,
-        runtimeMode: "direct_openai",
         runRepository,
         directLiveV2: {
           generator,
@@ -973,70 +964,6 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
     });
   });
 
-  it("keeps grounded shadow proposals out of PostgreSQL operational state", async () => {
-    const repository = new PostgresIntakeRepository(harness.db);
-    const gate = barrier();
-    let recordedObservation: WidgetAiShadowObservation | undefined;
-    let observationRecorded!: () => void;
-    const recorded = new Promise<void>((resolve) => {
-      observationRecorded = resolve;
-    });
-    const shadow = new ShadowWidgetAiReplyGenerator(
-      defaultGenerator(),
-      {
-        async generateReply(input) {
-          gate.enter();
-          await gate.wait;
-          return groundedShadowHandoff(input.inboundMessage.publicMessageId);
-        }
-      },
-      {
-        async record(observation) {
-          recordedObservation = observation;
-          await repository.recordSiteWidgetAiShadowComparison(observation);
-          observationRecorded();
-        }
-      }
-    );
-    const { service, worker } = runtime(shadow, repository);
-
-    await expect(shadowStateCounts()).resolves.toEqual({
-      slots: 0,
-      requirements: 0,
-      handoffs: 0,
-      observations: 0
-    });
-    await accept(service, widgetRequest("postgres-shadow", { text: "Нужен чёрный гранит" }));
-    const running = worker.runOnce(readyNow());
-    await gate.entered;
-    await running;
-
-    expect(await countMessagesByRole("ai_assistant")).toBe(1);
-    await expect(shadowStateCounts()).resolves.toEqual({
-      slots: 0,
-      requirements: 0,
-      handoffs: 0,
-      observations: 0
-    });
-    await expect(conversationRows()).resolves.toMatchObject([
-      { agentAllowedToReply: true, aiState: "ai_collecting_info" }
-    ]);
-
-    gate.release();
-    await recorded;
-    expect(recordedObservation?.groundedResult).toMatchObject({
-      action: "handoff",
-      handoff_reason: "commercial_commitment"
-    });
-    await repository.recordSiteWidgetAiShadowComparison(recordedObservation!);
-    await expect(shadowStateCounts()).resolves.toEqual({
-      slots: 0,
-      requirements: 0,
-      handoffs: 0,
-      observations: 1
-    });
-  });
-
   it("collapses a burst to one fresh response window", async () => {
     const sessionId = randomUUID();
     let generationCalls = 0;
@@ -1065,7 +992,11 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
     await drain(worker, 3);
 
     expect(generationCalls).toBe(1);
-    expect(compactContextTexts).toEqual(["Первый вопрос", "Уточнение"]);
+    expect(compactContextTexts).toEqual([
+      "Первый вопрос",
+      "Уточнение",
+      "Финальный контекст"
+    ]);
     expect(await countMessagesByRole("visitor")).toBe(3);
     expect(await jobRows()).toMatchObject([
       { status: "superseded", terminalReason: "newer_inbound" },
@@ -1324,7 +1255,9 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
           };
         }
 
-        return replyWithAiRun("Свежая попытка сохранила единственный ответ.");
+        return replyWithAiRun(
+          "Свежая попытка сохранила ответ. Какой материал вам ближе?"
+        );
       }
     });
     await accept(service, widgetRequest("lost-lease-degradation"));
@@ -1339,26 +1272,115 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
     gate.release();
     await staleAttempt;
 
-    expect(await harness.db.select().from(aiRuns)).toHaveLength(0);
+    expect(await harness.db.select().from(aiRuns)).toMatchObject([
+      {
+        status: "running",
+        outboundMessageId: null,
+        sendGateResult: "not_checked"
+      }
+    ]);
     expect(await jobRows()).toMatchObject([{ status: "processing", attemptCount: 2 }]);
     if (!reclaimed) throw new Error("expected reclaimed widget AI job");
 
-    await expect(service.processClaimedSiteWidgetAiJob(reclaimed)).resolves.toMatchObject({
-      status: "replied"
+    await expect(service.processClaimedSiteWidgetAiJob(reclaimed)).resolves.toEqual({
+      status: "replied",
+      outputPublicMessageId: expect.any(String)
     });
     expect(generationCalls).toBe(2);
     expect(await countMessagesByRole("ai_assistant")).toBe(1);
     expect(await jobRows()).toMatchObject([{ status: "replied", attemptCount: 2 }]);
-    expect(await harness.db.select().from(aiRuns)).toHaveLength(1);
+    expect(await harness.db.select().from(aiRuns)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          status: "running",
+          outboundMessageId: null,
+          sendGateResult: "not_checked"
+        }),
+        expect.objectContaining({
+          status: "persisted",
+          outboundMessageId: expect.any(String),
+          sendGateResult: "allowed"
+        })
+      ])
+    );
+    expect(await countAiRuns()).toBe(2);
   });
 
   function runtime(
     replyGenerator: PublicWidgetAiReplyGenerator = defaultGenerator(),
     repository = new PostgresIntakeRepository(harness.db)
   ): Runtime {
-    const service = new PublicWidgetIntakeService(repository, {
-      ai: { enabled: true, replyGenerator, jobMaxAttempts: 3 }
-    });
+    const runRepository = new PostgresAiRunRepository(harness.db);
+    const generator: ObservedLiveV2DecisionGenerator = {
+      async generateDecision(input, options) {
+        const [run] = await harness.db
+          .select({
+            conversationId: aiRuns.conversationId,
+            inboundPublicMessageId: aiRuns.inboundPublicMessageId
+          })
+          .from(aiRuns)
+          .where(eq(aiRuns.traceId, options.appTraceId));
+        const [conversation] = run
+          ? await harness.db
+              .select({ publicConversationId: conversations.publicConversationId })
+              .from(conversations)
+              .where(eq(conversations.id, run.conversationId))
+          : [];
+        const inboundText = input.turn.messages.at(-1)?.text ?? "";
+        const legacyResult = (await replyGenerator.generateReply(
+          {
+            conversation: {
+              publicConversationId: conversation?.publicConversationId ?? randomUUID()
+            },
+            inboundMessage: {
+              publicMessageId: run?.inboundPublicMessageId ?? randomUUID(),
+              text: inboundText
+            },
+            compactContext: {
+              messages: input.turn.messages.map((message, index) => ({
+                publicMessageId: `test-context-${index}`,
+                direction: message.role === "visitor" ? "inbound" : "outbound",
+                senderRole: message.role === "visitor" ? "visitor" : "ai_assistant",
+                text: message.text,
+                createdAt: "2026-08-03T10:00:00.000Z"
+              }))
+            }
+          } as never,
+          { signal: options.signal }
+        )) as { decision?: string; text?: string };
+
+        if (legacyResult.decision !== "reply_candidate" || !legacyResult.text) {
+          throw new Error("test generator returned no reply");
+        }
+
+        return {
+          candidate: modelTurnCandidate(legacyResult.text),
+          observation: {
+            observedModelProvider: "openai",
+            observedModelName: "gpt-5.6-luna"
+          }
+        };
+      }
+    };
+    const service = buildAppContext({
+      repository,
+      widgetAi: {
+        enabled: true,
+        runRepository,
+        directLiveV2: {
+          generator,
+          modelName: "gpt-5.6-luna",
+          approvedFacts: TEST_LIVE_V2_FACTS
+        },
+        jobWorker: {
+          enabled: true,
+          pollIntervalMs: 25,
+          leaseMs: 5_000,
+          retryBackoffMs: 1,
+          maxAttempts: 3
+        }
+      }
+    }).publicIntake.siteWidget;
     const worker = new WidgetAiJobWorker(repository, service, {
       pollIntervalMs: 25,
       leaseMs: 5_000,
@@ -1488,18 +1510,6 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
       .from(aiRuns);
   }
 
-  async function shadowStateCounts() {
-    const [row] = await harness.client.unsafe<
-      Array<{ slots: number; requirements: number; handoffs: number; observations: number }>
-    >(`
-      SELECT
-        (SELECT count(*)::int FROM conversation_slots) AS slots,
-        (SELECT count(*)::int FROM conversation_requirements) AS requirements,
-        (SELECT count(*)::int FROM conversation_handoffs) AS handoffs,
-        (SELECT count(*)::int FROM ai_shadow_comparisons) AS observations
-    `);
-    return row;
-  }
 });
 
 function readyNow() {
@@ -1509,8 +1519,24 @@ function readyNow() {
 function defaultGenerator(): PublicWidgetAiReplyGenerator {
   return {
     async generateReply() {
-      return reply("Помогу подобрать вариант. Какие материал и сроки важны?");
+      return reply("Помогу подобрать вариант. Какой материал вам ближе?");
     }
+  };
+}
+
+function modelTurnCandidate(text: string) {
+  const questionMatch = text.match(/^(.*?)([^.!?]+\?)$/u);
+  return {
+    version: "granit_model_turn.v1" as const,
+    message: questionMatch
+      ? {
+          answerText: questionMatch[1]?.trim() || "Уточню детали.",
+          question: { text: questionMatch[2]!.trim(), target: "material" as const }
+        }
+      : { answerText: text, question: null },
+    statePatches: [],
+    recommendationIds: [],
+    handoffIntent: null
   };
 }
 
@@ -1531,36 +1557,6 @@ function replyWithAiRun(text: string) {
     ...reply(text),
     action: "answer" as const,
     intent: "product_selection" as const
-  };
-}
-
-function groundedShadowHandoff(sourceMessageId: string) {
-  return {
-    ...replyWithAiRun("Grounded shadow предлагает handoff, но не пишет state."),
-    action: "handoff" as const,
-    slotUpdates: [
-      {
-        name: "material" as const,
-        value: "чёрный гранит",
-        confidence: 0.98,
-        source: "ai_extraction" as const,
-        sourceMessageId,
-        evidence: { messageId: sourceMessageId, quote: "чёрный гранит", start: 6, end: 20 }
-      }
-    ],
-    requirementUpdates: [
-      {
-        category: "color" as const,
-        mode: "requirement" as const,
-        value: "чёрный",
-        confidence: 0.97,
-        source: "ai_extraction" as const,
-        sourceMessageId,
-        evidence: { messageId: sourceMessageId, quote: "чёрный", start: 6, end: 12 }
-      }
-    ],
-    handoffReason: "commercial_commitment" as const,
-    agentAllowedToReplyAfterSend: false
   };
 }
 

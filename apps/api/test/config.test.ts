@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { loadConfig, parsePublicIntakeAllowedOrigins } from "../src/config.js";
 
@@ -37,39 +37,5 @@ describe("public intake CORS config", () => {
     });
 
     expect(config.publicIntakeCors.allowedOrigins).toEqual(["https://preview.granitkr.ru"]);
-  });
-});
-
-describe("widget AI grounded mode config", () => {
-  it.each([
-    [undefined, "off"],
-    ["off", "off"],
-    ["shadow", "shadow"],
-    ["enforce", "enforce"]
-  ] as const)("maps %s to %s", (value, expected) => {
-    const config = loadConfig({
-      DATABASE_URL: "postgres://example.invalid/granit",
-      ...(value === undefined ? {} : { AI_WIDGET_GROUNDED_MODE: value })
-    });
-
-    expect(config.widgetAi.groundedMode).toBe(expected);
-  });
-
-  it("falls back to off and emits a sanitized startup error for an unknown value", () => {
-    const write = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-
-    try {
-      const config = loadConfig({
-        DATABASE_URL: "postgres://example.invalid/granit",
-        AI_WIDGET_GROUNDED_MODE: "secret-invalid-value"
-      });
-
-      expect(config.widgetAi.groundedMode).toBe("off");
-      expect(write).toHaveBeenCalledOnce();
-      expect(String(write.mock.calls[0]?.[0])).toContain("invalid_widget_ai_grounded_mode");
-      expect(String(write.mock.calls[0]?.[0])).not.toContain("secret-invalid-value");
-    } finally {
-      write.mockRestore();
-    }
   });
 });

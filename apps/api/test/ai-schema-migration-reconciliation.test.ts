@@ -19,6 +19,7 @@ const reconciliationMigration = "0017_ai_schema_reconciliation.sql";
 const turnIdentityMigration = "0018_widget_ai_turn_identity.sql";
 const latestWinsMigration = "0019_widget_ai_latest_wins.sql";
 const directLiveV2Migration = "0020_direct_live_v2_turn_contract.sql";
+const aiRunAttemptsMigration = "0021_ai_run_attempts.sql";
 const narrowThrough0016 = [
   "0001_s01_intake.sql",
   "0002_s02_manager_auth.sql",
@@ -67,7 +68,7 @@ describe.sequential("PR0b canonical AI schema migration reconciliation", () => {
     await container?.stop({ remove: true, removeVolumes: true });
   });
 
-  it("applies the exact fresh narrow 0001..0020 root chain", async () => {
+  it("applies the exact fresh narrow 0001..0021 root chain", async () => {
     await withDatabase("fresh_narrow", async (database) => {
       const rootMigrations = (await readdir(migrationsDir))
         .filter((file) => file.endsWith(".sql"))
@@ -77,7 +78,8 @@ describe.sequential("PR0b canonical AI schema migration reconciliation", () => {
         reconciliationMigration,
         turnIdentityMigration,
         latestWinsMigration,
-        directLiveV2Migration
+        directLiveV2Migration,
+        aiRunAttemptsMigration
       ]);
 
       await applyMigrations(database, migrationsDir, rootMigrations);
@@ -135,7 +137,8 @@ describe.sequential("PR0b canonical AI schema migration reconciliation", () => {
         reconciliationMigration,
         turnIdentityMigration,
         latestWinsMigration,
-        directLiveV2Migration
+        directLiveV2Migration,
+        aiRunAttemptsMigration
       ]);
       await expectInventory(database, { runs: 2, spans: 0, quality: 1 });
       const rows = await database.client.unsafe<
@@ -240,7 +243,8 @@ describe.sequential("PR0b canonical AI schema migration reconciliation", () => {
         reconciliationMigration,
         turnIdentityMigration,
         latestWinsMigration,
-        directLiveV2Migration
+        directLiveV2Migration,
+        aiRunAttemptsMigration
       ]);
       await expectInventory(database, { runs: 1, spans: 1, quality: 1 });
       const [row] = await database.client.unsafe<
@@ -301,7 +305,8 @@ describe.sequential("PR0b canonical AI schema migration reconciliation", () => {
         reconciliationMigration,
         turnIdentityMigration,
         latestWinsMigration,
-        directLiveV2Migration
+        directLiveV2Migration,
+        aiRunAttemptsMigration
       ]);
 
       const [conversation] = await database.client.unsafe<
@@ -348,7 +353,8 @@ describe.sequential("PR0b canonical AI schema migration reconciliation", () => {
         reconciliationMigration,
         turnIdentityMigration,
         latestWinsMigration,
-        directLiveV2Migration
+        directLiveV2Migration,
+        aiRunAttemptsMigration
       ]);
 
       const constraints = await database.client.unsafe<
@@ -730,7 +736,7 @@ async function expectCanonicalAiStorageContract(database: Database) {
   );
   expect(indexDefinitions.get("ai_runs_trace_id_idx")).toContain("UNIQUE INDEX");
   expect(indexDefinitions.get("ai_runs_idempotency_key_idx")).toContain("UNIQUE INDEX");
-  expect(indexDefinitions.get("ai_runs_inbound_public_message_id_idx")).toContain(
+  expect(indexDefinitions.get("ai_runs_inbound_public_message_id_idx")).not.toContain(
     "UNIQUE INDEX"
   );
   expect(indexDefinitions.get("ai_runs_outbound_message_id_idx")).toContain(

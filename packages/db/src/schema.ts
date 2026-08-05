@@ -537,7 +537,7 @@ export const aiRuns = pgTable(
   (table) => ({
     traceIdIdx: uniqueIndex("ai_runs_trace_id_idx").on(table.traceId),
     idempotencyKeyIdx: uniqueIndex("ai_runs_idempotency_key_idx").on(table.idempotencyKey),
-    inboundPublicMessageIdIdx: uniqueIndex("ai_runs_inbound_public_message_id_idx").on(
+    inboundPublicMessageIdIdx: index("ai_runs_inbound_public_message_id_idx").on(
       table.inboundPublicMessageId
     ),
     outboundMessageIdIdx: uniqueIndex("ai_runs_outbound_message_id_idx")

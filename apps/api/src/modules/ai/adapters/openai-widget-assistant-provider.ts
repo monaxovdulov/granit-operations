@@ -1,18 +1,9 @@
-import {
-  type WidgetAiProvider,
-  type WidgetAiProviderInput,
-  type WidgetAiProviderResult
-} from "../services/widget-ai-service.js";
 import type {
   GroundedWidgetAiProvider,
   GroundedWidgetAiProviderInput,
   GroundedWidgetAiProviderResult
 } from "../services/grounded-widget-ai-service.js";
-import { WIDGET_AI_POLICY_VERSION } from "../policy/widget-ai-policy.js";
-import {
-  GROUNDED_WIDGET_AI_PROMPT_VERSION,
-  WIDGET_AI_PROMPT_VERSION
-} from "../prompts/widget-ai-prompt.js";
+import { GROUNDED_WIDGET_AI_PROMPT_VERSION } from "../prompts/widget-ai-prompt.js";
 import {
   GROUNDED_AI_TURN_DECISION_JSON_SCHEMA,
   GroundedAiTurnCandidateDecisionSchema
@@ -26,43 +17,12 @@ export type OpenAiWidgetAssistantProviderOptions = {
   timeoutMs?: number;
 };
 
-export class OpenAiWidgetAssistantProvider
-  implements WidgetAiProvider, GroundedWidgetAiProvider
-{
-  readonly providerKind = "openai" as const;
+export class OpenAiWidgetAssistantProvider implements GroundedWidgetAiProvider {
 
   constructor(private readonly options: OpenAiWidgetAssistantProviderOptions) {
     if (!isSafeWidgetAiModelName(options.model)) {
       throw new Error("Invalid widget AI model name");
     }
-  }
-
-  async generateReply(
-    input: WidgetAiProviderInput,
-    signal?: AbortSignal
-  ): Promise<WidgetAiProviderResult> {
-    const response = await requestOpenAiStructuredResponse({
-      apiKey: this.options.apiKey,
-      model: this.options.model,
-      timeoutMs: this.options.timeoutMs ?? 15000,
-      instructions: input.instructions,
-      input: input.userInput,
-      metadata: {
-        channel: "site_widget",
-        prompt_version: WIDGET_AI_PROMPT_VERSION,
-        policy_version: WIDGET_AI_POLICY_VERSION
-      },
-      maxOutputTokens: 120,
-      signal
-    });
-
-    return {
-      text: response.outputText,
-      modelProvider: "openai",
-      modelName: response.model,
-      responseId: response.id,
-      usage: response.usage
-    };
   }
 
   async generateGroundedReply(

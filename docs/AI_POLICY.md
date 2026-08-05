@@ -1,8 +1,11 @@
 # AI Policy
 
-Status: grounded website consultant and reviewed catalog provider implemented; customer traffic remains controlled by runtime flags
+Status: direct model-turn website runtime implemented; customer traffic remains controlled by runtime flags
 
-Website AI remains disabled unless `AI_WIDGET_ENABLED=true`. Enabling that flag alone does not select the grounded pipeline: `AI_WIDGET_GROUNDED_MODE` must explicitly be `shadow` or `enforce`; missing, empty, or unknown values fail closed to `off`. Production enablement still requires separate owner approval.
+Website AI remains disabled unless `AI_WIDGET_ENABLED=true`. When enabled, the
+application has one `direct_openai` model-turn pipeline; Mastra, legacy and
+shadow runtime selectors no longer exist. Production enablement still requires
+separate owner approval.
 
 ## Grounded send path
 
@@ -42,10 +45,13 @@ Semantic decisions are not made by keyword regex in the grounded path. Requests 
 
 ## Rollout and evaluation
 
-- `off`: legacy compatibility path.
-- `shadow`: the legacy reply is returned without waiting for grounded work; the full grounded/legacy comparison, evidence, verdicts and latency are recorded asynchronously.
-- `enforce`: unverified model text cannot be sent. Customer-facing text is either a model reply accepted by generator, verifier and app-side contract checks, or deterministic app-owned plan/fallback text allowed by policy; both still pass through the send-time gate.
-- Offline regression contains 40 realistic dialogs and checks extracted values/evidence, flexible requirements, claim coverage, semantic quality and latency in addition to action. Stateful persistence tests cover long dialogs and flexible requirements. Paid live evaluation additionally requires `AI_WIDGET_EVAL_LIVE=true` and owner-provided OpenAI credentials.
+- Операционный выключатель один: `AI_WIDGET_ENABLED=false`; кодовый rollback —
+  revert предыдущего принятого commit, а не выбор второго runtime.
+- Ответ проходит app-owned schema validation, fresh send gate и атомарную запись;
+  непроверенный model output не отправляется клиенту.
+- Offline regression для grounded/catalog экспериментов остаётся отдельным eval
+  harness и не является production runtime. Paid live evaluation дополнительно
+  требует `AI_WIDGET_EVAL_LIVE=true` и owner-provided OpenAI credentials.
 
 Future owner updates, especially commercial terms, are documented in `docs/AI_ASSISTANT_OWNER_INPUT_GUIDE_RU.md`. A plain-Russian explanation of layers, message flow, controls and limitations is in `docs/AI_ASSISTANT_OWNER_ARCHITECTURE_GUIDE_RU.md`.
 

@@ -8,14 +8,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildApi } from "../src/app.js";
 import {
   APPROVED_AI_ASSET_MANIFEST_VERSION,
-  LEGACY_S05_ASSET_VERSION,
   loadApprovedAiAssetManifest,
   parseApprovedAiAssetManifest,
   selectLiveV2ApprovedAssets
 } from "../src/modules/ai/assets/approved-ai-assets.js";
-import { WIDGET_AI_POLICY_VERSION } from "../src/modules/ai/policy/widget-ai-policy.js";
-import { WIDGET_AI_PROMPT_VERSION } from "../src/modules/ai/prompts/widget-ai-prompt.js";
-import { WIDGET_AI_DISCLOSURE_VERSION } from "../src/modules/intake/ports/public-widget-ai-reply-generator.js";
+import { TEST_LIVE_V2_FACTS } from "./fixtures/live-v2-synthetic.v1.js";
 import { MemoryIntakeRepository } from "./helpers/memory-intake-repository.js";
 
 const openApps: Array<ReturnType<typeof buildApi>> = [];
@@ -31,12 +28,6 @@ describe("P3 approved AI assets", () => {
 
     expect(manifest).toMatchObject({
       version: APPROVED_AI_ASSET_MANIFEST_VERSION,
-      legacyS05: {
-        policyVersion: WIDGET_AI_POLICY_VERSION,
-        promptVersion: WIDGET_AI_PROMPT_VERSION,
-        disclosureVersion: WIDGET_AI_DISCLOSURE_VERSION,
-        assetVersion: LEGACY_S05_ASSET_VERSION
-      },
       liveV2: {
         promptVersion: manifest.liveV2Prompt.version,
         toneVersion: manifest.liveV2Tone.version
@@ -55,23 +46,13 @@ describe("P3 approved AI assets", () => {
     expect(() =>
       parseApprovedAiAssetManifest({
         ...manifest,
-        legacyS05: { ...manifest.legacyS05, toolVersion: "unversioned" }
+        liveV2: { ...manifest.liveV2, toolVersion: "unversioned" }
       })
     ).toThrow();
     expect(() =>
       parseApprovedAiAssetManifest({
         ...manifest,
-        liveV2: { ...manifest.liveV2, assetVersion: LEGACY_S05_ASSET_VERSION }
-      })
-    ).toThrow();
-    expect(() =>
-      parseApprovedAiAssetManifest({
-        ...manifest,
-        legacyS05: {
-          ...manifest.legacyS05,
-          policyVersion: manifest.liveV2.policyVersion,
-          toneVersion: manifest.liveV2.toneVersion
-        }
+        liveV2: { ...manifest.liveV2, assetVersion: "unversioned" }
       })
     ).toThrow();
   });
@@ -83,22 +64,38 @@ describe("P3 approved AI assets", () => {
     await expect(selectLiveV2ApprovedAssets()).rejects.toThrow("outside its approval window");
   });
 
-  it("records the exact approved direct asset version on a run", async () => {
+  it("records the exact approved live_v2 asset version on a direct run", async () => {
     const repository = new MemoryIntakeRepository();
+    const manifest = loadApprovedAiAssetManifest();
     const app = buildApi({
       repository,
       widgetAi: {
         enabled: true,
-        modelName: "p3-fake-model",
-        replyGenerator: {
-          async generateReply() {
-            return {
-              decision: "reply_candidate",
-              text: "Подберу варианты. Какой стиль вам ближе?",
-              metadata: {}
-            };
-          }
-        }
+        directLiveV2: {
+          generator: {
+            async generateDecision() {
+              return {
+                candidate: {
+                  version: "granit_model_turn.v1",
+                  message: {
+                    answerText: "Подберу варианты.",
+                    question: { text: "Какой материал вам ближе?", target: "material" }
+                  },
+                  statePatches: [],
+                  recommendationIds: [],
+                  handoffIntent: null
+                },
+                observation: {
+                  observedModelProvider: "openai",
+                  observedModelName: "gpt-5.6-luna"
+                }
+              };
+            }
+          },
+          modelName: "gpt-5.6-luna",
+          approvedFacts: TEST_LIVE_V2_FACTS
+        },
+        jobWorker: testJobWorkerOptions()
       }
     });
     openApps.push(app);
@@ -110,18 +107,37 @@ describe("P3 approved AI assets", () => {
     });
 
     expect(response.statusCode).toBe(202);
+    await waitForAiRun(repository);
     expect(repository.listAiRuns()).toMatchObject([
       {
         versions: {
-          policyVersion: WIDGET_AI_POLICY_VERSION,
-          promptVersion: WIDGET_AI_PROMPT_VERSION,
-          disclosureVersion: WIDGET_AI_DISCLOSURE_VERSION,
-          assetVersion: LEGACY_S05_ASSET_VERSION
+          policyVersion: manifest.liveV2.policyVersion,
+          promptVersion: "granit_model_turn_prompt.v1",
+          disclosureVersion: manifest.liveV2.disclosureVersion,
+          assetVersion: manifest.liveV2.assetVersion
         }
       }
     ]);
   });
 });
+
+function testJobWorkerOptions() {
+  return {
+    enabled: true,
+    pollIntervalMs: 10,
+    leaseMs: 5_000,
+    retryBackoffMs: 10,
+    maxAttempts: 3
+  };
+}
+
+async function waitForAiRun(repository: MemoryIntakeRepository): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (repository.listAiRuns().length > 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("timed out waiting for approved-assets run");
+}
 
 function widgetRequest(idempotencyKey: string): SiteWidgetMessageRequest {
   return {

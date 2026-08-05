@@ -29,7 +29,8 @@ const activeMigrationManifest = [
   "0017_ai_schema_reconciliation.sql",
   "0018_widget_ai_turn_identity.sql",
   "0019_widget_ai_latest_wins.sql",
-  "0020_direct_live_v2_turn_contract.sql"
+  "0020_direct_live_v2_turn_contract.sql",
+  "0021_ai_run_attempts.sql"
 ];
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");

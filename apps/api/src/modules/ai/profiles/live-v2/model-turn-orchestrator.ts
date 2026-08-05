@@ -6,6 +6,7 @@ import {
 } from "./live-v2-assets.js";
 import { buildLiveV2TurnView } from "./live-v2-context.js";
 import type { LiveV2Gate, LiveV2TurnView } from "./live-v2-contract.js";
+import { liveV2GateSnapshotPlan } from "./live-v2-apply-plan.js";
 import type {
   LiveV2DecisionGenerator,
   LiveV2GeneratorInput,
@@ -152,7 +153,7 @@ export async function executeModelTurn(input: {
 }
 
 function gateClosed(gate: LiveV2Gate): boolean {
-  return !gate.agentAllowedToReply || gate.aiState !== "ai_collecting_info";
+  return liveV2GateSnapshotPlan(gate) !== null;
 }
 
 function terminalNoReply(

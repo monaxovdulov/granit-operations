@@ -10,6 +10,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApi } from "../src/app.js";
 import { PostgresAiRunRepository } from "../src/modules/ai/repositories/postgres-ai-run-repository.js";
 import { PostgresIntakeRepository } from "../src/modules/conversations/repositories/postgres-intake-repository.js";
+import { TEST_LIVE_V2_FACTS } from "./fixtures/live-v2-synthetic.v1.js";
 import { MemoryIntakeRepository } from "./helpers/memory-intake-repository.js";
 import {
   MemoryManagerAuthRepository,
@@ -33,13 +34,16 @@ describe("P3 protected manager AI quality visibility", () => {
       repository,
       widgetAi: {
         enabled: true,
-        modelName: "p3-manager-fake",
-        provider: {
-          providerKind: "fake",
-          async generateReply() {
-            throw new Error(RAW_PROVIDER_CANARY);
-          }
-        }
+        directLiveV2: {
+          generator: {
+            async generateDecision() {
+              throw new Error(RAW_PROVIDER_CANARY);
+            }
+          },
+          modelName: "gpt-5.6-luna",
+          approvedFacts: TEST_LIVE_V2_FACTS
+        },
+        jobWorker: testJobWorkerOptions()
       },
       managerAuth: {
         repository: managerAuthRepository,
@@ -56,11 +60,11 @@ describe("P3 protected manager AI quality visibility", () => {
     expect(intakeResponse.statusCode).toBe(202);
     expect(intakeResponse.json()).toMatchObject({
       automation: {
-        status: "fallback",
-        reason: "model_error",
-        next_step: "manager_review"
+        status: "processing",
+        next_step: "poll_history"
       }
     });
+    await waitForTerminalHistory(app, intakeResponse.json().public_session_id);
 
     const leadId = repository.onlyLead().leadId;
     const unauthenticated = await app.inject({
@@ -80,8 +84,8 @@ describe("P3 protected manager AI quality visibility", () => {
 
     const quality = authenticated.json().lead.conversations[0]?.latestUnresolvedAiQuality;
     expect(quality).toEqual({
-      eventType: "model_failure",
-      reasonCode: "model_error",
+      eventType: "runtime_failure",
+      reasonCode: "runtime_failed",
       severity: "critical",
       runStatus: "fallback_unavailable",
       createdAt: expect.any(String)
@@ -138,14 +142,17 @@ postgresDescribe("P3 PostgreSQL latest unresolved AI quality selection", () => {
       repository,
       widgetAi: {
         enabled: true,
-        modelName: "p3-postgres-fake",
-        provider: {
-          providerKind: "fake",
-          async generateReply() {
-            throw new Error(RAW_PROVIDER_CANARY);
-          }
+        directLiveV2: {
+          generator: {
+            async generateDecision() {
+              throw new Error(RAW_PROVIDER_CANARY);
+            }
+          },
+          modelName: "gpt-5.6-luna",
+          approvedFacts: TEST_LIVE_V2_FACTS
         },
-        runRepository
+        runRepository,
+        jobWorker: testJobWorkerOptions()
       }
     });
     openApps.push(app);
@@ -155,9 +162,8 @@ postgresDescribe("P3 PostgreSQL latest unresolved AI quality selection", () => {
       url: "/public/intake/site-widget/messages",
       payload: validWidgetRequest({ idempotencyKey: "p3-quality-postgres-0001" })
     });
-    expect(first.json()).toMatchObject({
-      automation: { status: "fallback", reason: "model_error" }
-    });
+    expect(first.json()).toMatchObject({ automation: { status: "processing" } });
+    await waitForTerminalHistory(app, first.json().public_session_id);
 
     const eventRows = await database.db.select().from(aiQualityEvents);
     expect(eventRows).toHaveLength(1);
@@ -205,14 +211,40 @@ postgresDescribe("P3 PostgreSQL latest unresolved AI quality selection", () => {
 
     const detail = await repository.getManagerLead(leadId);
     expect(detail?.conversations[0]?.latestUnresolvedAiQuality).toEqual({
-      eventType: "model_failure",
-      reasonCode: "model_error",
+      eventType: "runtime_failure",
+      reasonCode: "runtime_failed",
       severity: "critical",
       runStatus: "fallback_unavailable",
       createdAt: openCreatedAt.toISOString()
     });
   });
 });
+
+function testJobWorkerOptions() {
+  return {
+    enabled: true,
+    pollIntervalMs: 10,
+    leaseMs: 5_000,
+    retryBackoffMs: 10,
+    maxAttempts: 1
+  };
+}
+
+async function waitForTerminalHistory(
+  app: ReturnType<typeof buildApi>,
+  publicSessionId: string
+): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const response = await app.inject({
+      method: "GET",
+      url: `/public/intake/site-widget/sessions/${publicSessionId}/history?schema_version=site_widget.history.v2`
+    });
+    const status = response.json().messages?.[0]?.automation?.status;
+    if (status && !["pending", "processing", "retrying"].includes(status)) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("timed out waiting for protected manager quality turn");
+}
 
 function validWidgetRequest(
   overrides: { idempotencyKey?: string; publicSessionId?: string } = {}
