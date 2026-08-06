@@ -1,7 +1,7 @@
 # Goal: AI Runtime Convergence и очистка репозитория
 
-Статус: `implementing`; активный срез — CONV-4 по карточке
-`AI_REF_CONV_4_ACTIVE_DOCUMENTATION_RU.md`. Goal запущена 2026-08-04. Обязательный
+Статус: `implementing`; активный срез — CONV-5 по карточке
+`AI_REF_CONV_5_ANTI_CLUTTER_GUARDRAILS_RU.md`. Goal запущена 2026-08-04. Обязательный
 current-main repair PR2 получил свежий independent `accept` и опубликован
 в `origin/main` commit `ca1cdb798829674e40b4eab7e4e948476e71d61c`. CONV-1
 получил свежий independent `accept` и опубликован в `origin/main` commit
@@ -13,6 +13,8 @@ commit `8122a8ef44568d6b97dccee54dee074c4a1c4733`. Владелец выбрал
 системную модель logical run + child attempt ledger и явно вставил CONV-3A
 перед CONV-4. CONV-3A получил пятый independent `accept` и опубликован в
 `origin/main` commit `e4cfe371a96ff5a7a3262c19c02776a36d979936`.
+CONV-4 получил третий independent `accept` и опубликован в `origin/main` commit
+`d3f9cbd2213ec60bba3953c43f212aa307fd8175`.
 
 Goal ID: `AI-RUNTIME-CONVERGENCE`.
 
@@ -273,8 +275,8 @@ ai_run_attempts  -> физические lease/model attempts, включая fa
 
 ### CONV-4: Active documentation reduction
 
-Точная compact card реализации:
-`docs/tasks/AI_REF_CONV_4_ACTIVE_DOCUMENTATION_RU.md`.
+Retired compact card и publication provenance перечислены в
+`docs/tasks/ARCHIVE_RU.md`.
 
 Один результат: новый агент получает обязательный AI-контекст из небольшого
 repo-local набора, а история остаётся доступной без участия в active routing.
@@ -317,8 +319,13 @@ repo-local набора, а история остаётся доступной �
 
 ### CONV-5: Anti-clutter guardrails
 
-Один результат: CI/local architecture checks блокируют возврат второго runtime
-и разрастание активной AI-документации.
+Точная compact card реализации:
+`docs/tasks/AI_REF_CONV_5_ANTI_CLUTTER_GUARDRAILS_RU.md`.
+
+Один результат: repo-local architecture check, когда его запускает обычный
+`build`/CI entrypoint, блокирует возврат второго runtime и разрастание активной
+AI-документации. Неизменяемое внешнее принуждение самого entrypoint относится к
+CI/branch-protection конфигурации и не входит в этот repo-local срез.
 
 Guardrails:
 
@@ -399,7 +406,9 @@ artifacts не коммитятся.
   может стать победителем или оставить неоднозначный итог.
 - App-owned observability остаётся sanitized source of truth.
 - Активная документация компактна и repo-local.
-- Guardrails предотвращают повторное появление dual runtime и active-doc sprawl.
+- Guardrails предотвращают повторное появление dual runtime и active-doc sprawl
+  внутри проверяемого build boundary; защита самого invocation boundary требует
+  отдельной внешней CI/branch-protection настройки.
 - Нет production deploy/activation без отдельного owner approval.
 
 ## 11. Rollback Goal
@@ -421,17 +430,17 @@ docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md.
 Сначала прочитай AGENTS.md, README.md, docs/source-of-truth.md,
 docs/AGENT_WORKFLOW.md, AI refactor playbook, minimal Goal governance, ADR-012,
 owner architecture docs, эту Goal и
-docs/tasks/AI_REF_CONV_4_ACTIVE_DOCUMENTATION_RU.md.
+docs/tasks/AI_REF_CONV_5_ANTI_CLUTTER_GUARDRAILS_RU.md.
 
 Фактическая опубликованная база передачи:
-e4cfe371a96ff5a7a3262c19c02776a36d979936. Сначала заново проверь
-HEAD/origin/main, dirty tree, active-doc routes и inbound links; `output/` не
-трогай. Продолжи только CONV-4 по точному deletion allowlist карточки. Не
-изменяй code/schema/tests, accepted ADR/release evidence, public contract,
-prompt/model/policy, deploy или внешние repo.
+d3f9cbd2213ec60bba3953c43f212aa307fd8175. Сначала заново проверь
+HEAD/origin/main, dirty tree, package/build/architecture checks и active-doc
+routes; `output/` не трогай. Продолжи только CONV-5 по точной карточке. Не
+изменяй production behavior, schema/migrations/public contract,
+prompt/model/tools/policy/privacy/send gate/takeover, deploy или внешние repo.
 
 После technical_done остановись для свежего независимого Reviewer. Только
 после independent `accept` сделай понятный русский commit и обычный push;
-затем перейди к CONV-5. Субагенты/Multi-agent/Terra/Ultra, force-push и deploy
-запрещены.
+затем проведи общий teach-back. Субагенты/Multi-agent/Terra/Ultra, force-push и
+deploy запрещены.
 ```

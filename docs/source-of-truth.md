@@ -2,6 +2,23 @@
 
 Status: active repo-local source map approved by the owner on 2026-08-04
 
+<!-- architecture-guard: active-ai-documents
+AGENTS.md
+README.md
+docs/AGENT_WORKFLOW.md
+docs/AI_AGENT_REFACTOR_PLAYBOOK_RU.md
+docs/adr/ADR-010-AI_OBSERVABILITY_RUNTIME_BOUNDARY_RU.md
+docs/adr/ADR-011-CUSTOMER_FACING_LANDING_SOURCE_RU.md
+docs/adr/ADR-012-REPO_LOCAL_AI_SOURCE_OF_TRUTH_RU.md
+docs/architecture/AI_LIVE_AGENT_REFACTOR_FINAL_OWNER_REVIEW_RU.md
+docs/architecture/AI_LIVE_AGENT_REFACTOR_OWNER_SPEC_RU.md
+docs/architecture/AI_REFACTOR_MINIMAL_GOAL_GOVERNANCE_RU.md
+docs/source-of-truth.md
+docs/tasks/AI_REF_CONV_5_ANTI_CLUTTER_GUARDRAILS_RU.md
+docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md
+docs/tasks/README.md
+-->
+
 `granit-operations` no longer depends on an external planning repository for AI
 architecture, scope, gates or implementation order.
 
@@ -22,7 +39,7 @@ The active decision hierarchy is:
 3. `docs/architecture/AI_LIVE_AGENT_REFACTOR_OWNER_SPEC_RU.md`;
 4. `docs/architecture/AI_REFACTOR_MINIMAL_GOAL_GOVERNANCE_RU.md`;
 5. `docs/AI_AGENT_REFACTOR_PLAYBOOK_RU.md`;
-6. `docs/tasks/AI_REF_CONV_4_ACTIVE_DOCUMENTATION_RU.md`, единственная active
+6. `docs/tasks/AI_REF_CONV_5_ANTI_CLUTTER_GUARDRAILS_RU.md`, единственная active
    AI-card, и exact-SHA evidence;
 7. current code, contracts, migrations and tests for factual implementation
    details not decided above.
@@ -53,8 +70,8 @@ Mastra dependency/runtime и executable `legacy_s05` path удалены при�
 CONV-3. Единственный production assembly использует app-owned direct model
 boundary; возвращение второго runtime требует нового accepted ADR/owner gate.
 
-Активный порядок определяется Goal `AI-RUNTIME-CONVERGENCE`: сейчас CONV-4,
-затем CONV-5 и общий teach-back. PR0a—PR9, AI_DIALOG/Mastra и S01—S15 —
+Активный порядок определяется Goal `AI-RUNTIME-CONVERGENCE`: сейчас CONV-5,
+затем общий teach-back. PR0a—PR9, CONV-1—CONV-4, AI_DIALOG/Mastra и S01—S15 —
 исторические этапы, не active routing.
 
 ## Active AI Route

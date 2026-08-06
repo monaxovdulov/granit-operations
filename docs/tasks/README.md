@@ -8,8 +8,9 @@
 
 1. `../source-of-truth.md` — карта полномочий и фактического состояния.
 2. `AI_RUNTIME_CONVERGENCE_GOAL_RU.md` — утверждённая долгоживущая Goal.
-3. `AI_REF_CONV_4_ACTIVE_DOCUMENTATION_RU.md` — единственная active AI-card:
-   CONV-4 сокращает активную документацию перед CONV-5 guardrails.
+3. `AI_REF_CONV_5_ANTI_CLUTTER_GUARDRAILS_RU.md` — единственная active AI-card:
+   CONV-5 закрепляет single-runtime и documentation guardrails перед общим
+   teach-back.
 
 Шаблон новой карточки: `AI_REFACTOR_SLICE_TEMPLATE_RU.md`.
 

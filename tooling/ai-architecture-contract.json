@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "production": {
+    "roots": [
+      "apps/api/src/index.ts",
+      "apps/api/src/app.ts"
+    ],
+    "assembly_paths": [
+      "apps/api/src/widget-ai-runtime-assembly.ts"
+    ],
+    "provider_boundary": "apps/api/src/modules/ai/adapters/openai-live-v2-decision-generator.ts",
+    "source_count": 140,
+    "source_paths_sha256": "95f2c18c9ddc7aaba769ec2f422bbfffaa35d8b7881f5c5548ba726d08827781",
+    "source_contents_sha256": "efc78259159baf5ee4980a503f17a16eae0a1b5d89fe520d3c9d2b4fe356cfdf"
+  },
+  "documents": {
+    "active_goal": "docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md",
+    "active_card": "docs/tasks/AI_REF_CONV_5_ANTI_CLUTTER_GUARDRAILS_RU.md",
+    "active_authority_paths": [
+      "AGENTS.md",
+      "README.md",
+      "docs/AGENT_WORKFLOW.md",
+      "docs/AI_AGENT_REFACTOR_PLAYBOOK_RU.md",
+      "docs/adr/ADR-010-AI_OBSERVABILITY_RUNTIME_BOUNDARY_RU.md",
+      "docs/adr/ADR-011-CUSTOMER_FACING_LANDING_SOURCE_RU.md",
+      "docs/adr/ADR-012-REPO_LOCAL_AI_SOURCE_OF_TRUTH_RU.md",
+      "docs/architecture/AI_LIVE_AGENT_REFACTOR_FINAL_OWNER_REVIEW_RU.md",
+      "docs/architecture/AI_LIVE_AGENT_REFACTOR_OWNER_SPEC_RU.md",
+      "docs/architecture/AI_REFACTOR_MINIMAL_GOAL_GOVERNANCE_RU.md",
+      "docs/source-of-truth.md",
+      "docs/tasks/AI_REF_CONV_5_ANTI_CLUTTER_GUARDRAILS_RU.md",
+      "docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md",
+      "docs/tasks/README.md"
+    ],
+    "allowed_provenance_paths": [
+      "docs/tasks/ARCHIVE_RU.md"
+    ],
+    "task_count": 21,
+    "task_paths_sha256": "851eb09545d0113d4f12d3beebee93af3a7ed71592196bb97949b2061cf11b6f",
+    "routing_surface_hashes": {
+      "docs/source-of-truth.md": "55d6f093ca4f15b8f4c1c57552648e861afd79eb96c9a49cfd482de030126f15",
+      "docs/tasks/README.md": "8d3893bbe47b7e87e0a433ee49ac00782cf1557e0c834327730de77ae7893068"
+    }
+  },
+  "compatibility": {
+    "legacy_roots": [
+      "apps/api/src/auth",
+      "apps/api/src/repositories",
+      "apps/api/src/routes",
+      "apps/api/src/services"
+    ],
+    "entries": [
+      { "path": "apps/api/src/auth/cookies.ts", "targets": ["../modules/auth/cookies.js"] },
+      { "path": "apps/api/src/auth/manager-auth.ts", "targets": ["../modules/auth/manager-auth.js"] },
+      { "path": "apps/api/src/auth/session.ts", "targets": ["../modules/auth/session.js"] },
+      { "path": "apps/api/src/auth/yandex-oauth.ts", "targets": ["../modules/auth/yandex-oauth.js"] },
+      { "path": "apps/api/src/repositories/intake-repository.ts", "targets": ["../modules/conversations/repositories/intake-repository.js"] },
+      { "path": "apps/api/src/repositories/manager-auth-repository.ts", "targets": ["../modules/auth/repositories/manager-auth-repository.js"] },
+      { "path": "apps/api/src/repositories/postgres-intake-repository.ts", "targets": ["../modules/conversations/repositories/postgres-intake-repository.js"] },
+      { "path": "apps/api/src/repositories/postgres-manager-auth-repository.ts", "targets": ["../modules/auth/repositories/postgres-manager-auth-repository.js"] },
+      { "path": "apps/api/src/repositories/telegram-delivery-repository.ts", "targets": ["../modules/delivery/repositories/telegram-delivery-repository.js"] },
+      { "path": "apps/api/src/routes/manager-auth.ts", "targets": ["../modules/auth/routes/manager-auth-routes.js"] },
+      { "path": "apps/api/src/routes/manager-shell.ts", "targets": ["../modules/manager/routes/manager-shell-routes.js"] },
+      { "path": "apps/api/src/routes/manager.ts", "targets": ["../modules/manager/routes/manager-routes.js"] },
+      { "path": "apps/api/src/routes/public-intake.ts", "targets": ["../modules/intake/routes/public-intake-routes.js"] },
+      { "path": "apps/api/src/routes/telegram.ts", "targets": ["../modules/telegram/inbound/routes/telegram-routes.js"] },
+      { "path": "apps/api/src/services/postgres-advisory-lock.ts", "targets": ["../modules/delivery/services/postgres-advisory-lock.js"] },
+      { "path": "apps/api/src/services/public-intake-service.ts", "targets": ["../modules/intake/use-cases/public-intake-service.js"] },
+      { "path": "apps/api/src/services/public-widget-intake-service.ts", "targets": ["../modules/intake/use-cases/public-widget-intake-service.js"] },
+      { "path": "apps/api/src/services/telegram-bot-service.ts", "targets": ["../modules/telegram/inbound/telegram-bot-service.js"] },
+      { "path": "apps/api/src/services/telegram-delivery-service.ts", "targets": ["../modules/delivery/adapters/telegram-bot-api-delivery-provider.js", "../modules/delivery/services/telegram-delivery-service.js"] },
+      { "path": "apps/api/src/services/telegram-delivery-worker.ts", "targets": ["../modules/delivery/services/telegram-delivery-worker.js"] }
+    ]
+  }
+}

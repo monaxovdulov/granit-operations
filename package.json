@@ -8,7 +8,8 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run typecheck && npm -w @granit/manager run build",
+    "build": "npm run check:architecture && npm run typecheck && npm -w @granit/manager run build",
+    "check:architecture": "node tooling/ai-architecture-guardrails.mjs && node --test tooling/ai-architecture-guardrails.test.mjs",
     "build:catalog-knowledge": "tsx apps/api/src/scripts/build-catalog-knowledge.ts",
     "typecheck": "npm run typecheck:api && npm -w @granit/manager run typecheck",
     "typecheck:api": "node tooling/typecheck-bounded.mjs",

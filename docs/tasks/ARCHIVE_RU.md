@@ -16,6 +16,12 @@ release evidence и активной карточкой из `docs/tasks/README.
 | CONV-2 turn contract/direct cutover | `4d567d8acfef3718d92358c3980430539aea367d` | Goal, owner architecture и current model-turn contract/tests |
 | CONV-3 Mastra/legacy removal | `8122a8ef44568d6b97dccee54dee074c4a1c4733` | Goal и current single-runtime assembly |
 | CONV-3A logical run/attempt ledger | `e4cfe371a96ff5a7a3262c19c02776a36d979936` | Goal, migration `0022`, schema/repositories и PostgreSQL evidence tests |
+| CONV-4 active documentation reduction | `d3f9cbd2213ec60bba3953c43f212aa307fd8175` | Source map, task index, этот archive и current CONV-5 card |
+
+CONV-4 принят fresh independent Reviewer в session
+`019fd523-6f6f-7741-9133-3556d176c55e` с verdict `accept` на fingerprint
+`c89b49a847bf45813d3708bde8cd26ca60e4982fafe85f047a612f957c4fba76`;
+замечаний всех уровней не было.
 
 Удалённые карточки:
 
@@ -24,6 +30,7 @@ AI_RUNTIME_CONVERGENCE_CONV_1_DIRECT_LIVE_V2_ADAPTER_RU.md
 AI_RUNTIME_CONVERGENCE_CONV_2_TURN_CONTRACT_RU.md
 AI_RUNTIME_CONVERGENCE_CONV_3_RUNTIME_REMOVAL_RU.md
 AI_RUNTIME_CONVERGENCE_CONV_3A_ATTEMPT_LEDGER_RU.md
+AI_REF_CONV_4_ACTIVE_DOCUMENTATION_RU.md
 ```
 
 ## AI refactor PR0a—PR2 и source realignment
