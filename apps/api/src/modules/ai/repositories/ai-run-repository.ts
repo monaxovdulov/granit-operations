@@ -191,6 +191,7 @@ export type AiQualityEventWrite = {
 };
 
 export type BeginAiRunInput = {
+  /** Attempt trace; the logical run keeps the first accepted trace for compatibility. */
   traceId: string;
   leadId: string;
   conversationId: string;
@@ -199,6 +200,11 @@ export type BeginAiRunInput = {
   runtimeMode: AiRunRuntimeMode;
   decisionProfile: AiRunDecisionProfile;
   idempotencyKey: string;
+  attemptIdempotencyKey: string;
+  attemptNumber: number;
+  jobId?: string;
+  jobAttemptCount: number;
+  maxAttempts?: number;
   inputFingerprint: string;
   versions: AiRunVersions;
   model: AiRunModelConfig;
@@ -208,6 +214,17 @@ export type BeginAiRunInput = {
 export type RunningAiRunRecord = BeginAiRunInput & {
   id: string;
   status: "running";
+  attempt: {
+    id: string;
+    attemptNumber: number;
+    jobId?: string;
+    jobAttemptCount: number;
+    maxAttempts?: number;
+    idempotencyKey: string;
+    traceId: string;
+    inputFingerprint: string;
+    startedAt: Date;
+  };
 };
 
 export type AiRunTerminalCompletion = {
@@ -239,6 +256,7 @@ export type AiRunTerminalCompletion = {
 export type TerminalAiRunRecord = Omit<RunningAiRunRecord, "status"> &
   AiRunTerminalCompletion & {
     outboundMessageId?: string;
+    winningAttemptId?: string;
   };
 
 export type BeginAiRunResult =
@@ -257,4 +275,14 @@ export interface AiRunRepository {
     run: RunningAiRunRecord;
     completion: AiRunTerminalCompletion;
   }): Promise<TerminalAiRunRecord>;
+
+  failAttempt(input: {
+    run: RunningAiRunRecord;
+    completion: AiRunTerminalCompletion;
+  }): Promise<void>;
+
+  fenceAttempt(input: {
+    run: RunningAiRunRecord;
+    completion: AiRunTerminalCompletion;
+  }): Promise<void>;
 }

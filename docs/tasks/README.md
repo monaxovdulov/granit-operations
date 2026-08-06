@@ -10,6 +10,9 @@ docs/tasks/TEMPLATE_RU.md
 
 Current task records:
 
+- `AI_RUNTIME_CONVERGENCE_CONV_3A_ATTEMPT_LEDGER_RU.md` - единственная
+  активная AI-карточка: owner-approved разделение одного logical `ai_run` и
+  дочерних durable lease/model attempts перед CONV-4.
 - `AI_RUNTIME_CONVERGENCE_CONV_1_DIRECT_LIVE_V2_ADAPTER_RU.md` - independently
   `accepted` and published card: direct OpenAI Responses parity adapter for the existing
   provider-neutral live-v2 pipeline, without runtime cutover or model call;
@@ -17,8 +20,8 @@ Current task records:
 - `AI_RUNTIME_CONVERGENCE_GOAL_RU.md` - active multi-slice Goal for direct
   live-v2 convergence, Mastra/legacy removal, active-doc reduction and
   anti-clutter guardrails; prerequisite PR2 backlog repair is independently
-  `accepted` and published; CONV-1 is also accepted/published, and CONV-2 is
-  stopped at its exact output-contract owner gate before working code.
+  `accepted` and published; CONV-1—CONV-3 are accepted/published, and planned
+  CONV-3A attempt ledger is the next technical slice before CONV-4.
 - `AI_REF_SOURCE_OF_TRUTH_REALIGNMENT_RU.md` - owner-approved move to
   repo-local AI authority: current code, app-owned queue/direct runtime and
   `PR0a-PR9` replace external planning dependencies.

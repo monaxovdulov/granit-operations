@@ -85,9 +85,7 @@ describe("M2 AI run runtime evidence", () => {
       { ...completion, costEstimateMicrounits: -1 },
       { ...completion, costEstimateMicrounits: 2_147_483_648 }
     ]) {
-      expect(() => sanitizeAiRunCompletion(candidate)).toThrow(
-        AiObservabilitySanitizationError
-      );
+      expect(() => sanitizeAiRunCompletion(candidate)).toThrow(AiObservabilitySanitizationError);
     }
   });
 
@@ -100,9 +98,7 @@ describe("M2 AI run runtime evidence", () => {
       { ...completion, costRateVersion: "authorization.v1" },
       { ...completion, costRateVersion: "r".repeat(161) }
     ]) {
-      expect(() => sanitizeAiRunCompletion(candidate)).toThrow(
-        AiObservabilitySanitizationError
-      );
+      expect(() => sanitizeAiRunCompletion(candidate)).toThrow(AiObservabilitySanitizationError);
     }
   });
 });
@@ -117,6 +113,9 @@ function beginInput(): BeginAiRunInput {
     runtimeMode: "mastra_openai_api",
     decisionProfile: "live_v2",
     idempotencyKey: "ai-turn:00000000-0000-4000-8000-000000000204",
+    attemptIdempotencyKey: "ai-turn:00000000-0000-4000-8000-000000000204:attempt:1",
+    attemptNumber: 1,
+    jobAttemptCount: 1,
     inputFingerprint: "c".repeat(64),
     versions: {
       policyVersion: "m2_policy.v1",
@@ -149,7 +148,21 @@ function directBeginInput(): BeginAiRunInput {
 }
 
 function runningRecord(): RunningAiRunRecord {
-  return { ...beginInput(), id: "m2-run", status: "running" };
+  const input = beginInput();
+  return {
+    ...input,
+    id: "m2-run",
+    status: "running",
+    attempt: {
+      id: "m2-attempt",
+      attemptNumber: 1,
+      jobAttemptCount: 1,
+      idempotencyKey: input.attemptIdempotencyKey,
+      traceId: input.traceId,
+      inputFingerprint: input.inputFingerprint,
+      startedAt: input.startedAt
+    }
+  };
 }
 
 async function start(

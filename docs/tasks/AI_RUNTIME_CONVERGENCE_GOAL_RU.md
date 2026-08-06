@@ -6,11 +6,12 @@ current-main repair PR2 получил свежий independent `accept` и оп
 получил свежий independent `accept` и опубликован в `origin/main` commit
 `aff347bb00d07f8ee40f86203bd27a6a99b5b40f`. CONV-2 получил свежий
 independent `accept` и опубликован в `origin/main` commit
-`4d567d8acfef3718d92358c3980430539aea367d`. Активный срез — CONV-3 по карточке
-`AI_RUNTIME_CONVERGENCE_CONV_3_RUNTIME_REMOVAL_RU.md`; baseline callers
-зафиксирован до рабочего кода. Владелец одобрил точную migration для
-attempt-scoped retry. CONV-3 получил независимый `accept` и опубликован в
-commit `8122a8ef44568d6b97dccee54dee074c4a1c4733`. Следующий срез — CONV-4.
+`4d567d8acfef3718d92358c3980430539aea367d`. Владелец одобрил точную migration
+для attempt-scoped retry. CONV-3 получил независимый `accept` и опубликован в
+commit `8122a8ef44568d6b97dccee54dee074c4a1c4733`. Владелец выбрал более
+системную модель logical run + child attempt ledger и явно вставил CONV-3A
+перед CONV-4. Активный срез — planned CONV-3A по карточке
+`AI_RUNTIME_CONVERGENCE_CONV_3A_ATTEMPT_LEDGER_RU.md`.
 
 Goal ID: `AI-RUNTIME-CONVERGENCE`.
 
@@ -225,6 +226,45 @@ Mastra и legacy_s05 paths.
 - tests не становятся зелёными из-за удаления assertions;
 - direct rollback описан на уровне предыдущего accepted commit.
 
+После independent `accept` автоматически перейти к CONV-3A.
+
+### CONV-3A: Logical run и durable attempt ledger
+
+Точная compact card реализации:
+`docs/tasks/AI_RUNTIME_CONVERGENCE_CONV_3A_ATTEMPT_LEDGER_RU.md`.
+
+Owner decision 2026-08-05: минимальная модель из migration `0021`, где каждая
+lease attempt является отдельным `ai_run`, заменяется versioned двухуровневой
+моделью для новых записей:
+
+```text
+ai_runs          -> один логический response window / итог хода
+ai_run_attempts  -> физические lease/model attempts, включая failed/fenced
+```
+
+Разрешено:
+
+- новая repo-local migration/schema для child attempt ledger и winning linkage;
+- раздельные logical-run/attempt repository contracts;
+- atomic attempt/run/outbound/job completion;
+- upgrade/read compatibility, PostgreSQL concurrency и migration tests.
+
+Не разрешено:
+
+- эвристическое destructive объединение исторических runs;
+- public contract, prompt/model/tools/policy/privacy/send-gate/takeover changes;
+- deploy, внешнее применение migration, secrets или платный provider call;
+- смешивание с CONV-4 documentation cleanup.
+
+Критерии:
+
+- один logical run переживает retries и имеет максимум одну winning attempt;
+- stale worker завершает только свою attempt как fenced и не пишет outbound;
+- retry/max-attempt/replay не оставляют необъяснимый logical `running`;
+- review/eval/manager linkage остаётся стабильным по `ai_run_id`;
+- fresh/upgrade migrations, real PostgreSQL races, typecheck/build и независимый
+  Code Scout проходят.
+
 После independent `accept` автоматически перейти к CONV-4.
 
 ### CONV-4: Active documentation reduction
@@ -295,9 +335,9 @@ Goal завершается только после independent `accept` CONV-5 
 4. включить runtime, использовать secrets, сделать платный внешний вызов,
    deploy или изменить другой repo.
 
-Создание этой карточки не снимает перечисленные стоп-гейты. При запуске Goal
-владелец может отдельно одобрить точный CONV-1 scope. CONV-2 всё равно требует
-точного решения по output contract до рабочего кода. Commit и обычный push
+Исторические owner gates CONV-1—CONV-3 уже разрешены и приняты. Владелец
+отдельно разрешил architecture/roadmap/schema scope точной карточки CONV-3A.
+Остальные перечисленные стоп-гейты сохраняются. Commit и обычный push
 accepted-срезов в `origin/main` уже одобрены; force-push не одобрен.
 
 ## 8. Commit и push protocol
@@ -348,6 +388,8 @@ artifacts не коммитятся.
 - Public intake не ждёт model call и работает через durable queue.
 - Latest-wins, fresh context, cancellation, commit fence и takeover доказаны.
 - Model output, validated plan и committed turn разделены явными контрактами.
+- Logical AI run отделён от физических retry/lease attempts; stale attempt не
+  может стать победителем или оставить неоднозначный итог.
 - App-owned observability остаётся sanitized source of truth.
 - Активная документация компактна и repo-local.
 - Guardrails предотвращают повторное появление dual runtime и active-doc sprawl.
@@ -370,13 +412,20 @@ runtime, legacy code и удалённые документы.
 docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md.
 
 Сначала прочитай AGENTS.md, README.md, docs/source-of-truth.md,
-docs/AGENT_WORKFLOW.md, ADR-012, owner architecture docs, minimal Goal
-governance и эту Goal-карточку. Зафиксируй фактические HEAD/origin/main, dirty
-worktree и baseline callers. Не меняй код до компактной карточки CONV-1.
+docs/AGENT_WORKFLOW.md, AI refactor playbook, minimal Goal governance, ADR-012,
+owner architecture docs, эту Goal и
+docs/tasks/AI_RUNTIME_CONVERGENCE_CONV_3A_ATTEMPT_LEDGER_RU.md.
 
-Начни только CONV-1: direct live-v2 adapter parity без runtime cutover, prompt,
-model, policy, schema, public contract, deploy или платного model call. После
-technical_done остановись для свежего независимого Reviewer. Commit/push только
-после independent accept по publish-протоколу Goal; отдельное поручение для
-каждого accepted-среза не требуется. Force-push и deploy запрещены.
+Фактическая опубликованная база передачи:
+1fb13c6e6ca743b06495a9a1740b33b5c810dfc8. Сначала заново проверь
+HEAD/origin/main, dirty tree, current schema, callers и FK/read consumers;
+`output/` не трогай. Начни только CONV-3A: один logical `ai_run` и отдельные
+durable `ai_run_attempts` по уже одобренной карточке. Не смешивай CONV-4,
+public contract, prompt/model/policy, deploy или платные вызовы.
+
+До рабочего кода уточни в карточке migration/backfill/atomic ownership. После
+technical_done остановись для свежего независимого Reviewer. Только после
+independent `accept` сделай понятный русский commit и обычный push; затем
+перейди к CONV-4. Субагенты/Multi-agent/Terra/Ultra, force-push и deploy
+запрещены.
 ```

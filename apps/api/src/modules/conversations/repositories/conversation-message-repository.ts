@@ -36,6 +36,7 @@ export type WidgetAiTurnIdentity = {
 export type WidgetAiJobCommitIdentity = {
   jobId: string;
   attemptCount: number;
+  maxAttempts: number;
 };
 
 export function buildWidgetAiTurnIdempotencyKey(input: {
@@ -133,6 +134,7 @@ export type AcceptInboundMessageResult = {
       | "failed"
       | "superseded";
     attemptCount: number;
+    maxAttempts: number;
     terminalReason?: string;
   };
 };

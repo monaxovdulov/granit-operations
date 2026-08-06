@@ -29,7 +29,10 @@ describe("P3 centralized AI observability sanitizer", () => {
       usage: { inputTokens: 10, raw_response: RAW_CANARY },
       spans: [{ ...terminalCompletion().spans[0], raw_input: RAW_CANARY }],
       qualityEvents: [
-        { ...terminalCompletion().qualityEvents[0], customer_message: RAW_CANARY }
+        {
+          ...terminalCompletion().qualityEvents[0],
+          customer_message: RAW_CANARY
+        }
       ]
     };
 
@@ -73,10 +76,7 @@ describe("P3 centralized AI observability sanitizer", () => {
   });
 
   it("fails closed on secret or PII-shaped run and span identifiers", () => {
-    for (const idempotencyKey of [
-      "sk-proj-1234567890",
-      "ai-turn:raw-customer@example.test"
-    ]) {
+    for (const idempotencyKey of ["sk-proj-1234567890", "ai-turn:raw-customer@example.test"]) {
       expect(() => sanitizeAiRunStart({ ...beginInput(), idempotencyKey })).toThrow(
         AiObservabilitySanitizationError
       );
@@ -98,7 +98,10 @@ describe("P3 centralized AI observability sanitizer", () => {
 
   it("applies the same projection before the memory repository stores evidence", async () => {
     const repository = new MemoryAiRunRepository();
-    const pollutedStart = { ...beginInput(), raw_prompt: RAW_CANARY } as BeginAiRunInput;
+    const pollutedStart = {
+      ...beginInput(),
+      raw_prompt: RAW_CANARY
+    } as BeginAiRunInput;
     const started = await repository.beginOrReplay(pollutedStart);
     if (started.kind !== "started") throw new Error("expected started run");
 
@@ -125,6 +128,9 @@ function beginInput(): BeginAiRunInput {
     runtimeMode: "direct_openai",
     decisionProfile: "legacy_s05",
     idempotencyKey: "ai-turn:00000000-0000-4000-8000-000000000104",
+    attemptIdempotencyKey: "ai-turn:00000000-0000-4000-8000-000000000104:attempt:1",
+    attemptNumber: 1,
+    jobAttemptCount: 1,
     inputFingerprint: "b".repeat(64),
     versions: {
       policyVersion: "p3_policy.v1",
@@ -144,9 +150,7 @@ function beginInput(): BeginAiRunInput {
   };
 }
 
-function terminalCompletion(
-  run: RunningAiRunRecord = { ...beginInput(), id: "run-p3", status: "running" }
-): AiRunTerminalCompletion {
+function terminalCompletion(run: RunningAiRunRecord = runningRecord()): AiRunTerminalCompletion {
   return {
     status: "fallback_unavailable",
     normalizedAction: "no_reply",
@@ -177,5 +181,23 @@ function terminalCompletion(
         managerVisible: true
       }
     ]
+  };
+}
+
+function runningRecord(): RunningAiRunRecord {
+  const input = beginInput();
+  return {
+    ...input,
+    id: "run-p3",
+    status: "running",
+    attempt: {
+      id: "attempt-p3",
+      attemptNumber: 1,
+      jobAttemptCount: 1,
+      idempotencyKey: input.attemptIdempotencyKey,
+      traceId: input.traceId,
+      inputFingerprint: input.inputFingerprint,
+      startedAt: input.startedAt
+    }
   };
 }

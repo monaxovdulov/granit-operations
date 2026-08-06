@@ -412,7 +412,8 @@ export class PublicWidgetIntakeService {
               jobCommit: saved.widgetAiJob
                 ? {
                     jobId: saved.widgetAiJob.id,
-                    attemptCount: saved.widgetAiJob.attemptCount
+                    attemptCount: saved.widgetAiJob.attemptCount,
+                    maxAttempts: saved.widgetAiJob.maxAttempts
                   }
                 : undefined
             }
@@ -451,6 +452,10 @@ export class PublicWidgetIntakeService {
               saved.publicMessageId,
               "agent_reply_blocked"
             );
+          }
+
+          if (saved.widgetAiJob) {
+            throw error;
           }
 
           return this.transitionToManagerReviewOr503(

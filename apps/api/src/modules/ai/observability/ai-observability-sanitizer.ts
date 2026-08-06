@@ -165,6 +165,11 @@ export function sanitizeAiRunStart(value: unknown): BeginAiRunInput {
     runtimeMode: enumValue(AI_RUN_RUNTIME_MODES, input.runtimeMode),
     decisionProfile: enumValue(AI_RUN_DECISION_PROFILES, input.decisionProfile),
     idempotencyKey: aiRunIdempotencyKey(input.idempotencyKey),
+    attemptIdempotencyKey: aiRunIdempotencyKey(input.attemptIdempotencyKey),
+    attemptNumber: positiveCount(input.attemptNumber),
+    ...(input.jobId === undefined ? {} : { jobId: uuid(input.jobId) }),
+    jobAttemptCount: positiveCount(input.jobAttemptCount),
+    ...(input.maxAttempts === undefined ? {} : { maxAttempts: positiveCount(input.maxAttempts) }),
     inputFingerprint: fingerprint(input.inputFingerprint),
     versions,
     model: {
@@ -444,6 +449,14 @@ function count(value: unknown): number {
     throw new AiObservabilitySanitizationError();
   }
   return value;
+}
+
+function positiveCount(value: unknown): number {
+  const sanitized = count(value);
+  if (sanitized < 1) {
+    throw new AiObservabilitySanitizationError();
+  }
+  return sanitized;
 }
 
 function boolean(value: unknown): boolean {

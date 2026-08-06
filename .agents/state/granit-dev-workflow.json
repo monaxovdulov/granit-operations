@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
   "repo": "granit-operations",
-  "updated_at": "2026-08-05T19:20:00Z",
-  "git_head": "8122a8ef44568d6b97dccee54dee074c4a1c4733",
-  "mode": "planning",
-  "state": "ai_runtime_convergence_conv4_planned",
+  "updated_at": "2026-08-06T03:01:00Z",
+  "git_head": "1fb13c6e6ca743b06495a9a1740b33b5c810dfc8",
+  "mode": "implementation",
+  "state": "ai_runtime_convergence_conv3a_attempt_ledger_accepted_pending_publish",
   "dirty_worktree": {
-    "status": "clean_tracked_except_public_docs",
-    "summary": "accepted CONV-3 is published at 8122a8e; public README work remains separate and pre-existing output/ remains untouched"
+    "status": "conv3a_accepted_uncommitted",
+    "summary": "Fifth fresh independent review accepted the stable CONV-3A diff without findings; publication is pending; output/ remains untouched"
   },
   "context": {
     "last_scan_at": "2026-08-04T23:37:25Z",
@@ -19,9 +19,9 @@
     "last_refresh_at": "2026-08-04T23:37:25Z"
   },
   "task": {
-    "type": "ai-runtime-convergence-conv3",
-    "summary": "Remove executable Mastra and legacy_s05 paths so production has one direct app-owned runtime.",
-    "source": "docs/tasks/AI_RUNTIME_CONVERGENCE_CONV_3_RUNTIME_REMOVAL_RU.md; Goal remains docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md",
+    "type": "ai-runtime-convergence-conv3a",
+    "summary": "Separate one logical AI run from durable lease/model attempts before documentation cleanup.",
+    "source": "docs/tasks/AI_RUNTIME_CONVERGENCE_CONV_3A_ATTEMPT_LEDGER_RU.md; Goal remains docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md",
     "owner_decisions": {
       "conv2_runtime_model": {
         "decided_at": "2026-08-05",
@@ -34,6 +34,11 @@
         "decided_at": "2026-08-05",
         "decision": "replace the unique ai_runs inbound public message index with a non-unique index while preserving unique idempotency_key",
         "reason": "each reclaimed lease attempt needs its own fenced durable ai_run"
+      },
+      "conv3a_attempt_ledger": {
+        "decided_at": "2026-08-05",
+        "decision": "insert CONV-3A before CONV-4; keep one logical ai_run and store physical lease/model executions in versioned child ai_run_attempts",
+        "reason": "preserve stable logical review/eval identity, explicit fenced retries and a single atomic winning attempt instead of conflating turns with executions"
       }
     }
   },
@@ -52,6 +57,62 @@
       "command": "git diff --check",
       "status": "passed",
       "reason": "repair and evidence diff have no whitespace errors"
+    },
+    "conv3a_first_independent_review": {
+      "session_id": "019fd47d-eb13-7232-a3c8-4c3a3e3244bc",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "high",
+      "status": "changes_requested",
+      "reason": "found running replay trace mismatch, incomplete terminalization after immediate abort/final lease loss, and cross-run/cascading attempt evidence FKs"
+    },
+    "conv3a_repair_evidence": {
+      "fingerprint": "3244ad04b6315bc15d46f15e1895f0e73499feda9cc5c4e2543cac3df6d59c67",
+      "status": "technical_done",
+      "reason": "PostgreSQL runtime 28/28, migrations 8/8, focused changed tests 21/21, build/typecheck and diff check passed; full suite 357 passed, 2 skipped, only 3 inherited baseline failures"
+    },
+    "conv3a_second_independent_review": {
+      "session_id": "019fd498-d842-7aa1-b6af-6464975b1f75",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "high",
+      "status": "changes_requested",
+      "reason": "found terminal superseded jobs that could orphan logical runs and a final-lease-before-begin race that allowed a late running ledger"
+    },
+    "conv3a_final_repair_evidence": {
+      "fingerprint": "1528f6bcb3255e460944b04ea598e0d42f3348fe3398df5f7aa687bba1c43bc6",
+      "status": "technical_done",
+      "reason": "PostgreSQL runtime 30/30, migrations 8/8, focused changed tests 21/21, build/typecheck and diff check passed; full suite 359 passed, 2 skipped, only 3 inherited baseline failures"
+    },
+    "conv3a_third_independent_review": {
+      "session_id": "019fd4b0-efe2-7fa1-a11d-c4ec94dc0433",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "high",
+      "status": "changes_requested",
+      "reason": "found a production-reachable pre-begin retry gap that could reject the next ledger attempt or orphan a logical run, plus false-green job/lease and terminalization behavior in the memory intake helper"
+    },
+    "conv3a_third_repair_evidence": {
+      "fingerprint": "59a75faff1875a52beb137182c684ddcbd64866a37f9acf27a2c1774da3ae7b6",
+      "status": "technical_done",
+      "reason": "PostgreSQL runtime 31/31, migrations 8/8, focused changed tests 22/22, public-intake memory parity 31/31, API typecheck/build and diff check passed; full suite 362 passed, 2 skipped, only 3 inherited baseline failures"
+    },
+    "conv3a_fourth_independent_review": {
+      "session_id": "019fd4cf-7f30-70e2-91f3-b6e512854e9f",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "high",
+      "status": "changes_requested",
+      "reason": "found failed completions incorrectly forced through succeeded/winner semantics, incomplete immutable same-attempt replay checks, and remaining memory helper false-green job attempt/max validation"
+    },
+    "conv3a_fourth_repair_evidence": {
+      "fingerprint": "a2f0bc2a2420aad7b5813c1aa9e313adc82960952f5d91e8a0473977cd82304c",
+      "status": "technical_done",
+      "reason": "PostgreSQL runtime 32/32, migrations 8/8, focused changed tests 23/23, public-intake memory parity 32/32, API typecheck/build and diff check passed; full suite 365 passed, 2 skipped, only 3 inherited baseline failures"
+    },
+    "conv3a_fifth_independent_review": {
+      "session_id": "019fd4e7-f628-7821-8a43-0ae1dbee6a92",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "high",
+      "status": "accepted",
+      "fingerprint": "a2f0bc2a2420aad7b5813c1aa9e313adc82960952f5d91e8a0473977cd82304c",
+      "reason": "fresh read-only Code Scout found no blocker, high, medium or low findings across failed/winner semantics, immutable replay, job identity, concurrency, migrations/FKs, privacy and false-green tests; independent test execution was unavailable because the read-only temp filesystem rejected Vitest/typecheck scratch directories"
     },
     "independent_review": {
       "session_id": "019fcf04-8f4c-7663-a4f9-91376542cf42",
@@ -133,5 +194,5 @@
       "reason": "ordinary fast-forward push from the reviewed b678a37 base; force-push, deploy and external runtime activation were not used"
     }
   },
-  "next_action": "Complete the separate Russian public README slice, then continue the approved CONV-4 documentation reduction without mixing code changes."
+  "next_action": "Recheck origin/main, stage only the explicit CONV-3A file set excluding output/, commit in Russian, push by ordinary fast-forward, then continue CONV-4."
 }

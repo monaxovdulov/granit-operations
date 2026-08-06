@@ -18,6 +18,7 @@ export type PublicWidgetAiTurnExecutionInput = {
     jobCommit?: {
       jobId: string;
       attemptCount: number;
+      maxAttempts: number;
     };
   };
 };

@@ -23,10 +23,7 @@ import {
   type ModelTurnOutcome
 } from "../profiles/live-v2/model-turn-orchestrator.js";
 import type { ValidatedTurnPlan } from "../profiles/live-v2/model-turn-contract.js";
-import type {
-  AiRequirementUpdate,
-  AiSlotUpdate
-} from "../ai-dialog-contract.js";
+import type { AiRequirementUpdate, AiSlotUpdate } from "../ai-dialog-contract.js";
 import type {
   RecordedAiPersistReplyInput,
   RecordedAiPersistReplyResult,
@@ -34,9 +31,7 @@ import type {
   RecordedAiTurnResult,
   RecordedAiTurnService
 } from "../ports/recorded-ai-turn.js";
-import type {
-  RecordedSiteWidgetAiGateRepository
-} from "../repositories/recorded-site-widget-ai-reply-repository.js";
+import type { RecordedSiteWidgetAiGateRepository } from "../repositories/recorded-site-widget-ai-reply-repository.js";
 import type {
   AiModelProvider,
   AiQualityEventWrite,
@@ -116,6 +111,11 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
     }
 
     const startedAt = this.clock();
+    const attempt = input.attempt ?? {
+      attemptNumber: 1,
+      idempotencyKey: `${input.executionContext.turn.idempotencyKey}:attempt:1`,
+      jobAttemptCount: 1
+    };
     let beginResult: BeginAiRunResult;
 
     try {
@@ -128,6 +128,11 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
         runtimeMode: this.options.runtimeMode ?? "direct_openai",
         decisionProfile: "live_v2",
         idempotencyKey: input.executionContext.turn.idempotencyKey,
+        attemptIdempotencyKey: attempt.idempotencyKey,
+        attemptNumber: attempt.attemptNumber,
+        ...(attempt.jobId ? { jobId: attempt.jobId } : {}),
+        jobAttemptCount: attempt.jobAttemptCount,
+        ...(attempt.maxAttempts === undefined ? {} : { maxAttempts: attempt.maxAttempts }),
         inputFingerprint,
         versions: this.options.versions,
         model: this.options.model,
@@ -136,8 +141,6 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
     } catch (error) {
       throw new RecordedLiveV2ExecutionError();
     }
-
-    throwIfRecordedTurnAborted(input.signal);
 
     if (beginResult.kind === "terminal_replay") {
       return { kind: "terminal_replay", run: beginResult.run };
@@ -148,6 +151,29 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
     }
 
     const run = beginResult.run;
+
+    if (input.signal?.aborted) {
+      await this.fenceAttempt(
+        run,
+        this.completion(
+          run,
+          executionFailedState(),
+          [
+            this.span(
+              "runtime",
+              "turn_execution",
+              "blocked",
+              elapsedMs(startedAt, this.clock()),
+              "runtime_failed"
+            )
+          ],
+          { observedModelProvider: "none" },
+          false
+        ),
+        input.noReplyApplier
+      ).catch(() => undefined);
+      throw new RecordedLiveV2ExecutionError();
+    }
 
     if (!aiTurnExecutionContextMatchesInput(input.executionContext, input.turnInput)) {
       const completed = await this.completeWithoutReply(
@@ -187,9 +213,7 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
 
     try {
       const executeTurn =
-        this.options.turnContract === "model_turn_v1"
-          ? executeModelTurn
-          : executeLiveV2Turn;
+        this.options.turnContract === "model_turn_v1" ? executeModelTurn : executeLiveV2Turn;
       const liveOutcome: RecordedPipelineOutcome = await executeTurn({
         turnInput: input.turnInput,
         approvedFacts: this.options.approvedFacts,
@@ -207,10 +231,7 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
               generatorSucceeded = true;
               return generation.candidate;
             } catch (error) {
-              if (
-                error instanceof LiveV2GenerationError &&
-                error.observation
-              ) {
+              if (error instanceof LiveV2GenerationError && error.observation) {
                 observation = toTrustedObservation(error.observation);
               }
 
@@ -275,13 +296,7 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
               : {})
           },
           completionPlan: {
-            allowed: this.completion(
-              run,
-              allowedReplyState(action),
-              baseSpans,
-              observation,
-              true
-            ),
+            allowed: this.completion(run, allowedReplyState(action), baseSpans, observation, true),
             agentReplyBlocked: this.completion(
               run,
               agentReplyBlockedState(action),
@@ -313,13 +328,7 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
       throwIfRecordedTurnAborted(input.signal);
       const completed = await this.completeWithoutReply(
         run,
-        this.completion(
-          run,
-          state,
-          baseSpans,
-          observation,
-          state.sendGateResult !== "not_checked"
-        ),
+        this.completion(run, state, baseSpans, observation, state.sendGateResult !== "not_checked"),
         input.noReplyApplier
       );
 
@@ -330,6 +339,25 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
       };
     } catch (error) {
       if (input.signal?.aborted) {
+        await this.fenceAttempt(
+          run,
+          this.completion(
+            run,
+            executionFailedState(),
+            [
+              this.span(
+                "runtime",
+                "turn_execution",
+                "blocked",
+                elapsedMs(startedAt, this.clock()),
+                "runtime_failed"
+              )
+            ],
+            observation,
+            false
+          ),
+          input.noReplyApplier
+        ).catch(() => undefined);
         throw error;
       }
 
@@ -349,15 +377,9 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
       ];
 
       try {
-        await this.completeWithoutReply(
+        await this.failAttempt(
           run,
-          this.completion(
-            run,
-            executionFailedState(),
-            failedSpans,
-            observation,
-            false
-          ),
+          this.completion(run, executionFailedState(), failedSpans, observation, false),
           input.noReplyApplier
         );
       } catch {
@@ -498,6 +520,28 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
     return this.options.repository.completeWithoutReply({ run, completion });
   }
 
+  private async failAttempt(
+    run: RunningAiRunRecord,
+    completion: AiRunTerminalCompletion,
+    applier?: NonNullable<Parameters<RecordedAiTurnService["execute"]>[0]["noReplyApplier"]>
+  ): Promise<void> {
+    if (applier?.failAttempt) {
+      return applier.failAttempt({ run, completion });
+    }
+    return this.options.repository.failAttempt({ run, completion });
+  }
+
+  private async fenceAttempt(
+    run: RunningAiRunRecord,
+    completion: AiRunTerminalCompletion,
+    applier?: NonNullable<Parameters<RecordedAiTurnService["execute"]>[0]["noReplyApplier"]>
+  ): Promise<void> {
+    if (applier?.fenceAttempt) {
+      return applier.fenceAttempt({ run, completion });
+    }
+    return this.options.repository.fenceAttempt({ run, completion });
+  }
+
   private span(
     kind: AiRunSpanWrite["kind"],
     name: AiRunSpanWrite["name"],
@@ -541,17 +585,13 @@ function toTrustedObservation(
 
   return {
     observedModelProvider: observation.observedModelProvider,
-    ...(observation.observedModelName
-      ? { observedModelName: observation.observedModelName }
-      : {}),
+    ...(observation.observedModelName ? { observedModelName: observation.observedModelName } : {}),
     ...(observation.runtimeRunId ? { runtimeRunId: observation.runtimeRunId } : {}),
     ...(usage && Object.keys(usage).length > 0 ? { usage } : {})
   };
 }
 
-function allowedReplyState(
-  action: Exclude<LiveV2Candidate["action"], "no_reply">
-): TerminalState {
+function allowedReplyState(action: Exclude<LiveV2Candidate["action"], "no_reply">): TerminalState {
   if (action === "handoff_to_manager") {
     return {
       status: "handed_off",
@@ -693,10 +733,7 @@ function event(
   return { eventType, reasonCode, severity, managerVisible: true };
 }
 
-function decisionMetadata(
-  decision: RecordedReplyDecision,
-  plan?: ValidatedTurnPlan
-) {
+function decisionMetadata(decision: RecordedReplyDecision, plan?: ValidatedTurnPlan) {
   return {
     normalized_action: decision.action,
     ...(plan
@@ -727,7 +764,10 @@ function persistedOutcome(
       result: {
         status: "blocked",
         reason: result.reason,
-        evidence: { decision_profile: "live_v2", normalized_action: decision.action }
+        evidence: {
+          decision_profile: "live_v2",
+          normalized_action: decision.action
+        }
       }
     };
   }
@@ -745,12 +785,18 @@ function persistedOutcome(
         ? {
             status: "handed_off",
             reason: "live_v2_handoff_to_manager",
-            evidence: { decision_profile: "live_v2", normalized_action: decision.action }
+            evidence: {
+              decision_profile: "live_v2",
+              normalized_action: decision.action
+            }
           }
         : {
             status: "persisted",
             publicMessageId: result.publicMessageId,
-            evidence: { decision_profile: "live_v2", normalized_action: decision.action }
+            evidence: {
+              decision_profile: "live_v2",
+              normalized_action: decision.action
+            }
           },
     persistedReply
   };
@@ -777,12 +823,18 @@ function terminalOutcome(
         ? {
             status: "blocked",
             reason: "agent_reply_blocked",
-            evidence: { decision_profile: "live_v2", normalized_action: action }
+            evidence: {
+              decision_profile: "live_v2",
+              normalized_action: action
+            }
           }
         : {
             status: "fallback_unavailable",
             reason: run.outcomeReason,
-            evidence: { decision_profile: "live_v2", normalized_action: action }
+            evidence: {
+              decision_profile: "live_v2",
+              normalized_action: action
+            }
           }
   };
 }
@@ -798,10 +850,9 @@ function noReplyOutcome(reason: string): RecordedAiTurnOutcome {
   };
 }
 
-function validatedDecision(outcome: RecordedPipelineOutcome):
-  | RecordedReplyDecision
-  | { action: "no_reply"; reason: string }
-  | undefined {
+function validatedDecision(
+  outcome: RecordedPipelineOutcome
+): RecordedReplyDecision | { action: "no_reply"; reason: string } | undefined {
   if (!outcome.validation?.ok) return undefined;
 
   if ("decision" in outcome.validation) {
@@ -833,9 +884,10 @@ function modelTurnPlan(
   return "validatedPlan" in plan ? plan.validatedPlan : undefined;
 }
 
-function splitAppliedPatches(
-  patches: ValidatedTurnPlan["appliedPatches"]
-): { slotUpdates: AiSlotUpdate[]; requirementUpdates: AiRequirementUpdate[] } {
+function splitAppliedPatches(patches: ValidatedTurnPlan["appliedPatches"]): {
+  slotUpdates: AiSlotUpdate[];
+  requirementUpdates: AiRequirementUpdate[];
+} {
   const slotUpdates: AiSlotUpdate[] = [];
   const requirementUpdates: AiRequirementUpdate[] = [];
 
@@ -850,9 +902,7 @@ function splitAppliedPatches(
 function buildRecordedHandoff(
   turnInput: AiTurnInput,
   plan: ValidatedTurnPlan,
-  patches:
-    | { slotUpdates: AiSlotUpdate[]; requirementUpdates: AiRequirementUpdate[] }
-    | undefined
+  patches: { slotUpdates: AiSlotUpdate[]; requirementUpdates: AiRequirementUpdate[] } | undefined
 ): RecordedAiPersistReplyInput["handoff"] {
   if (!plan.handoffAction) return undefined;
 
@@ -864,22 +914,17 @@ function buildRecordedHandoff(
     slotsSnapshot[slot.name] = slot.value;
   }
 
-  const requirements = [
-    ...turnInput.knownRequirements,
-    ...(patches?.requirementUpdates ?? [])
-  ].map((requirement) => ({
-    category: requirement.category,
-    mode: requirement.mode,
-    value: requirement.value
-  }));
+  const requirements = [...turnInput.knownRequirements, ...(patches?.requirementUpdates ?? [])].map(
+    (requirement) => ({
+      category: requirement.category,
+      mode: requirement.mode,
+      value: requirement.value
+    })
+  );
   if (requirements.length > 0) slotsSnapshot.requirements = requirements;
 
-  const summaryUpdate = patches?.slotUpdates.find(
-    (slot) => slot.name === "questionSummary"
-  );
-  const summary = (summaryUpdate?.value ?? turnInput.inboundMessage.text)
-    .trim()
-    .slice(0, 900);
+  const summaryUpdate = patches?.slotUpdates.find((slot) => slot.name === "questionSummary");
+  const summary = (summaryUpdate?.value ?? turnInput.inboundMessage.text).trim().slice(0, 900);
 
   return {
     reason: plan.handoffAction.reason,

@@ -20,6 +20,7 @@ const turnIdentityMigration = "0018_widget_ai_turn_identity.sql";
 const latestWinsMigration = "0019_widget_ai_latest_wins.sql";
 const directLiveV2Migration = "0020_direct_live_v2_turn_contract.sql";
 const aiRunAttemptsMigration = "0021_ai_run_attempts.sql";
+const aiRunAttemptLedgerMigration = "0022_ai_run_attempt_ledger.sql";
 const narrowThrough0016 = [
   "0001_s01_intake.sql",
   "0002_s02_manager_auth.sql",
@@ -68,7 +69,7 @@ describe.sequential("PR0b canonical AI schema migration reconciliation", () => {
     await container?.stop({ remove: true, removeVolumes: true });
   });
 
-  it("applies the exact fresh narrow 0001..0021 root chain", async () => {
+  it("applies the exact fresh narrow 0001..0022 root chain", async () => {
     await withDatabase("fresh_narrow", async (database) => {
       const rootMigrations = (await readdir(migrationsDir))
         .filter((file) => file.endsWith(".sql"))
@@ -79,11 +80,17 @@ describe.sequential("PR0b canonical AI schema migration reconciliation", () => {
         turnIdentityMigration,
         latestWinsMigration,
         directLiveV2Migration,
-        aiRunAttemptsMigration
+        aiRunAttemptsMigration,
+        aiRunAttemptLedgerMigration
       ]);
 
       await applyMigrations(database, migrationsDir, rootMigrations);
-      await expectInventory(database, { runs: 0, spans: 0, quality: 0 });
+      await expectInventory(database, {
+        runs: 0,
+        attempts: 0,
+        spans: 0,
+        quality: 0
+      });
     });
   }, 120_000);
 
@@ -138,9 +145,15 @@ describe.sequential("PR0b canonical AI schema migration reconciliation", () => {
         turnIdentityMigration,
         latestWinsMigration,
         directLiveV2Migration,
-        aiRunAttemptsMigration
+        aiRunAttemptsMigration,
+        aiRunAttemptLedgerMigration
       ]);
-      await expectInventory(database, { runs: 2, spans: 0, quality: 1 });
+      await expectInventory(database, {
+        runs: 2,
+        attempts: 0,
+        spans: 0,
+        quality: 1
+      });
       const rows = await database.client.unsafe<
         Array<{
           recording_contract: string;
@@ -244,23 +257,48 @@ describe.sequential("PR0b canonical AI schema migration reconciliation", () => {
         turnIdentityMigration,
         latestWinsMigration,
         directLiveV2Migration,
-        aiRunAttemptsMigration
+        aiRunAttemptsMigration,
+        aiRunAttemptLedgerMigration
       ]);
-      await expectInventory(database, { runs: 1, spans: 1, quality: 1 });
+      await expectInventory(database, {
+        runs: 1,
+        attempts: 1,
+        spans: 1,
+        quality: 1
+      });
       const [row] = await database.client.unsafe<
         Array<{
           recording_contract: string;
           inbound_public_message_id: string;
           outbound_public_message_id: string;
+          winning_attempt_id: string;
         }>
       >(`
-        SELECT recording_contract, inbound_public_message_id, outbound_public_message_id
+        SELECT recording_contract, inbound_public_message_id, outbound_public_message_id,
+          winning_attempt_id
         FROM ai_runs
       `);
       expect(row).toEqual({
-        recording_contract: "native_recorded",
+        recording_contract: "logical_recorded_v2",
         inbound_public_message_id: "33333333-3333-4333-8333-333333333331",
-        outbound_public_message_id: "44444444-4444-4444-8444-444444444444"
+        outbound_public_message_id: "44444444-4444-4444-8444-444444444444",
+        winning_attempt_id: expect.any(String)
+      });
+
+      const [attempt] = await database.client.unsafe<
+        Array<{ status: string; span_linked: boolean; quality_linked: boolean }>
+      >(`
+        SELECT attempt.status,
+          span.ai_run_attempt_id = attempt.id AS span_linked,
+          quality.ai_run_attempt_id = attempt.id AS quality_linked
+        FROM ai_run_attempts attempt
+        JOIN ai_run_spans span ON span.ai_run_id = attempt.ai_run_id
+        JOIN ai_quality_events quality ON quality.ai_run_id = attempt.ai_run_id
+      `);
+      expect(attempt).toEqual({
+        status: "succeeded",
+        span_linked: true,
+        quality_linked: true
       });
     });
   }, 120_000);
@@ -306,7 +344,8 @@ describe.sequential("PR0b canonical AI schema migration reconciliation", () => {
         turnIdentityMigration,
         latestWinsMigration,
         directLiveV2Migration,
-        aiRunAttemptsMigration
+        aiRunAttemptsMigration,
+        aiRunAttemptLedgerMigration
       ]);
 
       const [conversation] = await database.client.unsafe<
@@ -316,7 +355,10 @@ describe.sequential("PR0b canonical AI schema migration reconciliation", () => {
         FROM conversations
         WHERE id = '22222222-2222-4222-8222-222222222222'
       `);
-      expect(conversation).toEqual({ last_message_sequence: 3, generation_epoch: 0 });
+      expect(conversation).toEqual({
+        last_message_sequence: 3,
+        generation_epoch: 0
+      });
 
       const messages = await database.client.unsafe<
         Array<{ id: string; message_sequence: number }>
@@ -333,7 +375,10 @@ describe.sequential("PR0b canonical AI schema migration reconciliation", () => {
       ]);
 
       const [job] = await database.client.unsafe<
-        Array<{ expected_generation_epoch: number; responds_through_sequence: number }>
+        Array<{
+          expected_generation_epoch: number;
+          responds_through_sequence: number;
+        }>
       >(`
         SELECT expected_generation_epoch::int, responds_through_sequence::int
         FROM widget_ai_jobs
@@ -354,7 +399,8 @@ describe.sequential("PR0b canonical AI schema migration reconciliation", () => {
         turnIdentityMigration,
         latestWinsMigration,
         directLiveV2Migration,
-        aiRunAttemptsMigration
+        aiRunAttemptsMigration,
+        aiRunAttemptLedgerMigration
       ]);
 
       const constraints = await database.client.unsafe<
@@ -376,15 +422,202 @@ describe.sequential("PR0b canonical AI schema migration reconciliation", () => {
       expect(definitions.get("ai_runs_runtime_linkage_check")).toContain(
         "decision_profile = 'live_v2'"
       );
-      expect(definitions.get("ai_runs_runtime_linkage_check")).toContain(
-        "runtime_run_id IS NULL"
-      );
+      expect(definitions.get("ai_runs_runtime_linkage_check")).toContain("runtime_run_id IS NULL");
       expect(definitions.get("ai_runs_runtime_profile_check")).toContain(
         "runtime_mode = 'direct_openai'"
       );
       expect(definitions.get("ai_runs_runtime_profile_check")).toContain(
         "'legacy_s05'::text, 'live_v2'::text"
       );
+    });
+  }, 120_000);
+
+  it("rejects cross-run attempt evidence and preserves linked evidence on delete", async () => {
+    await withDatabase("attempt_evidence_ownership", async (database) => {
+      await applyMigrations(database, migrationsDir, [...narrowThrough0016]);
+      await seedConversation(database);
+      await applyMigrations(database, migrationsDir, [
+        reconciliationMigration,
+        turnIdentityMigration,
+        latestWinsMigration,
+        directLiveV2Migration,
+        aiRunAttemptsMigration,
+        aiRunAttemptLedgerMigration
+      ]);
+      await database.client.unsafe(`
+        INSERT INTO ai_runs (
+          id, trace_id, lead_id, conversation_id, inbound_message_id,
+          inbound_public_message_id, channel, runtime_mode, decision_profile,
+          idempotency_key, input_fingerprint, status, policy_version, prompt_version,
+          tool_version, disclosure_version, configured_model_provider,
+          configured_model_name, reasoning_effort, model_profile_version, started_at
+        ) VALUES
+          (
+            '55555555-5555-4555-8555-555555555571',
+            '99999999-9999-4999-8999-999999999971',
+            '11111111-1111-4111-8111-111111111111',
+            '22222222-2222-4222-8222-222222222222',
+            '33333333-3333-4333-8333-333333333331',
+            '33333333-3333-4333-8333-333333333331',
+            'site_widget', 'direct_openai', 'live_v2',
+            'ai-turn:evidence-owner-a', repeat('a', 64), 'running',
+            'policy.v1', 'prompt.v1', 'tools.v1', 'disclosure.v1',
+            'fake', 'fake-model', 'none', 'live_v2', '2026-08-04T10:00:00Z'
+          ),
+          (
+            '55555555-5555-4555-8555-555555555572',
+            '99999999-9999-4999-8999-999999999972',
+            '11111111-1111-4111-8111-111111111111',
+            '22222222-2222-4222-8222-222222222222',
+            '33333333-3333-4333-8333-333333333331',
+            '33333333-3333-4333-8333-333333333331',
+            'site_widget', 'direct_openai', 'live_v2',
+            'ai-turn:evidence-owner-b', repeat('b', 64), 'running',
+            'policy.v1', 'prompt.v1', 'tools.v1', 'disclosure.v1',
+            'fake', 'fake-model', 'none', 'live_v2', '2026-08-04T10:00:01Z'
+          );
+        INSERT INTO ai_run_attempts (
+          id, ai_run_id, attempt_number, job_attempt_count, idempotency_key,
+          trace_id, input_fingerprint, policy_version, prompt_version, tool_version,
+          disclosure_version, configured_model_provider, configured_model_name,
+          reasoning_effort, model_profile_version, status, started_at
+        ) VALUES
+          (
+            '77777777-7777-4777-8777-777777777771',
+            '55555555-5555-4555-8555-555555555571', 1, 1,
+            'ai-turn:evidence-owner-a:attempt:1',
+            '88888888-8888-4888-8888-888888888871', repeat('a', 64),
+            'policy.v1', 'prompt.v1', 'tools.v1', 'disclosure.v1',
+            'fake', 'fake-model', 'none', 'live_v2', 'running',
+            '2026-08-04T10:00:00Z'
+          ),
+          (
+            '77777777-7777-4777-8777-777777777772',
+            '55555555-5555-4555-8555-555555555572', 1, 1,
+            'ai-turn:evidence-owner-b:attempt:1',
+            '88888888-8888-4888-8888-888888888872', repeat('b', 64),
+            'policy.v1', 'prompt.v1', 'tools.v1', 'disclosure.v1',
+            'fake', 'fake-model', 'none', 'live_v2', 'running',
+            '2026-08-04T10:00:01Z'
+          );
+      `);
+
+      await expect(
+        database.client.unsafe(`
+          INSERT INTO ai_run_spans (
+            ai_run_id, ai_run_attempt_id, span_id, kind, name, status,
+            latency_ms, created_at, expires_at
+          ) VALUES (
+            '55555555-5555-4555-8555-555555555571',
+            '77777777-7777-4777-8777-777777777772',
+            'cross-run-span', 'runtime', 'turn_execution', 'failed', 1,
+            '2026-08-04T10:00:02Z', '2026-09-04T10:00:02Z'
+          )
+        `)
+      ).rejects.toThrow(/ai_run_spans_attempt_run_fkey/);
+      await expect(
+        database.client.unsafe(`
+          INSERT INTO ai_quality_events (
+            ai_run_id, ai_run_attempt_id, lead_id, conversation_id, message_id,
+            event_type, reason_code, severity
+          ) VALUES (
+            '55555555-5555-4555-8555-555555555571',
+            '77777777-7777-4777-8777-777777777772',
+            '11111111-1111-4111-8111-111111111111',
+            '22222222-2222-4222-8222-222222222222',
+            '33333333-3333-4333-8333-333333333331',
+            'runtime_failure', 'runtime_failed', 'critical'
+          )
+        `)
+      ).rejects.toThrow(/ai_quality_events_attempt_run_fkey/);
+
+      await database.client.unsafe(`
+        INSERT INTO ai_run_spans (
+          ai_run_id, ai_run_attempt_id, span_id, kind, name, status,
+          latency_ms, created_at, expires_at
+        ) VALUES (
+          '55555555-5555-4555-8555-555555555571',
+          '77777777-7777-4777-8777-777777777771',
+          'owned-span', 'runtime', 'turn_execution', 'failed', 1,
+          '2026-08-04T10:00:02Z', '2026-09-04T10:00:02Z'
+        )
+      `);
+      await expect(
+        database.client.unsafe(`
+          DELETE FROM ai_run_attempts
+          WHERE id = '77777777-7777-4777-8777-777777777771'
+        `)
+      ).rejects.toThrow(/ai_run_spans_attempt_run_fkey/);
+    });
+  }, 120_000);
+
+  it("fails closed before ledger DDL for ambiguous native attempts", async () => {
+    await withDatabase("attempt_ledger_ambiguous", async (database) => {
+      await applyMigrations(database, migrationsDir, [...narrowThrough0016]);
+      await seedConversation(database);
+      await applyMigrations(database, migrationsDir, [
+        reconciliationMigration,
+        turnIdentityMigration,
+        latestWinsMigration,
+        directLiveV2Migration,
+        aiRunAttemptsMigration
+      ]);
+      await database.client.unsafe(`
+        INSERT INTO ai_runs (
+          id, trace_id, lead_id, conversation_id, inbound_message_id,
+          inbound_public_message_id, channel, runtime_mode, decision_profile,
+          idempotency_key, input_fingerprint, status, policy_version, prompt_version,
+          tool_version, disclosure_version, configured_model_provider,
+          configured_model_name, reasoning_effort, model_profile_version, started_at
+        ) VALUES
+          (
+            '55555555-5555-4555-8555-555555555561',
+            '99999999-9999-4999-8999-999999999991',
+            '11111111-1111-4111-8111-111111111111',
+            '22222222-2222-4222-8222-222222222222',
+            '33333333-3333-4333-8333-333333333331',
+            '33333333-3333-4333-8333-333333333331',
+            'site_widget', 'direct_openai', 'live_v2',
+            'ai-turn:33333333-3333-4333-8333-333333333331:attempt:1',
+            repeat('a', 64), 'running', 'policy.v1', 'prompt.v1', 'tools.v1',
+            'disclosure.v1', 'fake', 'fake-model', 'none', 'live_v2',
+            '2026-08-04T10:00:00Z'
+          ),
+          (
+            '55555555-5555-4555-8555-555555555562',
+            '99999999-9999-4999-8999-999999999992',
+            '11111111-1111-4111-8111-111111111111',
+            '22222222-2222-4222-8222-222222222222',
+            '33333333-3333-4333-8333-333333333331',
+            '33333333-3333-4333-8333-333333333331',
+            'site_widget', 'direct_openai', 'live_v2',
+            'ai-turn:33333333-3333-4333-8333-333333333331:attempt:2',
+            repeat('a', 64), 'running', 'policy.v1', 'prompt.v1', 'tools.v1',
+            'disclosure.v1', 'fake', 'fake-model', 'none', 'live_v2',
+            '2026-08-04T10:00:01Z'
+          )
+      `);
+
+      await expect(
+        applyMigrations(database, migrationsDir, [aiRunAttemptLedgerMigration])
+      ).rejects.toThrow(/explicit duplicate-run plan/);
+      const [inventory] = await database.client.unsafe<
+        Array<{ attempts_table: boolean; winner_column: boolean; runs: number }>
+      >(`
+        SELECT
+          to_regclass('public.ai_run_attempts') IS NOT NULL AS attempts_table,
+          EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'ai_runs'
+              AND column_name = 'winning_attempt_id'
+          ) AS winner_column,
+          (SELECT count(*)::int FROM ai_runs) AS runs
+      `);
+      expect(inventory).toEqual({
+        attempts_table: false,
+        winner_column: false,
+        runs: 2
+      });
     });
   }, 120_000);
 
@@ -401,7 +634,11 @@ describe.sequential("PR0b canonical AI schema migration reconciliation", () => {
   }
 });
 
-async function applyMigrations(database: Database, directory: string, migrations: readonly string[]) {
+async function applyMigrations(
+  database: Database,
+  directory: string,
+  migrations: readonly string[]
+) {
   for (const migration of migrations) {
     const connection = await database.client.reserve();
     try {
@@ -478,13 +715,20 @@ async function seedConversation(database: Database) {
 
 async function expectInventory(
   database: Database,
-  expected: { runs: number; spans: number; quality: number }
+  expected: { runs: number; attempts: number; spans: number; quality: number }
 ) {
   const [counts] = await database.client.unsafe<
-    Array<{ runs: number; spans: number; quality: number; orphans: number }>
+    Array<{
+      runs: number;
+      attempts: number;
+      spans: number;
+      quality: number;
+      orphans: number;
+    }>
   >(`
     SELECT
       (SELECT count(*)::int FROM ai_runs) AS runs,
+      (SELECT count(*)::int FROM ai_run_attempts) AS attempts,
       (SELECT count(*)::int FROM ai_run_spans) AS spans,
       (SELECT count(*)::int FROM ai_quality_events) AS quality,
       (
@@ -495,9 +739,18 @@ async function expectInventory(
           LEFT JOIN conversation_messages outbound ON outbound.id = r.outbound_message_id
           WHERE inbound.id IS NULL OR (r.outbound_message_id IS NOT NULL AND outbound.id IS NULL)
           UNION ALL
+          SELECT a.id FROM ai_run_attempts a LEFT JOIN ai_runs r ON r.id = a.ai_run_id
+          WHERE r.id IS NULL
+          UNION ALL
           SELECT s.id FROM ai_run_spans s LEFT JOIN ai_runs r ON r.id = s.ai_run_id WHERE r.id IS NULL
           UNION ALL
+          SELECT s.id FROM ai_run_spans s LEFT JOIN ai_run_attempts a ON a.id = s.ai_run_attempt_id
+          WHERE s.ai_run_attempt_id IS NOT NULL AND a.id IS NULL
+          UNION ALL
           SELECT q.id FROM ai_quality_events q LEFT JOIN ai_runs r ON r.id = q.ai_run_id WHERE r.id IS NULL
+          UNION ALL
+          SELECT q.id FROM ai_quality_events q LEFT JOIN ai_run_attempts a ON a.id = q.ai_run_attempt_id
+          WHERE q.ai_run_attempt_id IS NOT NULL AND a.id IS NULL
         ) orphan_rows
       ) AS orphans
   `);
@@ -509,7 +762,8 @@ async function expectInventory(
     SELECT conname, convalidated
     FROM pg_constraint
     WHERE conrelid IN (
-      'ai_runs'::regclass, 'ai_run_spans'::regclass, 'ai_quality_events'::regclass
+      'ai_runs'::regclass, 'ai_run_attempts'::regclass,
+      'ai_run_spans'::regclass, 'ai_quality_events'::regclass
     )
   `);
   expect(constraints.length).toBeGreaterThan(20);
@@ -518,6 +772,8 @@ async function expectInventory(
     expect.arrayContaining([
       "ai_runs_recording_contract_check",
       "ai_runs_contract_evidence_check",
+      "ai_runs_winning_attempt_state_check",
+      "ai_run_attempts_status_check",
       "ai_runs_public_internal_linkage_check",
       "ai_quality_events_reason_code_check"
     ])
@@ -529,7 +785,11 @@ async function expectInventory(
 
 async function expectLatestWinsWidgetJobContract(database: Database) {
   const columns = await database.client.unsafe<
-    Array<{ column_name: string; column_default: string | null; is_nullable: "YES" | "NO" }>
+    Array<{
+      column_name: string;
+      column_default: string | null;
+      is_nullable: "YES" | "NO";
+    }>
   >(`
     SELECT column_name, column_default, is_nullable
     FROM information_schema.columns
@@ -560,13 +820,9 @@ async function expectLatestWinsWidgetJobContract(database: Database) {
     "direct_openai",
     "mastra_openai_api"
   ]);
-  expect(quotedLiterals(definitions.get("widget_ai_jobs_status_check"))).toContain(
-    "superseded"
-  );
+  expect(quotedLiterals(definitions.get("widget_ai_jobs_status_check"))).toContain("superseded");
 
-  const [index] = await database.client.unsafe<
-    Array<{ indexname: string; definition: string }>
-  >(`
+  const [index] = await database.client.unsafe<Array<{ indexname: string; definition: string }>>(`
     SELECT indexname, indexdef AS definition
     FROM pg_indexes
     WHERE schemaname = 'public'
@@ -582,7 +838,11 @@ async function expectLatestWinsWidgetJobContract(database: Database) {
 
 async function expectCanonicalAiStorageContract(database: Database) {
   const columns = await database.client.unsafe<
-    Array<{ column_name: string; column_default: string | null; is_nullable: "YES" | "NO" }>
+    Array<{
+      column_name: string;
+      column_default: string | null;
+      is_nullable: "YES" | "NO";
+    }>
   >(`
     SELECT column_name, column_default, is_nullable
     FROM information_schema.columns
@@ -592,27 +852,47 @@ async function expectCanonicalAiStorageContract(database: Database) {
         'channel', 'created_at', 'decision_profile', 'inbound_message_id',
         'inbound_public_message_id', 'metadata', 'profile_validator_result',
         'reasoning_effort', 'recording_contract', 'send_gate_result', 'started_at',
-        'status', 'trace_id', 'updated_at'
+        'status', 'trace_id', 'updated_at', 'winning_attempt_id'
       )
     ORDER BY column_name
   `);
   expect(columns).toEqual([
-    { column_name: "channel", column_default: "'site_widget'::text", is_nullable: "NO" },
+    {
+      column_name: "channel",
+      column_default: "'site_widget'::text",
+      is_nullable: "NO"
+    },
     { column_name: "created_at", column_default: "now()", is_nullable: "NO" },
     {
       column_name: "decision_profile",
       column_default: "'legacy_s05'::text",
       is_nullable: "NO"
     },
-    { column_name: "inbound_message_id", column_default: null, is_nullable: "NO" },
-    { column_name: "inbound_public_message_id", column_default: null, is_nullable: "NO" },
-    { column_name: "metadata", column_default: "'{}'::jsonb", is_nullable: "NO" },
+    {
+      column_name: "inbound_message_id",
+      column_default: null,
+      is_nullable: "NO"
+    },
+    {
+      column_name: "inbound_public_message_id",
+      column_default: null,
+      is_nullable: "NO"
+    },
+    {
+      column_name: "metadata",
+      column_default: "'{}'::jsonb",
+      is_nullable: "NO"
+    },
     {
       column_name: "profile_validator_result",
       column_default: "'not_run'::text",
       is_nullable: "NO"
     },
-    { column_name: "reasoning_effort", column_default: null, is_nullable: "YES" },
+    {
+      column_name: "reasoning_effort",
+      column_default: null,
+      is_nullable: "YES"
+    },
     {
       column_name: "recording_contract",
       column_default: "'native_recorded'::text",
@@ -624,9 +904,18 @@ async function expectCanonicalAiStorageContract(database: Database) {
       is_nullable: "NO"
     },
     { column_name: "started_at", column_default: null, is_nullable: "YES" },
-    { column_name: "status", column_default: "'running'::text", is_nullable: "NO" },
+    {
+      column_name: "status",
+      column_default: "'running'::text",
+      is_nullable: "NO"
+    },
     { column_name: "trace_id", column_default: null, is_nullable: "YES" },
-    { column_name: "updated_at", column_default: "now()", is_nullable: "NO" }
+    { column_name: "updated_at", column_default: "now()", is_nullable: "NO" },
+    {
+      column_name: "winning_attempt_id",
+      column_default: null,
+      is_nullable: "YES"
+    }
   ]);
 
   const constraintRows = await database.client.unsafe<
@@ -679,7 +968,7 @@ async function expectCanonicalAiStorageContract(database: Database) {
   const schemaSource = await readFile(resolve(repositoryRoot, "packages/db/src/schema.ts"), "utf8");
   const schemaCheckNames = [
     ...schemaSource.matchAll(
-      /check\(\s*"(ai_(?:runs|run_spans|quality_events)_[a-z0-9_]+)"/g
+      /check\(\s*"(ai_(?:runs|run_attempts|run_spans|quality_events)_[a-z0-9_]+)"/g
     )
   ]
     .map((match) => match[1]!)
@@ -689,7 +978,8 @@ async function expectCanonicalAiStorageContract(database: Database) {
     FROM pg_constraint
     WHERE contype = 'c'
       AND conrelid IN (
-        'ai_runs'::regclass, 'ai_run_spans'::regclass, 'ai_quality_events'::regclass
+        'ai_runs'::regclass, 'ai_run_attempts'::regclass,
+        'ai_run_spans'::regclass, 'ai_quality_events'::regclass
       )
     ORDER BY conname
   `);
@@ -700,13 +990,73 @@ async function expectCanonicalAiStorageContract(database: Database) {
   >(`
     SELECT conname, confdeltype::text AS delete_action, convalidated AS validated
     FROM pg_constraint
-    WHERE conrelid = 'ai_runs'::regclass
-      AND conname IN ('ai_runs_inbound_message_id_fkey', 'ai_runs_outbound_message_id_fkey')
+    WHERE conname IN (
+      'ai_runs_inbound_message_id_fkey',
+      'ai_runs_outbound_message_id_fkey',
+      'ai_runs_winning_attempt_id_fkey',
+      'ai_run_attempts_ai_run_id_fkey',
+      'ai_run_spans_attempt_run_fkey',
+      'ai_quality_events_attempt_run_fkey'
+    )
     ORDER BY conname
   `);
   expect(foreignKeys).toEqual([
-    { conname: "ai_runs_inbound_message_id_fkey", delete_action: "a", validated: true },
-    { conname: "ai_runs_outbound_message_id_fkey", delete_action: "a", validated: true }
+    {
+      conname: "ai_quality_events_attempt_run_fkey",
+      delete_action: "r",
+      validated: true
+    },
+    {
+      conname: "ai_run_attempts_ai_run_id_fkey",
+      delete_action: "c",
+      validated: true
+    },
+    {
+      conname: "ai_run_spans_attempt_run_fkey",
+      delete_action: "r",
+      validated: true
+    },
+    {
+      conname: "ai_runs_inbound_message_id_fkey",
+      delete_action: "a",
+      validated: true
+    },
+    {
+      conname: "ai_runs_outbound_message_id_fkey",
+      delete_action: "a",
+      validated: true
+    },
+    {
+      conname: "ai_runs_winning_attempt_id_fkey",
+      delete_action: "a",
+      validated: true
+    }
+  ]);
+
+  const winnerTriggers = await database.client.unsafe<
+    Array<{ trigger_name: string; deferrable: boolean; initially_deferred: boolean }>
+  >(`
+    SELECT tgname AS trigger_name,
+      tgdeferrable AS deferrable,
+      tginitdeferred AS initially_deferred
+    FROM pg_trigger
+    WHERE tgname IN (
+      'ai_runs_winner_ownership_trigger',
+      'ai_run_attempts_winner_state_trigger'
+    )
+    ORDER BY tgname
+  `);
+  expect(winnerTriggers).toEqual([
+    {
+      trigger_name: "ai_run_attempts_winner_state_trigger",
+      deferrable: true,
+      initially_deferred: true
+    },
+    {
+      trigger_name: "ai_runs_winner_ownership_trigger",
+      deferrable: true,
+      initially_deferred: true
+    }
   ]);
 
   const indexRows = await database.client.unsafe<Array<{ indexname: string; definition: string }>>(`
@@ -719,11 +1069,21 @@ async function expectCanonicalAiStorageContract(database: Database) {
         'ai_runs_inbound_public_message_id_idx',
         'ai_runs_outbound_message_id_idx',
         'ai_runs_conversation_started_idx',
-        'ai_runs_status_started_idx'
+        'ai_runs_status_started_idx',
+        'ai_run_attempts_id_run_idx',
+        'ai_run_attempts_run_number_idx',
+        'ai_run_attempts_idempotency_key_idx',
+        'ai_run_attempts_trace_id_idx',
+        'ai_run_attempts_single_success_idx'
       )
     ORDER BY indexname
   `);
   expect(indexRows.map((row) => row.indexname)).toEqual([
+    "ai_run_attempts_id_run_idx",
+    "ai_run_attempts_idempotency_key_idx",
+    "ai_run_attempts_run_number_idx",
+    "ai_run_attempts_single_success_idx",
+    "ai_run_attempts_trace_id_idx",
     "ai_runs_conversation_started_idx",
     "ai_runs_idempotency_key_idx",
     "ai_runs_inbound_public_message_id_idx",
@@ -745,8 +1105,13 @@ async function expectCanonicalAiStorageContract(database: Database) {
   expect(indexDefinitions.get("ai_runs_conversation_started_idx")).toContain(
     "(conversation_id, started_at DESC)"
   );
-  expect(indexDefinitions.get("ai_runs_status_started_idx")).toContain(
-    "(status, started_at DESC)"
+  expect(indexDefinitions.get("ai_runs_status_started_idx")).toContain("(status, started_at DESC)");
+  expect(indexDefinitions.get("ai_run_attempts_run_number_idx")).toContain("UNIQUE INDEX");
+  expect(indexDefinitions.get("ai_run_attempts_id_run_idx")).toContain("UNIQUE INDEX");
+  expect(indexDefinitions.get("ai_run_attempts_idempotency_key_idx")).toContain("UNIQUE INDEX");
+  expect(indexDefinitions.get("ai_run_attempts_trace_id_idx")).toContain("UNIQUE INDEX");
+  expect(indexDefinitions.get("ai_run_attempts_single_success_idx")).toContain(
+    "WHERE (status = 'succeeded'::text)"
   );
 }
 
@@ -757,7 +1122,5 @@ function normalizeSql(value: string | undefined) {
 
 function quotedLiterals(value: string | undefined) {
   const normalized = normalizeSql(value);
-  return [...normalized.matchAll(/'([^']+)'::text/g)]
-    .map((match) => match[1]!)
-    .sort();
+  return [...normalized.matchAll(/'([^']+)'::text/g)].map((match) => match[1]!).sort();
 }

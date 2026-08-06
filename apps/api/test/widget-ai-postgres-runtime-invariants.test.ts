@@ -7,6 +7,7 @@ import {
 } from "@granit/contracts";
 import {
   aiQualityEvents,
+  aiRunAttempts,
   aiRunSpans,
   aiRuns,
   conversationHandoffs,
@@ -18,18 +19,21 @@ import {
   managerUsers,
   widgetAiJobs
 } from "@granit/db";
-import { sha256Hex } from "@granit/shared";
+import { sha256Hex, stableStringify } from "@granit/shared";
 import { and, asc, count, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { buildAppContext } from "../src/app-context.js";
 import type { ObservedLiveV2DecisionGenerator } from "../src/modules/ai/ports/live-v2-runtime.js";
 import type {
+  AiRunRepository,
   AiRunTerminalCompletion,
-  BeginAiRunInput
+  BeginAiRunInput,
+  RunningAiRunRecord
 } from "../src/modules/ai/repositories/ai-run-repository.js";
 import {
   AiRunInputInvariantError,
+  AiRunReplayConflictError,
   completeAiRunInTransaction,
   PostgresAiRunRepository
 } from "../src/modules/ai/repositories/postgres-ai-run-repository.js";
@@ -117,6 +121,183 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
     expect(await jobRows()).toMatchObject([{ status: "processing", attemptCount: 2 }]);
   });
 
+  it("terminally fails the logical run when the final lease expires", async () => {
+    const { repository, service } = runtime();
+    await accept(service, widgetRequest("final-lease-expiry"));
+    await harness.db.update(widgetAiJobs).set({ maxAttempts: 1 });
+    const claimTime = readyNow();
+    const job = await repository.claimSiteWidgetAiJob!({ leaseMs: 5_000, now: claimTime });
+    if (!job) throw new Error("expected final claimed attempt");
+    const runRepository = new PostgresAiRunRepository(harness.db);
+    const started = await runRepository.beginOrReplay({
+      traceId: randomUUID(),
+      leadId: job.leadId,
+      conversationId: job.conversationId,
+      inboundMessageId: job.aiTurnExecutionContext.internal.inboundMessageId,
+      channel: "site_widget",
+      runtimeMode: "direct_openai",
+      decisionProfile: "live_v2",
+      idempotencyKey: job.aiTurnExecutionContext.turn.idempotencyKey,
+      attemptIdempotencyKey: `${job.aiTurnExecutionContext.turn.idempotencyKey}:attempt:1`,
+      attemptNumber: 1,
+      jobId: job.id,
+      jobAttemptCount: 1,
+      maxAttempts: 1,
+      inputFingerprint: sha256Hex(stableStringify(job.aiTurnInput)),
+      versions: {
+        policyVersion: "pr0b_policy.v1",
+        promptVersion: "pr0b_prompt.v1",
+        toolVersion: "pr0b_tools.none.v1",
+        disclosureVersion: "pr0b_disclosure.v1",
+        modelProfileVersion: "pr0b_model_profile.v1"
+      },
+      model: {
+        modelProvider: "fake",
+        requestedModelName: "pr0b-recorded-fake",
+        reasoningEffort: "none"
+      },
+      startedAt: claimTime
+    });
+    if (started.kind !== "started") throw new Error("expected a fresh final attempt");
+
+    await expect(
+      repository.claimSiteWidgetAiJob!({
+        leaseMs: 5_000,
+        now: new Date(claimTime.getTime() + 6_000)
+      })
+    ).resolves.toBeNull();
+    expect(await jobRows()).toMatchObject([
+      { status: "failed", attemptCount: 1, terminalReason: "worker_failed" }
+    ]);
+    expect(await aiAttemptRows()).toMatchObject([
+      { attemptNumber: 1, jobAttemptCount: 1, status: "fenced" }
+    ]);
+    expect(await harness.db.select().from(aiRuns)).toMatchObject([
+      {
+        id: started.run.id,
+        status: "failed",
+        decisionAction: "no_reply",
+        outcomeReason: "generator_failed",
+        failureCode: "runtime_failure",
+        winningAttemptId: null
+      }
+    ]);
+    expect(await harness.db.select().from(aiQualityEvents)).toMatchObject([
+      {
+        aiRunId: started.run.id,
+        aiRunAttemptId: started.run.attempt.id,
+        eventType: "runtime_failure",
+        reasonCode: "runtime_failed"
+      }
+    ]);
+  });
+
+  it("rejects a late begin after the final lease expired before an attempt existed", async () => {
+    const { repository, service } = runtime();
+    await accept(service, widgetRequest("final-lease-before-begin"));
+    await harness.db.update(widgetAiJobs).set({ maxAttempts: 1 });
+    const claimTime = readyNow();
+    const job = await repository.claimSiteWidgetAiJob!({ leaseMs: 5_000, now: claimTime });
+    if (!job) throw new Error("expected final claimed job before begin");
+
+    await expect(
+      repository.claimSiteWidgetAiJob!({
+        leaseMs: 5_000,
+        now: new Date(claimTime.getTime() + 6_000)
+      })
+    ).resolves.toBeNull();
+    expect(await jobRows()).toMatchObject([
+      { status: "failed", attemptCount: 1, terminalReason: "worker_failed" }
+    ]);
+
+    const runRepository = new PostgresAiRunRepository(harness.db);
+    await expect(
+      runRepository.beginOrReplay({
+        traceId: randomUUID(),
+        leadId: job.leadId,
+        conversationId: job.conversationId,
+        inboundMessageId: job.aiTurnExecutionContext.internal.inboundMessageId,
+        channel: "site_widget",
+        runtimeMode: "direct_openai",
+        decisionProfile: "live_v2",
+        idempotencyKey: job.aiTurnExecutionContext.turn.idempotencyKey,
+        attemptIdempotencyKey: `${job.aiTurnExecutionContext.turn.idempotencyKey}:attempt:1`,
+        attemptNumber: 1,
+        jobId: job.id,
+        jobAttemptCount: 1,
+        maxAttempts: 1,
+        inputFingerprint: sha256Hex(stableStringify(job.aiTurnInput)),
+        versions: {
+          policyVersion: "pr0b_policy.v1",
+          promptVersion: "pr0b_prompt.v1",
+          toolVersion: "pr0b_tools.none.v1",
+          disclosureVersion: "pr0b_disclosure.v1",
+          modelProfileVersion: "pr0b_model_profile.v1"
+        },
+        model: {
+          modelProvider: "fake",
+          requestedModelName: "pr0b-recorded-fake",
+          reasoningEffort: "none"
+        },
+        startedAt: new Date(claimTime.getTime() + 6_001)
+      })
+    ).rejects.toBeInstanceOf(AiRunInputInvariantError);
+    expect(await harness.db.select().from(aiRuns)).toHaveLength(0);
+    expect(await aiAttemptRows()).toHaveLength(0);
+  });
+
+  it("fences an abort immediately after begin and closes the final logical run", async () => {
+    const controller = new AbortController();
+    const runRepository = new PostgresAiRunRepository(harness.db);
+    const abortingRepository: AiRunRepository = {
+      beginOrReplay: async (input) => {
+        const result = await runRepository.beginOrReplay(input);
+        if (result.kind === "started") controller.abort("abort_after_begin");
+        return result;
+      },
+      completeWithoutReply: (input) => runRepository.completeWithoutReply(input),
+      failAttempt: (input) => runRepository.failAttempt(input),
+      fenceAttempt: (input) => runRepository.fenceAttempt(input)
+    };
+    const repository = new PostgresIntakeRepository(harness.db);
+    const { service } = runtime(defaultGenerator(), repository, abortingRepository);
+    await accept(service, widgetRequest("abort-after-begin"));
+    await harness.db.update(widgetAiJobs).set({ maxAttempts: 1 });
+    const claimTime = readyNow();
+    const job = await repository.claimSiteWidgetAiJob!({ leaseMs: 5_000, now: claimTime });
+    if (!job) throw new Error("expected claimed abort attempt");
+
+    await expect(
+      service.processClaimedSiteWidgetAiJob(job, controller.signal)
+    ).rejects.toThrow("widget AI job execution aborted");
+    expect(await aiAttemptRows()).toMatchObject([
+      { attemptNumber: 1, jobAttemptCount: 1, status: "fenced" }
+    ]);
+    expect(await harness.db.select().from(aiRuns)).toMatchObject([
+      { status: "running", winningAttemptId: null }
+    ]);
+
+    await repository.finishSiteWidgetAiJob!({
+      jobId: job.id,
+      attemptCount: job.attemptCount,
+      status: "failed",
+      terminalReason: "worker_failed",
+      completedAt: new Date(claimTime.getTime() + 100)
+    });
+    expect(await jobRows()).toMatchObject([
+      { status: "failed", attemptCount: 1, terminalReason: "worker_failed" }
+    ]);
+    expect(await harness.db.select().from(aiRuns)).toMatchObject([
+      {
+        status: "failed",
+        decisionAction: "no_reply",
+        outcomeReason: "generator_failed",
+        failureCode: "runtime_failure",
+        winningAttemptId: null
+      }
+    ]);
+  });
+
   it("blocks an in-flight reply after manager takeover", async () => {
     const gate = barrier();
     let publicConversationId = "";
@@ -143,7 +324,11 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
     expect(await running).toBe(true);
     expect(await countMessagesByRole("ai_assistant")).toBe(0);
     expect(await jobRows()).toMatchObject([
-      { status: "superseded", attemptCount: 1, terminalReason: "turn_not_current" }
+      {
+        status: "superseded",
+        attemptCount: 1,
+        terminalReason: "turn_not_current"
+      }
     ]);
     expect(await conversationRows()).toMatchObject([
       { agentAllowedToReply: false, aiState: "manager_active" }
@@ -155,12 +340,13 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
     expect(takenOver?.generationEpoch).toBe(2);
     expect(await aiRunRows()).toMatchObject([
       {
-        recordingContract: "native_recorded",
-        status: "running",
+        recordingContract: "logical_recorded_v2",
+        status: "failed",
         outboundLinked: false,
         sendGateResult: "not_checked"
       }
     ]);
+    expect(await aiAttemptRows()).toMatchObject([{ status: "fenced" }]);
   });
 
   it("recovers exactly one outbound after reply commit succeeds but job finish fails", async () => {
@@ -223,10 +409,7 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
         lastMessageSequence: conversations.lastMessageSequence
       })
       .from(widgetAiJobs)
-      .innerJoin(
-        conversationMessages,
-        eq(widgetAiJobs.inboundMessageId, conversationMessages.id)
-      )
+      .innerJoin(conversationMessages, eq(widgetAiJobs.inboundMessageId, conversationMessages.id))
       .innerJoin(conversations, eq(widgetAiJobs.conversationId, conversations.id));
     expect(job).toBeDefined();
     expect(job!.availableAt.getTime() - job!.createdAt.getTime()).toBe(600);
@@ -249,9 +432,7 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
 
     expect(await worker.runOnce(readyNow())).toBe(true);
     expect(await countMessagesByRole("ai_assistant")).toBe(1);
-    expect(await conversationRows()).toEqual([
-      { agentAllowedToReply: true, aiState: "watching" }
-    ]);
+    expect(await conversationRows()).toEqual([{ agentAllowedToReply: true, aiState: "watching" }]);
   });
 
   it("advances generation epoch only for effective AI control changes", async () => {
@@ -464,7 +645,10 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
       metadata: { test_scope: "pr1_manager_writer" }
     });
 
-    expect(persisted).toMatchObject({ deliveryStatus: "pending", replayed: false });
+    expect(persisted).toMatchObject({
+      deliveryStatus: "pending",
+      replayed: false
+    });
     const messages = await harness.db
       .select({
         senderRole: conversationMessages.senderRole,
@@ -508,7 +692,7 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
     expect(await jobRows()).toMatchObject([{ status: "replied" }]);
     await expect(aiRunRows()).resolves.toMatchObject([
       {
-        recordingContract: "native_recorded",
+        recordingContract: "logical_recorded_v2",
         status: "persisted",
         inboundPublicMessageId: accepted.public_message_id,
         outboundLinked: true,
@@ -538,7 +722,7 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
     ]);
     expect(runRows).toMatchObject([
       {
-        recordingContract: "native_recorded",
+        recordingContract: "logical_recorded_v2",
         status: "fallback_unavailable",
         decisionAction: "no_reply",
         outcomeReason: "generator_failed",
@@ -565,7 +749,7 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
     ]);
   });
 
-  it("starts, replays and completes a native recorded run with child evidence", async () => {
+  it("starts, replays and completes a logical recorded run with child evidence", async () => {
     const { service } = runtime();
     const accepted = await accept(service, widgetRequest("native-recorded-replay"));
     const [inbound] = await harness.db
@@ -586,8 +770,11 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
       inboundMessageId: inbound.id,
       channel: "site_widget",
       runtimeMode: "direct_openai",
-      decisionProfile: "legacy_s05",
-      idempotencyKey: `ai-turn:${randomUUID()}`,
+      decisionProfile: "live_v2",
+      idempotencyKey: `ai-turn:${inbound.id}`,
+      attemptIdempotencyKey: `ai-turn:${inbound.id}:attempt:1`,
+      attemptNumber: 1,
+      jobAttemptCount: 1,
       inputFingerprint: "d".repeat(64),
       versions: {
         policyVersion: "pr0b_policy.v1",
@@ -615,10 +802,30 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
     ).rejects.toMatchObject({
       cause: { constraint_name: "ai_runs_contract_evidence_check" }
     });
-    await expect(repository.beginOrReplay(input)).resolves.toEqual({
+    await expect(
+      repository.beginOrReplay({
+        ...input,
+        traceId: randomUUID(),
+        startedAt: new Date("2026-08-04T11:00:00.010Z")
+      })
+    ).resolves.toEqual({
       kind: "running_replay",
       run: started.run
     });
+    for (const mismatch of [
+      {
+        ...input,
+        versions: { ...input.versions, promptVersion: "pr0b_prompt.v2" }
+      },
+      {
+        ...input,
+        model: { ...input.model, requestedModelName: "pr0b-recorded-fake-v2" }
+      }
+    ]) {
+      await expect(repository.beginOrReplay(mismatch)).rejects.toBeInstanceOf(
+        AiRunReplayConflictError
+      );
+    }
     await expect(
       repository.beginOrReplay({
         ...input,
@@ -667,14 +874,12 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
     const [runRows, spanRows, eventRows] = await Promise.all([
       harness.db.select().from(aiRuns).where(eq(aiRuns.id, started.run.id)),
       harness.db.select().from(aiRunSpans).where(eq(aiRunSpans.aiRunId, started.run.id)),
-      harness.db
-        .select()
-        .from(aiQualityEvents)
-        .where(eq(aiQualityEvents.aiRunId, started.run.id))
+      harness.db.select().from(aiQualityEvents).where(eq(aiQualityEvents.aiRunId, started.run.id))
     ]);
     expect(runRows).toMatchObject([
       {
-        recordingContract: "native_recorded",
+        recordingContract: "logical_recorded_v2",
+        winningAttemptId: started.run.attempt.id,
         status: "fallback_unavailable",
         inboundMessageId: inbound.id,
         inboundPublicMessageId: accepted.public_message_id,
@@ -684,17 +889,390 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
       }
     ]);
     expect(spanRows).toMatchObject([
-      { aiRunId: started.run.id, spanId: "model-1", status: "failed" }
+      {
+        aiRunId: started.run.id,
+        aiRunAttemptId: started.run.attempt.id,
+        spanId: "model-1",
+        status: "failed"
+      }
     ]);
     expect(eventRows).toMatchObject([
       {
         aiRunId: started.run.id,
+        aiRunAttemptId: started.run.attempt.id,
         messageId: inbound.id,
         eventType: "model_failure",
         reasonCode: "model_error",
         managerVisible: true
       }
     ]);
+  });
+
+  it("records a failed no-reply terminal without a winning attempt", async () => {
+    const { service } = runtime();
+    const accepted = await accept(service, widgetRequest("recorded-failed-terminal"));
+    const [inbound] = await harness.db
+      .select({
+        id: conversationMessages.id,
+        leadId: conversationMessages.leadId,
+        conversationId: conversationMessages.conversationId
+      })
+      .from(conversationMessages)
+      .where(eq(conversationMessages.publicMessageId, accepted.public_message_id));
+    if (!inbound) throw new Error("expected accepted inbound message");
+
+    const repository = new PostgresAiRunRepository(harness.db);
+    const input: BeginAiRunInput = {
+      traceId: randomUUID(),
+      leadId: inbound.leadId,
+      conversationId: inbound.conversationId,
+      inboundMessageId: inbound.id,
+      channel: "site_widget",
+      runtimeMode: "direct_openai",
+      decisionProfile: "live_v2",
+      idempotencyKey: `ai-turn:${inbound.id}`,
+      attemptIdempotencyKey: `ai-turn:${inbound.id}:attempt:1`,
+      attemptNumber: 1,
+      jobAttemptCount: 1,
+      inputFingerprint: "c".repeat(64),
+      versions: {
+        policyVersion: "pr0b_policy.v1",
+        promptVersion: "pr0b_prompt.v1",
+        toolVersion: "pr0b_tools.none.v1",
+        disclosureVersion: "pr0b_disclosure.v1",
+        modelProfileVersion: "pr0b_model_profile.v1"
+      },
+      model: {
+        modelProvider: "fake",
+        requestedModelName: "pr0b-recorded-fake",
+        reasoningEffort: "none"
+      },
+      startedAt: new Date("2026-08-04T11:05:00.000Z")
+    };
+    const started = await repository.beginOrReplay(input);
+    if (started.kind !== "started") throw new Error("expected failed terminal attempt");
+
+    const terminal = await repository.completeWithoutReply({
+      run: started.run,
+      completion: failedTerminalCompletion(started.run)
+    });
+    expect(terminal).toMatchObject({ status: "failed", failureCode: "recorder_failure" });
+    expect(terminal.winningAttemptId).toBeUndefined();
+    expect(await harness.db.select().from(aiRuns).where(eq(aiRuns.id, started.run.id))).toMatchObject([
+      { status: "failed", winningAttemptId: null }
+    ]);
+    expect(await aiAttemptRows()).toMatchObject([{ status: "failed" }]);
+    await expect(repository.beginOrReplay(input)).resolves.toEqual({
+      kind: "terminal_replay",
+      run: terminal
+    });
+  });
+
+  it("keeps retry failure attempt-scoped and fails the logical run at max attempts", async () => {
+    const { service } = runtime();
+    const accepted = await accept(service, widgetRequest("recorded-attempt-failure-budget"));
+    const [inbound] = await harness.db
+      .select({
+        id: conversationMessages.id,
+        leadId: conversationMessages.leadId,
+        conversationId: conversationMessages.conversationId
+      })
+      .from(conversationMessages)
+      .where(eq(conversationMessages.publicMessageId, accepted.public_message_id));
+    if (!inbound) throw new Error("expected accepted inbound message");
+
+    const repository = new PostgresAiRunRepository(harness.db);
+    const firstInput: BeginAiRunInput = {
+      traceId: randomUUID(),
+      leadId: inbound.leadId,
+      conversationId: inbound.conversationId,
+      inboundMessageId: inbound.id,
+      channel: "site_widget",
+      runtimeMode: "direct_openai",
+      decisionProfile: "live_v2",
+      idempotencyKey: `ai-turn:${inbound.id}`,
+      attemptIdempotencyKey: `ai-turn:${inbound.id}:attempt:1`,
+      attemptNumber: 1,
+      jobAttemptCount: 1,
+      maxAttempts: 2,
+      inputFingerprint: "e".repeat(64),
+      versions: {
+        policyVersion: "pr0b_policy.v1",
+        promptVersion: "pr0b_prompt.v1",
+        toolVersion: "pr0b_tools.none.v1",
+        disclosureVersion: "pr0b_disclosure.v1",
+        modelProfileVersion: "pr0b_model_profile.v1"
+      },
+      model: {
+        modelProvider: "fake",
+        requestedModelName: "pr0b-recorded-fake",
+        reasoningEffort: "none"
+      },
+      startedAt: new Date("2026-08-04T11:10:00.000Z")
+    };
+    const first = await repository.beginOrReplay(firstInput);
+    if (first.kind !== "started") throw new Error("expected first attempt");
+    await repository.failAttempt({
+      run: first.run,
+      completion: failedAttemptCompletion(first.run, "2026-08-04T11:10:00.100Z")
+    });
+
+    const secondInput: BeginAiRunInput = {
+      ...firstInput,
+      traceId: randomUUID(),
+      attemptIdempotencyKey: `ai-turn:${inbound.id}:attempt:2`,
+      attemptNumber: 2,
+      jobAttemptCount: 2,
+      startedAt: new Date("2026-08-04T11:10:01.000Z")
+    };
+    const second = await repository.beginOrReplay(secondInput);
+    if (second.kind !== "started") throw new Error("expected second attempt");
+    expect(await harness.db.select().from(aiRuns)).toMatchObject([
+      { id: first.run.id, status: "running", winningAttemptId: null }
+    ]);
+    expect(await aiAttemptRows()).toMatchObject([
+      { attemptNumber: 1, jobAttemptCount: 1, status: "failed" },
+      { attemptNumber: 2, jobAttemptCount: 2, status: "running" }
+    ]);
+
+    await repository.failAttempt({
+      run: second.run,
+      completion: failedAttemptCompletion(second.run, "2026-08-04T11:10:01.100Z")
+    });
+    expect(await harness.db.select().from(aiRuns)).toMatchObject([
+      { id: first.run.id, status: "failed", winningAttemptId: null }
+    ]);
+    expect(await aiAttemptRows()).toMatchObject([
+      { attemptNumber: 1, jobAttemptCount: 1, status: "failed" },
+      { attemptNumber: 2, jobAttemptCount: 2, status: "failed" }
+    ]);
+    await expect(repository.beginOrReplay(secondInput)).resolves.toMatchObject({
+      kind: "terminal_replay",
+      run: { id: first.run.id, status: "failed" }
+    });
+  });
+
+  it("records every queue execution failure and exhausts the shared attempt budget", async () => {
+    const { repository, service } = runtime();
+    await accept(service, widgetRequest("recorded-queue-failure-budget"));
+    const runRepository = new PostgresAiRunRepository(harness.db);
+    const attemptRuns: RunningAiRunRecord[] = [];
+
+    for (let attemptNumber = 1; attemptNumber <= 3; attemptNumber += 1) {
+      const claimTime = new Date(Date.now() + attemptNumber * 1_000);
+      const job = await repository.claimSiteWidgetAiJob!({ leaseMs: 5_000, now: claimTime });
+      if (!job) throw new Error(`expected claimed attempt ${attemptNumber}`);
+      const started = await runRepository.beginOrReplay({
+        traceId: randomUUID(),
+        leadId: job.leadId,
+        conversationId: job.conversationId,
+        inboundMessageId: job.aiTurnExecutionContext.internal.inboundMessageId,
+        channel: "site_widget",
+        runtimeMode: "direct_openai",
+        decisionProfile: "live_v2",
+        idempotencyKey: job.aiTurnExecutionContext.turn.idempotencyKey,
+        attemptIdempotencyKey: `${job.aiTurnExecutionContext.turn.idempotencyKey}:attempt:${job.attemptCount}`,
+        attemptNumber: job.attemptCount,
+        jobId: job.id,
+        jobAttemptCount: job.attemptCount,
+        maxAttempts: job.maxAttempts,
+        inputFingerprint: sha256Hex(stableStringify(job.aiTurnInput)),
+        versions: {
+          policyVersion: "pr0b_policy.v1",
+          promptVersion: "pr0b_prompt.v1",
+          toolVersion: "pr0b_tools.none.v1",
+          disclosureVersion: "pr0b_disclosure.v1",
+          modelProfileVersion: "pr0b_model_profile.v1"
+        },
+        model: {
+          modelProvider: "fake",
+          requestedModelName: "pr0b-recorded-fake",
+          reasoningEffort: "none"
+        },
+        startedAt: claimTime
+      });
+      if (started.kind !== "started") throw new Error("expected a fresh physical attempt");
+      attemptRuns.push(started.run);
+      const completedAt = new Date(claimTime.getTime() + 100);
+      await repository.failRecordedSiteWidgetAiAttempt({
+        run: started.run,
+        completion: failedAttemptCompletion(started.run, completedAt.toISOString()),
+        inboundPublicMessageId: job.inboundPublicMessageId,
+        expectedGenerationEpoch: job.expectedGenerationEpoch,
+        respondsThroughSequence: job.respondsThroughSequence,
+        runtimeMode: job.runtimeMode,
+        jobCommit: {
+          jobId: job.id,
+          attemptCount: job.attemptCount,
+          maxAttempts: job.maxAttempts
+        }
+      });
+      if (attemptNumber < job.maxAttempts) {
+        await repository.finishSiteWidgetAiJob!({
+          jobId: job.id,
+          attemptCount: job.attemptCount,
+          status: "retrying",
+          terminalReason: "worker_failed",
+          retryAt: completedAt,
+          completedAt
+        });
+      }
+    }
+
+    expect(new Set(attemptRuns.map((run) => run.id))).toEqual(new Set([attemptRuns[0]!.id]));
+    expect(await jobRows()).toMatchObject([
+      { status: "failed", attemptCount: 3, terminalReason: "worker_failed" }
+    ]);
+    expect(await harness.db.select().from(aiRuns)).toMatchObject([
+      { status: "failed", winningAttemptId: null, outboundMessageId: null }
+    ]);
+    expect(await aiAttemptRows()).toMatchObject([
+      { attemptNumber: 1, jobAttemptCount: 1, status: "failed" },
+      { attemptNumber: 2, jobAttemptCount: 2, status: "failed" },
+      { attemptNumber: 3, jobAttemptCount: 3, status: "failed" }
+    ]);
+    expect(await countMessagesByRole("ai_assistant")).toBe(0);
+  });
+
+  it("survives pre-begin retry gaps and closes the logical run on a final gap", async () => {
+    const { repository, service } = runtime();
+    await accept(service, widgetRequest("recorded-pre-begin-attempt-gap"));
+    await harness.db.update(widgetAiJobs).set({ maxAttempts: 4 });
+    const runRepository = new PostgresAiRunRepository(harness.db);
+    const firstClaimAt = readyNow();
+
+    const beginClaimedAttempt = async (
+      job: NonNullable<Awaited<ReturnType<typeof repository.claimSiteWidgetAiJob>>>,
+      startedAt: Date
+    ) => {
+      const started = await runRepository.beginOrReplay({
+        traceId: randomUUID(),
+        leadId: job.leadId,
+        conversationId: job.conversationId,
+        inboundMessageId: job.aiTurnExecutionContext.internal.inboundMessageId,
+        channel: "site_widget",
+        runtimeMode: "direct_openai",
+        decisionProfile: "live_v2",
+        idempotencyKey: job.aiTurnExecutionContext.turn.idempotencyKey,
+        attemptIdempotencyKey: `${job.aiTurnExecutionContext.turn.idempotencyKey}:attempt:${job.attemptCount}`,
+        attemptNumber: job.attemptCount,
+        jobId: job.id,
+        jobAttemptCount: job.attemptCount,
+        maxAttempts: job.maxAttempts,
+        inputFingerprint: sha256Hex(stableStringify(job.aiTurnInput)),
+        versions: {
+          policyVersion: "pr0b_policy.v1",
+          promptVersion: "pr0b_prompt.v1",
+          toolVersion: "pr0b_tools.none.v1",
+          disclosureVersion: "pr0b_disclosure.v1",
+          modelProfileVersion: "pr0b_model_profile.v1"
+        },
+        model: {
+          modelProvider: "fake",
+          requestedModelName: "pr0b-recorded-fake",
+          reasoningEffort: "none"
+        },
+        startedAt
+      });
+      if (started.kind !== "started") throw new Error("expected a fresh physical attempt");
+      return started.run;
+    };
+
+    const first = await repository.claimSiteWidgetAiJob({ leaseMs: 5_000, now: firstClaimAt });
+    if (!first) throw new Error("expected first claimed attempt");
+    const firstRun = await beginClaimedAttempt(first, firstClaimAt);
+    const firstFailedAt = new Date(firstClaimAt.getTime() + 100);
+    await repository.failRecordedSiteWidgetAiAttempt({
+      run: firstRun,
+      completion: failedAttemptCompletion(firstRun, firstFailedAt.toISOString()),
+      inboundPublicMessageId: first.inboundPublicMessageId,
+      expectedGenerationEpoch: first.expectedGenerationEpoch,
+      respondsThroughSequence: first.respondsThroughSequence,
+      runtimeMode: first.runtimeMode,
+      jobCommit: {
+        jobId: first.id,
+        attemptCount: first.attemptCount,
+        maxAttempts: first.maxAttempts
+      }
+    });
+    await repository.finishSiteWidgetAiJob({
+      jobId: first.id,
+      attemptCount: first.attemptCount,
+      status: "retrying",
+      terminalReason: "worker_failed",
+      retryAt: firstFailedAt,
+      completedAt: firstFailedAt
+    });
+
+    const secondClaimAt = new Date(firstClaimAt.getTime() + 200);
+    const second = await repository.claimSiteWidgetAiJob({ leaseMs: 5_000, now: secondClaimAt });
+    if (!second) throw new Error("expected pre-begin second claim");
+    const secondFailedAt = new Date(secondClaimAt.getTime() + 100);
+    await repository.finishSiteWidgetAiJob({
+      jobId: second.id,
+      attemptCount: second.attemptCount,
+      status: "retrying",
+      terminalReason: "worker_failed",
+      retryAt: secondFailedAt,
+      completedAt: secondFailedAt
+    });
+
+    const thirdClaimAt = new Date(firstClaimAt.getTime() + 400);
+    const third = await repository.claimSiteWidgetAiJob({ leaseMs: 5_000, now: thirdClaimAt });
+    if (!third) throw new Error("expected third claim after the ledger gap");
+    const thirdRun = await beginClaimedAttempt(third, thirdClaimAt);
+    expect(thirdRun.attempt).toMatchObject({ attemptNumber: 3, jobAttemptCount: 3 });
+    const thirdFailedAt = new Date(thirdClaimAt.getTime() + 100);
+    await repository.failRecordedSiteWidgetAiAttempt({
+      run: thirdRun,
+      completion: failedAttemptCompletion(thirdRun, thirdFailedAt.toISOString()),
+      inboundPublicMessageId: third.inboundPublicMessageId,
+      expectedGenerationEpoch: third.expectedGenerationEpoch,
+      respondsThroughSequence: third.respondsThroughSequence,
+      runtimeMode: third.runtimeMode,
+      jobCommit: {
+        jobId: third.id,
+        attemptCount: third.attemptCount,
+        maxAttempts: third.maxAttempts
+      }
+    });
+    await repository.finishSiteWidgetAiJob({
+      jobId: third.id,
+      attemptCount: third.attemptCount,
+      status: "retrying",
+      terminalReason: "worker_failed",
+      retryAt: thirdFailedAt,
+      completedAt: thirdFailedAt
+    });
+
+    const fourthClaimAt = new Date(firstClaimAt.getTime() + 600);
+    const fourth = await repository.claimSiteWidgetAiJob({ leaseMs: 5_000, now: fourthClaimAt });
+    if (!fourth) throw new Error("expected final pre-begin claim");
+    const fourthFailedAt = new Date(fourthClaimAt.getTime() + 100);
+    await repository.finishSiteWidgetAiJob({
+      jobId: fourth.id,
+      attemptCount: fourth.attemptCount,
+      status: "failed",
+      terminalReason: "worker_failed",
+      completedAt: fourthFailedAt
+    });
+
+    expect(await jobRows()).toMatchObject([
+      { status: "failed", attemptCount: 4, terminalReason: "worker_failed" }
+    ]);
+    expect(await harness.db.select().from(aiRuns)).toMatchObject([
+      {
+        status: "failed",
+        outcomeReason: "generator_failed",
+        failureCode: "runtime_failure",
+        winningAttemptId: null
+      }
+    ]);
+    expect(await aiAttemptRows()).toMatchObject([
+      { attemptNumber: 1, jobAttemptCount: 1, status: "failed" },
+      { attemptNumber: 3, jobAttemptCount: 3, status: "failed" }
+    ]);
+    expect(await countAiRuns()).toBe(1);
   });
 
   it("atomically commits the direct model-turn body, hash, patches, handoff, run and job", async () => {
@@ -859,8 +1437,11 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
       inboundMessageId: inbound.id,
       channel: "site_widget",
       runtimeMode: "direct_openai",
-      decisionProfile: "legacy_s05",
-      idempotencyKey: `ai-turn:${randomUUID()}`,
+      decisionProfile: "live_v2",
+      idempotencyKey: `ai-turn:${inbound.id}`,
+      attemptIdempotencyKey: `ai-turn:${inbound.id}:attempt:1`,
+      attemptNumber: 1,
+      jobAttemptCount: 1,
       inputFingerprint: "e".repeat(64),
       versions: {
         policyVersion: "pr0b_policy.v1",
@@ -946,12 +1527,10 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
       kind: "terminal_replay",
       run: completed.run
     });
-    const [runRow] = await harness.db
-      .select()
-      .from(aiRuns)
-      .where(eq(aiRuns.id, started.run.id));
+    const [runRow] = await harness.db.select().from(aiRuns).where(eq(aiRuns.id, started.run.id));
     expect(runRow).toMatchObject({
-      recordingContract: "native_recorded",
+      recordingContract: "logical_recorded_v2",
+      winningAttemptId: started.run.attempt.id,
       status: "persisted",
       outboundMessageId: completed.outbound.id,
       outboundPublicMessageId: completed.outbound.publicMessageId,
@@ -977,10 +1556,7 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
     });
     await accept(service, widgetRequest("burst-1", { sessionId, text: "Первый вопрос" }));
     await accept(service, widgetRequest("burst-2", { sessionId, text: "Уточнение" }));
-    await accept(
-      service,
-      widgetRequest("burst-3", { sessionId, text: "Финальный контекст" })
-    );
+    await accept(service, widgetRequest("burst-3", { sessionId, text: "Финальный контекст" }));
     await harness.client.unsafe(`
       UPDATE conversation_messages
       SET created_at = '2026-08-04T12:00:00.000Z'::timestamptz,
@@ -992,11 +1568,7 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
     await drain(worker, 3);
 
     expect(generationCalls).toBe(1);
-    expect(compactContextTexts).toEqual([
-      "Первый вопрос",
-      "Уточнение",
-      "Финальный контекст"
-    ]);
+    expect(compactContextTexts).toEqual(["Первый вопрос", "Уточнение", "Финальный контекст"]);
     expect(await countMessagesByRole("visitor")).toBe(3);
     expect(await jobRows()).toMatchObject([
       { status: "superseded", terminalReason: "newer_inbound" },
@@ -1015,13 +1587,13 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
     const sessionId = randomUUID();
     const { service, worker } = runtime();
 
+    await accept(service, widgetRequest("legacy-backlog-1", { sessionId, text: "Первый вопрос" }));
     await accept(
       service,
-      widgetRequest("legacy-backlog-1", { sessionId, text: "Первый вопрос" })
-    );
-    await accept(
-      service,
-      widgetRequest("legacy-backlog-2", { sessionId, text: "Актуальный вопрос" })
+      widgetRequest("legacy-backlog-2", {
+        sessionId,
+        text: "Актуальный вопрос"
+      })
     );
 
     // Reproduce the 0016 -> 0018 backfill shape: several legacy pending jobs
@@ -1043,10 +1615,7 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
       { status: "replied" }
     ]);
 
-    const history = await service.getSiteWidgetHistory(
-      sessionId,
-      "site_widget.history.v2"
-    );
+    const history = await service.getSiteWidgetHistory(sessionId, "site_widget.history.v2");
     expect(history.body).toMatchObject({ poll_after_ms: undefined });
   });
 
@@ -1056,11 +1625,17 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
 
     await accept(
       service,
-      widgetRequest("lost-worker-backlog-1", { sessionId, text: "Первый вопрос" })
+      widgetRequest("lost-worker-backlog-1", {
+        sessionId,
+        text: "Первый вопрос"
+      })
     );
     await accept(
       service,
-      widgetRequest("lost-worker-backlog-2", { sessionId, text: "Актуальный вопрос" })
+      widgetRequest("lost-worker-backlog-2", {
+        sessionId,
+        text: "Актуальный вопрос"
+      })
     );
 
     await harness.db
@@ -1082,10 +1657,7 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
       { status: "replied" }
     ]);
 
-    const history = await service.getSiteWidgetHistory(
-      sessionId,
-      "site_widget.history.v2"
-    );
+    const history = await service.getSiteWidgetHistory(sessionId, "site_widget.history.v2");
     expect(history.body).toMatchObject({ poll_after_ms: undefined });
   });
 
@@ -1103,10 +1675,7 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
       );
     }
 
-    const result = await service.getSiteWidgetHistory(
-      sessionId,
-      "site_widget.history.v2"
-    );
+    const result = await service.getSiteWidgetHistory(sessionId, "site_widget.history.v2");
     expect(result.statusCode).toBe(200);
     if (!result.body.ok) throw new Error("expected public widget history");
     if (result.body.schema_version !== "site_widget.history.v2") {
@@ -1167,7 +1736,9 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
     expect(generationCalls).toBe(5);
     expect(maxActive).toBe(4);
     expect(await jobRows()).toEqual(
-      expect.arrayContaining(Array.from({ length: 5 }, () => expect.objectContaining({ status: "replied" })))
+      expect.arrayContaining(
+        Array.from({ length: 5 }, () => expect.objectContaining({ status: "replied" }))
+      )
     );
   }, 10_000);
 
@@ -1212,6 +1783,89 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
       { status: "superseded", terminalReason: "turn_not_current" },
       { status: "pending" }
     ]);
+    expect(await harness.db.select().from(aiRuns)).toMatchObject([
+      {
+        status: "failed",
+        outcomeReason: "execution_context_mismatch",
+        failureCode: "execution_context_mismatch",
+        winningAttemptId: null
+      }
+    ]);
+    expect(await aiAttemptRows()).toMatchObject([{ status: "fenced" }]);
+  });
+
+  it("closes a retrying logical run when a newer inbound supersedes its job", async () => {
+    const sessionId = randomUUID();
+    const { repository, service } = runtime();
+    await accept(service, widgetRequest("retrying-before-newer-1", { sessionId }));
+    const claimTime = readyNow();
+    const job = await repository.claimSiteWidgetAiJob!({ leaseMs: 5_000, now: claimTime });
+    if (!job) throw new Error("expected retrying job claim");
+    const runRepository = new PostgresAiRunRepository(harness.db);
+    const attemptStartedAt = new Date(Date.now() - 1_000);
+    const started = await runRepository.beginOrReplay({
+      traceId: randomUUID(),
+      leadId: job.leadId,
+      conversationId: job.conversationId,
+      inboundMessageId: job.aiTurnExecutionContext.internal.inboundMessageId,
+      channel: "site_widget",
+      runtimeMode: "direct_openai",
+      decisionProfile: "live_v2",
+      idempotencyKey: job.aiTurnExecutionContext.turn.idempotencyKey,
+      attemptIdempotencyKey: `${job.aiTurnExecutionContext.turn.idempotencyKey}:attempt:1`,
+      attemptNumber: 1,
+      jobId: job.id,
+      jobAttemptCount: 1,
+      maxAttempts: job.maxAttempts,
+      inputFingerprint: sha256Hex(stableStringify(job.aiTurnInput)),
+      versions: {
+        policyVersion: "pr0b_policy.v1",
+        promptVersion: "pr0b_prompt.v1",
+        toolVersion: "pr0b_tools.none.v1",
+        disclosureVersion: "pr0b_disclosure.v1",
+        modelProfileVersion: "pr0b_model_profile.v1"
+      },
+      model: {
+        modelProvider: "fake",
+        requestedModelName: "pr0b-recorded-fake",
+        reasoningEffort: "none"
+      },
+      startedAt: attemptStartedAt
+    });
+    if (started.kind !== "started") throw new Error("expected retrying attempt");
+    const failedAt = new Date(Date.now() - 500);
+    await runRepository.failAttempt({
+      run: started.run,
+      completion: failedAttemptCompletion(started.run, failedAt.toISOString())
+    });
+    await repository.finishSiteWidgetAiJob!({
+      jobId: job.id,
+      attemptCount: job.attemptCount,
+      status: "retrying",
+      terminalReason: "worker_failed",
+      retryAt: new Date(failedAt.getTime() + 1_000),
+      completedAt: failedAt
+    });
+
+    expect(await jobRows()).toMatchObject([{ status: "retrying", attemptCount: 1 }]);
+    expect(await harness.db.select().from(aiRuns)).toMatchObject([
+      { status: "running", winningAttemptId: null }
+    ]);
+    expect(await aiAttemptRows()).toMatchObject([{ status: "failed" }]);
+
+    await accept(service, widgetRequest("retrying-before-newer-2", { sessionId }));
+    expect(await jobRows()).toMatchObject([
+      { status: "superseded", attemptCount: 1, terminalReason: "newer_inbound" },
+      { status: "pending", attemptCount: 0 }
+    ]);
+    expect(await harness.db.select().from(aiRuns)).toMatchObject([
+      {
+        status: "failed",
+        outcomeReason: "execution_context_mismatch",
+        failureCode: "execution_context_mismatch",
+        winningAttemptId: null
+      }
+    ]);
   });
 
   it("blocks persistence from a worker that lost its lease attempt", async () => {
@@ -1237,6 +1891,10 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
 
     expect(await countMessagesByRole("ai_assistant")).toBe(0);
     expect(await jobRows()).toMatchObject([{ status: "processing", attemptCount: 2 }]);
+    expect(await aiAttemptRows()).toMatchObject([
+      { attemptNumber: 1, jobAttemptCount: 1, status: "fenced" }
+    ]);
+    expect(await countAiRuns()).toBe(1);
   });
 
   it("rolls back stale degradation before the reclaimed attempt replies", async () => {
@@ -1255,9 +1913,7 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
           };
         }
 
-        return replyWithAiRun(
-          "Свежая попытка сохранила ответ. Какой материал вам ближе?"
-        );
+        return replyWithAiRun("Свежая попытка сохранила ответ. Какой материал вам ближе?");
       }
     });
     await accept(service, widgetRequest("lost-lease-degradation"));
@@ -1275,9 +1931,13 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
     expect(await harness.db.select().from(aiRuns)).toMatchObject([
       {
         status: "running",
+        winningAttemptId: null,
         outboundMessageId: null,
         sendGateResult: "not_checked"
       }
+    ]);
+    expect(await aiAttemptRows()).toMatchObject([
+      { attemptNumber: 1, jobAttemptCount: 1, status: "fenced" }
     ]);
     expect(await jobRows()).toMatchObject([{ status: "processing", attemptCount: 2 }]);
     if (!reclaimed) throw new Error("expected reclaimed widget AI job");
@@ -1289,28 +1949,26 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
     expect(generationCalls).toBe(2);
     expect(await countMessagesByRole("ai_assistant")).toBe(1);
     expect(await jobRows()).toMatchObject([{ status: "replied", attemptCount: 2 }]);
-    expect(await harness.db.select().from(aiRuns)).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          status: "running",
-          outboundMessageId: null,
-          sendGateResult: "not_checked"
-        }),
-        expect.objectContaining({
-          status: "persisted",
-          outboundMessageId: expect.any(String),
-          sendGateResult: "allowed"
-        })
-      ])
-    );
-    expect(await countAiRuns()).toBe(2);
+    expect(await harness.db.select().from(aiRuns)).toMatchObject([
+      {
+        status: "persisted",
+        winningAttemptId: expect.any(String),
+        outboundMessageId: expect.any(String),
+        sendGateResult: "allowed"
+      }
+    ]);
+    expect(await aiAttemptRows()).toMatchObject([
+      { attemptNumber: 1, jobAttemptCount: 1, status: "fenced" },
+      { attemptNumber: 2, jobAttemptCount: 2, status: "succeeded" }
+    ]);
+    expect(await countAiRuns()).toBe(1);
   });
 
   function runtime(
     replyGenerator: PublicWidgetAiReplyGenerator = defaultGenerator(),
-    repository = new PostgresIntakeRepository(harness.db)
+    repository = new PostgresIntakeRepository(harness.db),
+    runRepository: AiRunRepository = new PostgresAiRunRepository(harness.db)
   ): Runtime {
-    const runRepository = new PostgresAiRunRepository(harness.db);
     const generator: ObservedLiveV2DecisionGenerator = {
       async generateDecision(input, options) {
         const [run] = await harness.db
@@ -1318,11 +1976,14 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
             conversationId: aiRuns.conversationId,
             inboundPublicMessageId: aiRuns.inboundPublicMessageId
           })
-          .from(aiRuns)
-          .where(eq(aiRuns.traceId, options.appTraceId));
+          .from(aiRunAttempts)
+          .innerJoin(aiRuns, eq(aiRunAttempts.aiRunId, aiRuns.id))
+          .where(eq(aiRunAttempts.traceId, options.appTraceId));
         const [conversation] = run
           ? await harness.db
-              .select({ publicConversationId: conversations.publicConversationId })
+              .select({
+                publicConversationId: conversations.publicConversationId
+              })
               .from(conversations)
               .where(eq(conversations.id, run.conversationId))
           : [];
@@ -1396,7 +2057,9 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
     return acceptBody(await service.acceptSiteWidgetMessage(payload));
   }
 
-  function acceptBody(result: Awaited<ReturnType<PublicWidgetIntakeService["acceptSiteWidgetMessage"]>>) {
+  function acceptBody(
+    result: Awaited<ReturnType<PublicWidgetIntakeService["acceptSiteWidgetMessage"]>>
+  ) {
     expect(result.statusCode).toBe(202);
     expect(result.body.ok).toBe(true);
     return result.body as AcceptedV2Body;
@@ -1467,6 +2130,17 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
     return row?.value ?? 0;
   }
 
+  async function aiAttemptRows() {
+    return harness.db
+      .select({
+        attemptNumber: aiRunAttempts.attemptNumber,
+        jobAttemptCount: aiRunAttempts.jobAttemptCount,
+        status: aiRunAttempts.status
+      })
+      .from(aiRunAttempts)
+      .orderBy(asc(aiRunAttempts.attemptNumber));
+  }
+
   async function waitForBlockedTransactions(expected: number) {
     const deadline = Date.now() + 10_000;
 
@@ -1509,8 +2183,44 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
       })
       .from(aiRuns);
   }
-
 });
+
+function failedAttemptCompletion(
+  run: RunningAiRunRecord,
+  completedAt: string
+): AiRunTerminalCompletion {
+  const completed = new Date(completedAt);
+  return {
+    status: "fallback_unavailable",
+    normalizedAction: "no_reply",
+    outcomeReason: "generator_failed",
+    failureCode: "runtime_failure",
+    validatorResult: "failed",
+    observedModelProvider: "none",
+    sendGateResult: "not_checked",
+    completedAt: completed,
+    latencyMs: completed.getTime() - run.attempt.startedAt.getTime(),
+    spans: [],
+    qualityEvents: []
+  };
+}
+
+function failedTerminalCompletion(run: RunningAiRunRecord): AiRunTerminalCompletion {
+  const completedAt = new Date(run.attempt.startedAt.getTime() + 100);
+  return {
+    status: "failed",
+    normalizedAction: "no_reply",
+    outcomeReason: "recorder_failure",
+    failureCode: "recorder_failure",
+    validatorResult: "failed",
+    observedModelProvider: "none",
+    sendGateResult: "not_checked",
+    completedAt,
+    latencyMs: completedAt.getTime() - run.attempt.startedAt.getTime(),
+    spans: [],
+    qualityEvents: []
+  };
+}
 
 function readyNow() {
   return new Date(Date.now() + 1_000);
@@ -1531,7 +2241,10 @@ function modelTurnCandidate(text: string) {
     message: questionMatch
       ? {
           answerText: questionMatch[1]?.trim() || "Уточню детали.",
-          question: { text: questionMatch[2]!.trim(), target: "material" as const }
+          question: {
+            text: questionMatch[2]!.trim(),
+            target: "material" as const
+          }
         }
       : { answerText: text, question: null },
     statePatches: [],

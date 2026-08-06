@@ -18,9 +18,10 @@ const STARTED_AT = new Date("2026-07-14T12:00:00.000Z");
 const OUTBOUND_MESSAGE_ID = "00000000-0000-4000-8000-000000000005";
 
 describe("P2 memory AI run repository invariants", () => {
-  it("accepts only the two approved runtime/profile pairs", async () => {
+  it("accepts the compatibility pairs plus direct live_v2", async () => {
     for (const pair of [
       { runtimeMode: "direct_openai", decisionProfile: "legacy_s05" },
+      { runtimeMode: "direct_openai", decisionProfile: "live_v2" },
       { runtimeMode: "mastra_openai_api", decisionProfile: "live_v2" }
     ] as const) {
       const repository = new MemoryAiRunRepository();
@@ -31,7 +32,6 @@ describe("P2 memory AI run repository invariants", () => {
     }
 
     for (const pair of [
-      { runtimeMode: "direct_openai", decisionProfile: "live_v2" },
       { runtimeMode: "mastra_openai_api", decisionProfile: "legacy_s05" }
     ] as const) {
       const repository = new MemoryAiRunRepository();
@@ -55,7 +55,10 @@ describe("P2 memory AI run repository invariants", () => {
           requestedModelName: "unsafe model name",
           reasoningEffort: "none"
         }
-      })
+      }),
+      beginInput({ attemptNumber: 2 }),
+      beginInput({ jobAttemptCount: 2 }),
+      beginInput({ maxAttempts: 0 })
     ]) {
       const repository = new MemoryAiRunRepository();
       await expect(repository.beginOrReplay(input)).rejects.toBeInstanceOf(
@@ -75,7 +78,10 @@ describe("P2 memory AI run repository invariants", () => {
       startedAt: new Date("2026-07-14T12:01:00.000Z")
     });
 
-    expect(replay).toMatchObject({ kind: "running_replay", run: { traceId: run.traceId } });
+    expect(replay).toMatchObject({
+      kind: "running_replay",
+      run: { traceId: run.traceId }
+    });
 
     const mismatches: BeginAiRunInput[] = [
       { ...accepted, leadId: "00000000-0000-4000-8000-000000000091" },
@@ -87,7 +93,15 @@ describe("P2 memory AI run repository invariants", () => {
         runtimeMode: "mastra_openai_api",
         decisionProfile: "live_v2"
       },
-      { ...accepted, inputFingerprint: "b".repeat(64) }
+      { ...accepted, inputFingerprint: "b".repeat(64) },
+      {
+        ...accepted,
+        versions: { ...accepted.versions, promptVersion: "widget-ai-prompt.v2" }
+      },
+      {
+        ...accepted,
+        model: { ...accepted.model, requestedModelName: "p2-memory-fake-v2" }
+      }
     ];
 
     for (const mismatch of mismatches) {
@@ -96,6 +110,57 @@ describe("P2 memory AI run repository invariants", () => {
       );
     }
     expect(repository.runCount).toBe(1);
+  });
+
+  it("stores a failed terminal as a failed attempt without a winner", async () => {
+    const repository = new MemoryAiRunRepository();
+    const input = beginInput();
+    const run = await start(repository, input);
+    const terminal = await repository.completeWithoutReply({
+      run,
+      completion: failedTerminalCompletion(run)
+    });
+
+    expect(terminal).toMatchObject({ status: "failed", failureCode: "recorder_failure" });
+    expect(terminal.winningAttemptId).toBeUndefined();
+    expect(repository.listAttempts(run.id)).toMatchObject([{ status: "failed" }]);
+    await expect(repository.beginOrReplay(input)).resolves.toEqual({
+      kind: "terminal_replay",
+      run: terminal
+    });
+  });
+
+  it("accepts a monotonic physical-attempt gap but rejects a stale lower number", async () => {
+    const repository = new MemoryAiRunRepository();
+    const accepted = beginInput();
+    const first = await start(repository, accepted);
+    const thirdInput = {
+      ...accepted,
+      traceId: "00000000-0000-4000-8000-000000000012",
+      attemptIdempotencyKey: "ai-turn:00000000-0000-4000-8000-000000000004:attempt:3",
+      attemptNumber: 3,
+      jobAttemptCount: 3,
+      startedAt: new Date(STARTED_AT.getTime() + 200)
+    };
+
+    await expect(repository.beginOrReplay(thirdInput)).resolves.toMatchObject({
+      kind: "started",
+      run: { id: first.id, attempt: { attemptNumber: 3, jobAttemptCount: 3 } }
+    });
+    expect(repository.listAttempts(first.id)).toMatchObject([
+      { attemptNumber: 1, status: "fenced" },
+      { attemptNumber: 3, status: "running" }
+    ]);
+    await expect(
+      repository.beginOrReplay({
+        ...thirdInput,
+        traceId: "00000000-0000-4000-8000-000000000013",
+        attemptIdempotencyKey:
+          "ai-turn:00000000-0000-4000-8000-000000000004:attempt:2",
+        attemptNumber: 2,
+        jobAttemptCount: 2
+      })
+    ).rejects.toBeInstanceOf(MemoryAiRunReplayConflictError);
   });
 
   it("stores a valid no-reply terminal and returns it on replay", async () => {
@@ -173,7 +238,10 @@ describe("P2 memory AI run repository invariants", () => {
         failureCode: "send_gate_blocked",
         sendGateResult: "blocked"
       }),
-      (run) => ({ ...noReplyCompletion(run), sendGateCheckedAt: completedAt(run) }),
+      (run) => ({
+        ...noReplyCompletion(run),
+        sendGateCheckedAt: completedAt(run)
+      }),
       (run) => ({
         ...noReplyCompletion(run),
         completedAt: new Date(run.startedAt.getTime() - 1)
@@ -204,10 +272,16 @@ describe("P2 memory AI run repository invariants", () => {
         observedModelName: "provider model with spaces"
       }),
       (run) => ({ ...noReplyCompletion(run), observedModelProvider: "fake" }),
-      (run) => ({ ...noReplyCompletion(run), observedModelName: "p2-memory-fake" }),
+      (run) => ({
+        ...noReplyCompletion(run),
+        observedModelName: "p2-memory-fake"
+      }),
       (run) => ({ ...noReplyCompletion(run), usage: { inputTokens: -1 } }),
       (run) => ({ ...noReplyCompletion(run), usage: { totalTokens: 1.5 } }),
-      (run) => ({ ...noReplyCompletion(run), usage: { outputTokens: 2_147_483_648 } }),
+      (run) => ({
+        ...noReplyCompletion(run),
+        usage: { outputTokens: 2_147_483_648 }
+      }),
       (run) => ({ ...noReplyCompletion(run), latencyMs: -1 })
     ];
 
@@ -215,7 +289,10 @@ describe("P2 memory AI run repository invariants", () => {
       const repository = new MemoryAiRunRepository();
       const run = await start(repository);
       await expect(
-        repository.completeWithoutReply({ run, completion: completionFor(run) })
+        repository.completeWithoutReply({
+          run,
+          completion: completionFor(run)
+        })
       ).rejects.toBeInstanceOf(MemoryAiRunCompletionConflictError);
     }
   });
@@ -248,6 +325,56 @@ describe("P2 memory AI run repository invariants", () => {
     }
   });
 
+  it("fences replaced attempts and terminally fails only at the retry budget", async () => {
+    const repository = new MemoryAiRunRepository();
+    const firstInput = beginInput({ maxAttempts: 2 });
+    const first = await start(repository, firstInput);
+    await repository.failAttempt({ run: first, completion: noReplyCompletion(first) });
+    expect(repository.listRuns()).toMatchObject([{ id: first.id, status: "running" }]);
+    expect(repository.listAttempts(first.id)).toMatchObject([
+      { attemptNumber: 1, status: "failed" }
+    ]);
+
+    const secondInput = beginInput({
+      traceId: "00000000-0000-4000-8000-000000000011",
+      attemptIdempotencyKey:
+        "ai-turn:00000000-0000-4000-8000-000000000004:attempt:2",
+      attemptNumber: 2,
+      jobAttemptCount: 2,
+      maxAttempts: 2,
+      startedAt: new Date(STARTED_AT.getTime() + 100)
+    });
+    const second = await start(repository, secondInput);
+
+    expect(repository.listRuns()).toMatchObject([{ id: first.id, status: "running" }]);
+    expect(repository.listAttempts(first.id)).toMatchObject([
+      { attemptNumber: 1, status: "failed" },
+      { attemptNumber: 2, status: "running" }
+    ]);
+    await expect(
+      repository.completeWithoutReply({ run: first, completion: noReplyCompletion(first) })
+    ).rejects.toBeInstanceOf(MemoryAiRunCompletionConflictError);
+
+    await repository.failAttempt({ run: second, completion: noReplyCompletion(second) });
+    expect(repository.listRuns()).toMatchObject([{ id: first.id, status: "failed" }]);
+    expect(repository.listAttempts(first.id)).toMatchObject([
+      { attemptNumber: 1, status: "failed" },
+      { attemptNumber: 2, status: "failed" }
+    ]);
+    await expect(repository.beginOrReplay(secondInput)).resolves.toMatchObject({
+      kind: "terminal_replay",
+      run: { id: first.id, status: "failed" }
+    });
+
+    const fenceRepository = new MemoryAiRunRepository();
+    const fencedFirst = await start(fenceRepository, firstInput);
+    await start(fenceRepository, secondInput);
+    expect(fenceRepository.listAttempts(fencedFirst.id)).toMatchObject([
+      { attemptNumber: 1, status: "fenced" },
+      { attemptNumber: 2, status: "running" }
+    ]);
+  });
+
   it("rejects uncontrolled events, forged linkage and repeated prepared commits", async () => {
     const eventRepository = new MemoryAiRunRepository();
     const eventRun = await start(eventRepository);
@@ -263,7 +390,10 @@ describe("P2 memory AI run repository invariants", () => {
     await expect(
       eventRepository.completeWithoutReply({
         run: eventRun,
-        completion: { ...noReplyCompletion(eventRun), qualityEvents: uncontrolledEvents }
+        completion: {
+          ...noReplyCompletion(eventRun),
+          qualityEvents: uncontrolledEvents
+        }
       })
     ).rejects.toBeInstanceOf(MemoryAiRunCompletionConflictError);
 
@@ -276,10 +406,7 @@ describe("P2 memory AI run repository invariants", () => {
       })
     ).rejects.toBeInstanceOf(MemoryAiRunCompletionConflictError);
 
-    const commit = linkageRepository.prepareCompletion(
-      linkageRun,
-      noReplyCompletion(linkageRun)
-    );
+    const commit = linkageRepository.prepareCompletion(linkageRun, noReplyCompletion(linkageRun));
     expect(commit()).toMatchObject({ status: "fallback_unavailable" });
     expect(commit).toThrow(MemoryAiRunCompletionConflictError);
   });
@@ -295,6 +422,9 @@ function beginInput(overrides: Partial<BeginAiRunInput> = {}): BeginAiRunInput {
     runtimeMode: "direct_openai",
     decisionProfile: "legacy_s05",
     idempotencyKey: "ai-turn:00000000-0000-4000-8000-000000000004",
+    attemptIdempotencyKey: "ai-turn:00000000-0000-4000-8000-000000000004:attempt:1",
+    attemptNumber: 1,
+    jobAttemptCount: 1,
     inputFingerprint: "a".repeat(64),
     versions: {
       policyVersion: "widget-ai-policy.v1",
@@ -380,6 +510,22 @@ function replyCompletion(run: RunningAiRunRecord): AiRunTerminalCompletion {
         usedInFinalAnswer: true
       }
     ],
+    qualityEvents: []
+  };
+}
+
+function failedTerminalCompletion(run: RunningAiRunRecord): AiRunTerminalCompletion {
+  return {
+    status: "failed",
+    normalizedAction: "no_reply",
+    outcomeReason: "recorder_failure",
+    failureCode: "recorder_failure",
+    validatorResult: "failed",
+    observedModelProvider: "none",
+    sendGateResult: "not_checked",
+    completedAt: completedAt(run),
+    latencyMs: 10,
+    spans: [],
     qualityEvents: []
   };
 }

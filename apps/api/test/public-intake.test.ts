@@ -21,6 +21,7 @@ import {
 } from "../src/modules/ai/ai-dialog-contract.js";
 import { WIDGET_AI_POLICY_VERSION } from "../src/modules/ai/policy/widget-ai-policy.js";
 import { WIDGET_AI_PROMPT_VERSION } from "../src/modules/ai/prompts/widget-ai-prompt.js";
+import type { RunningAiRunRecord } from "../src/modules/ai/repositories/ai-run-repository.js";
 import {
   GroundedWidgetAiService,
   type GroundedWidgetAiProvider,
@@ -37,7 +38,9 @@ import {
 import { APPROVED_WIDGET_KNOWLEDGE_VERSION } from "../src/modules/ai/knowledge/approved-widget-knowledge.js";
 import { buildApi } from "../src/app.js";
 import {
+  AgentReplyBlockedError,
   TelegramOutboundBlockedError,
+  type ClaimedSiteWidgetAiJob,
   type SaveAcceptedSiteWidgetMessageInput,
   type SaveAcceptedSiteWidgetMessageResult
 } from "../src/repositories/intake-repository.js";
@@ -605,6 +608,235 @@ describe("public site_widget intake", () => {
       }
     ]);
     expect(JSON.stringify(completedHistory.messages[1])).not.toContain("https://");
+  });
+
+  it("keeps memory job and ledger transitions honest across pre-begin retry gaps", async () => {
+    const repository = new MemoryIntakeRepository();
+    const publicSessionId = randomUUID();
+    const publicMessageId = randomUUID();
+    await repository.saveAcceptedSiteWidgetMessage({
+      publicMessageId,
+      publicSessionId,
+      agentAllowedToReply: true,
+      request: validWidgetV2Request({
+        idempotencyKey: "widget-v2-memory-attempt-gap",
+        publicSessionId
+      }),
+      requestFingerprint: "a".repeat(64),
+      enqueueAiJob: true,
+      aiJobMaxAttempts: 4,
+      aiJobRuntimeMode: "direct_openai"
+    });
+    const firstClaimAt = new Date(Date.now() + 1_000);
+
+    const beginClaimedAttempt = (job: ClaimedSiteWidgetAiJob, startedAt: Date) =>
+      repository.beginOrReplay({
+        traceId: randomUUID(),
+        leadId: job.leadId,
+        conversationId: job.conversationId,
+        inboundMessageId: job.aiTurnExecutionContext.internal.inboundMessageId,
+        channel: "site_widget",
+        runtimeMode: "direct_openai",
+        decisionProfile: "live_v2",
+        idempotencyKey: job.aiTurnExecutionContext.turn.idempotencyKey,
+        attemptIdempotencyKey: `${job.aiTurnExecutionContext.turn.idempotencyKey}:attempt:${job.attemptCount}`,
+        attemptNumber: job.attemptCount,
+        jobId: job.id,
+        jobAttemptCount: job.attemptCount,
+        maxAttempts: job.maxAttempts,
+        inputFingerprint: "b".repeat(64),
+        versions: {
+          policyVersion: "memory_policy.v1",
+          promptVersion: "memory_prompt.v1",
+          toolVersion: "memory_tools.none.v1",
+          disclosureVersion: "memory_disclosure.v1",
+          modelProfileVersion: "memory_model_profile.v1"
+        },
+        model: {
+          modelProvider: "fake",
+          requestedModelName: "memory-recorded-fake",
+          reasoningEffort: "none"
+        },
+        startedAt
+      });
+    const failAttempt = async (run: RunningAiRunRecord, completedAt: Date) => {
+      await repository.failAttempt({
+        run,
+        completion: {
+          status: "failed",
+          normalizedAction: "no_reply",
+          outcomeReason: "generator_failed",
+          failureCode: "runtime_failure",
+          validatorResult: "failed",
+          observedModelProvider: "none",
+          sendGateResult: "not_checked",
+          completedAt,
+          latencyMs: Math.max(0, completedAt.getTime() - run.startedAt.getTime()),
+          spans: [],
+          qualityEvents: []
+        }
+      });
+    };
+
+    const first = await repository.claimSiteWidgetAiJob({ leaseMs: 5_000, now: firstClaimAt });
+    if (!first) throw new Error("expected first memory claim");
+    const firstStarted = await beginClaimedAttempt(first, firstClaimAt);
+    if (firstStarted.kind !== "started") throw new Error("expected first memory attempt");
+    const firstFailedAt = new Date(firstClaimAt.getTime() + 100);
+    await failAttempt(firstStarted.run, firstFailedAt);
+    await repository.finishSiteWidgetAiJob({
+      jobId: first.id,
+      attemptCount: first.attemptCount,
+      status: "retrying",
+      terminalReason: "worker_failed",
+      retryAt: firstFailedAt,
+      completedAt: firstFailedAt
+    });
+
+    const secondClaimAt = new Date(firstClaimAt.getTime() + 200);
+    const second = await repository.claimSiteWidgetAiJob({ leaseMs: 5_000, now: secondClaimAt });
+    if (!second) throw new Error("expected second memory claim");
+    const secondFailedAt = new Date(secondClaimAt.getTime() + 100);
+    await repository.finishSiteWidgetAiJob({
+      jobId: second.id,
+      attemptCount: second.attemptCount,
+      status: "retrying",
+      terminalReason: "worker_failed",
+      retryAt: secondFailedAt,
+      completedAt: secondFailedAt
+    });
+
+    const thirdClaimAt = new Date(firstClaimAt.getTime() + 400);
+    const third = await repository.claimSiteWidgetAiJob({ leaseMs: 5_000, now: thirdClaimAt });
+    if (!third) throw new Error("expected third memory claim");
+    const thirdStarted = await beginClaimedAttempt(third, thirdClaimAt);
+    if (thirdStarted.kind !== "started") throw new Error("expected memory attempt after gap");
+    const thirdFailedAt = new Date(thirdClaimAt.getTime() + 100);
+    await failAttempt(thirdStarted.run, thirdFailedAt);
+    await repository.finishSiteWidgetAiJob({
+      jobId: third.id,
+      attemptCount: third.attemptCount,
+      status: "retrying",
+      terminalReason: "worker_failed",
+      retryAt: thirdFailedAt,
+      completedAt: thirdFailedAt
+    });
+
+    const fourthClaimAt = new Date(firstClaimAt.getTime() + 600);
+    const fourth = await repository.claimSiteWidgetAiJob({ leaseMs: 5_000, now: fourthClaimAt });
+    if (!fourth) throw new Error("expected final memory claim");
+    const fourthFailedAt = new Date(fourthClaimAt.getTime() + 100);
+    await repository.finishSiteWidgetAiJob({
+      jobId: fourth.id,
+      attemptCount: fourth.attemptCount,
+      status: "failed",
+      terminalReason: "worker_failed",
+      completedAt: fourthFailedAt
+    });
+
+    await expect(beginClaimedAttempt(fourth, fourthClaimAt)).rejects.toBeInstanceOf(
+      AgentReplyBlockedError
+    );
+    expect(repository.listWidgetAiJobs()).toMatchObject([
+      { status: "failed", attemptCount: 4, terminalReason: "worker_failed" }
+    ]);
+    expect(repository.listAiRuns()).toMatchObject([
+      {
+        status: "failed",
+        outcomeReason: "generator_failed",
+        failureCode: "runtime_failure"
+      }
+    ]);
+    expect(repository.listAiAttempts()).toMatchObject([
+      { attemptNumber: 1, jobAttemptCount: 1, status: "failed" },
+      { attemptNumber: 3, jobAttemptCount: 3, status: "failed" }
+    ]);
+  });
+
+  it("rejects forged memory attempt numbering and max-attempt failure identity", async () => {
+    const repository = new MemoryIntakeRepository();
+    const publicSessionId = randomUUID();
+    await repository.saveAcceptedSiteWidgetMessage({
+      publicMessageId: randomUUID(),
+      publicSessionId,
+      agentAllowedToReply: true,
+      request: validWidgetV2Request({
+        idempotencyKey: "widget-v2-memory-forged-attempt",
+        publicSessionId
+      }),
+      requestFingerprint: "c".repeat(64),
+      enqueueAiJob: true,
+      aiJobMaxAttempts: 4,
+      aiJobRuntimeMode: "direct_openai"
+    });
+    const claimedAt = new Date(Date.now() + 1_000);
+    const job = await repository.claimSiteWidgetAiJob({ leaseMs: 5_000, now: claimedAt });
+    if (!job) throw new Error("expected claimed memory job");
+    const beginInput = {
+      traceId: randomUUID(),
+      leadId: job.leadId,
+      conversationId: job.conversationId,
+      inboundMessageId: job.aiTurnExecutionContext.internal.inboundMessageId,
+      channel: "site_widget" as const,
+      runtimeMode: "direct_openai" as const,
+      decisionProfile: "live_v2" as const,
+      idempotencyKey: job.aiTurnExecutionContext.turn.idempotencyKey,
+      attemptIdempotencyKey: `${job.aiTurnExecutionContext.turn.idempotencyKey}:attempt:1`,
+      attemptNumber: 1,
+      jobId: job.id,
+      jobAttemptCount: 1,
+      maxAttempts: 4,
+      inputFingerprint: "d".repeat(64),
+      versions: {
+        policyVersion: "memory_policy.v1",
+        promptVersion: "memory_prompt.v1",
+        toolVersion: "memory_tools.none.v1",
+        disclosureVersion: "memory_disclosure.v1",
+        modelProfileVersion: "memory_model_profile.v1"
+      },
+      model: {
+        modelProvider: "fake" as const,
+        requestedModelName: "memory-recorded-fake",
+        reasoningEffort: "none" as const
+      },
+      startedAt: claimedAt
+    };
+
+    await expect(
+      repository.beginOrReplay({
+        ...beginInput,
+        attemptIdempotencyKey: `${job.aiTurnExecutionContext.turn.idempotencyKey}:attempt:2`,
+        attemptNumber: 2
+      })
+    ).rejects.toBeInstanceOf(AgentReplyBlockedError);
+    const started = await repository.beginOrReplay(beginInput);
+    if (started.kind !== "started") throw new Error("expected honest memory attempt");
+    const completedAt = new Date(claimedAt.getTime() + 100);
+    await repository.failRecordedSiteWidgetAiAttempt({
+      run: started.run,
+      completion: {
+        status: "failed",
+        normalizedAction: "no_reply",
+        outcomeReason: "generator_failed",
+        failureCode: "runtime_failure",
+        validatorResult: "failed",
+        observedModelProvider: "none",
+        sendGateResult: "not_checked",
+        completedAt,
+        latencyMs: 100,
+        spans: [],
+        qualityEvents: []
+      },
+      inboundPublicMessageId: job.inboundPublicMessageId,
+      expectedGenerationEpoch: job.expectedGenerationEpoch,
+      respondsThroughSequence: job.respondsThroughSequence,
+      runtimeMode: job.runtimeMode,
+      jobCommit: { jobId: job.id, attemptCount: 1, maxAttempts: 1 }
+    });
+
+    expect(repository.listWidgetAiJobs()).toMatchObject([{ status: "processing", maxAttempts: 4 }]);
+    expect(repository.listAiRuns()).toMatchObject([{ status: "running" }]);
+    expect(repository.listAiAttempts()).toMatchObject([{ status: "fenced" }]);
   });
 
   it("returns public success only after widget message persistence and exposes manager dialog", async () => {

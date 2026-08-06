@@ -23,20 +23,21 @@ export class RecordedPublicWidgetAiTurnExecutor implements PublicWidgetAiTurnExe
   execute(input: PublicWidgetAiTurnExecutionInput) {
     const attemptIdempotencyKey = input.outbound.jobCommit
       ? `${input.executionContext.turn.idempotencyKey}:attempt:${input.outbound.jobCommit.attemptCount}`
-      : input.executionContext.turn.idempotencyKey;
-    const executionContext = {
-      ...input.executionContext,
-      turn: { ...input.executionContext.turn, idempotencyKey: attemptIdempotencyKey }
-    };
-    const turnInput = {
-      ...input.turnInput,
-      turn: { ...input.turnInput.turn, idempotencyKey: attemptIdempotencyKey }
-    };
+      : `${input.executionContext.turn.idempotencyKey}:attempt:1`;
 
     return this.turnService.execute({
-      executionContext,
-      turnInput,
+      executionContext: input.executionContext,
+      turnInput: input.turnInput,
       signal: input.signal,
+      attempt: {
+        attemptNumber: input.outbound.jobCommit?.attemptCount ?? 1,
+        idempotencyKey: attemptIdempotencyKey,
+        ...(input.outbound.jobCommit?.jobId ? { jobId: input.outbound.jobCommit.jobId } : {}),
+        jobAttemptCount: input.outbound.jobCommit?.attemptCount ?? 1,
+        ...(input.outbound.jobCommit?.maxAttempts === undefined
+          ? {}
+          : { maxAttempts: input.outbound.jobCommit.maxAttempts })
+      },
       replyApplier: {
         persistReplyAndCompleteRun: async ({ run, reply, completionPlan }) => {
           if (reply.finalTextHash && sha256Hex(reply.replyDraft) !== reply.finalTextHash) {
@@ -105,6 +106,21 @@ export class RecordedPublicWidgetAiTurnExecutor implements PublicWidgetAiTurnExe
             respondsThroughSequence: input.outbound.respondsThroughSequence,
             runtimeMode: input.outbound.runtimeMode,
             jobCommit: input.outbound.jobCommit
+          }),
+        failAttempt: ({ run, completion }) =>
+          this.replyRepository.failRecordedSiteWidgetAiAttempt({
+            run,
+            completion,
+            inboundPublicMessageId: input.outbound.inboundPublicMessageId,
+            expectedGenerationEpoch: input.outbound.expectedGenerationEpoch,
+            respondsThroughSequence: input.outbound.respondsThroughSequence,
+            runtimeMode: input.outbound.runtimeMode,
+            jobCommit: input.outbound.jobCommit
+          }),
+        fenceAttempt: ({ run, completion }) =>
+          this.replyRepository.fenceRecordedSiteWidgetAiAttempt({
+            run,
+            completion
           })
       }
     });
@@ -138,8 +154,7 @@ function recordedReplyMetadata(input: {
   const finalTextHash = input.candidateMetadata.final_text_hash;
   const appliedPatchCount = input.candidateMetadata.applied_patch_count;
   const droppedPatchCount = input.candidateMetadata.dropped_patch_count;
-  const droppedRecommendationCount =
-    input.candidateMetadata.dropped_recommendation_count;
+  const droppedRecommendationCount = input.candidateMetadata.dropped_recommendation_count;
   const usage = input.completion.usage;
 
   return {
@@ -171,18 +186,12 @@ function recordedReplyMetadata(input: {
     ...(typeof handoffReason === "string" && ALLOWED_HANDOFF_REASONS.has(handoffReason)
       ? { handoff_reason: handoffReason }
       : {}),
-    ...(turnContract === "granit_model_turn.v1"
-      ? { turn_contract: turnContract }
-      : {}),
+    ...(turnContract === "granit_model_turn.v1" ? { turn_contract: turnContract } : {}),
     ...(typeof finalTextHash === "string" && /^[a-f0-9]{64}$/.test(finalTextHash)
       ? { final_text_hash: finalTextHash }
       : {}),
-    ...(isNonNegativeInteger(appliedPatchCount)
-      ? { applied_patch_count: appliedPatchCount }
-      : {}),
-    ...(isNonNegativeInteger(droppedPatchCount)
-      ? { dropped_patch_count: droppedPatchCount }
-      : {}),
+    ...(isNonNegativeInteger(appliedPatchCount) ? { applied_patch_count: appliedPatchCount } : {}),
+    ...(isNonNegativeInteger(droppedPatchCount) ? { dropped_patch_count: droppedPatchCount } : {}),
     ...(isNonNegativeInteger(droppedRecommendationCount)
       ? { dropped_recommendation_count: droppedRecommendationCount }
       : {}),

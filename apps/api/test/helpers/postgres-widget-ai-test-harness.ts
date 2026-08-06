@@ -30,7 +30,8 @@ const activeMigrationManifest = [
   "0018_widget_ai_turn_identity.sql",
   "0019_widget_ai_latest_wins.sql",
   "0020_direct_live_v2_turn_contract.sql",
-  "0021_ai_run_attempts.sql"
+  "0021_ai_run_attempts.sql",
+  "0022_ai_run_attempt_ledger.sql"
 ];
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
@@ -46,7 +47,9 @@ export type PostgresWidgetAiTestHarness = OperationsDbHandle & {
 
 export async function startPostgresWidgetAiTestHarness(): Promise<PostgresWidgetAiTestHarness> {
   if (process.env.P2_TEST_DATABASE_URL) {
-    throw new Error("PR0a harness must use disposable Testcontainers PostgreSQL, not P2_TEST_DATABASE_URL");
+    throw new Error(
+      "PR0a harness must use disposable Testcontainers PostgreSQL, not P2_TEST_DATABASE_URL"
+    );
   }
 
   await assertMigrationManifestCurrent();
@@ -141,10 +144,7 @@ function quoteIdentifier(identifier: string) {
   return `"${identifier}"`;
 }
 
-async function stopHarness(
-  database: OperationsDbHandle,
-  container: StartedPostgreSqlContainer
-) {
+async function stopHarness(database: OperationsDbHandle, container: StartedPostgreSqlContainer) {
   const errors: unknown[] = [];
 
   try {

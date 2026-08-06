@@ -1,19 +1,12 @@
 import type { AiTurnExecutionContext, AiTurnInput, AiTurnResult } from "../ai-turn.js";
-import type {
-  AiHandoffReason,
-  AiRequirementUpdate,
-  AiSlotUpdate
-} from "../ai-dialog-contract.js";
+import type { AiHandoffReason, AiRequirementUpdate, AiSlotUpdate } from "../ai-dialog-contract.js";
 import type {
   AiRunTerminalCompletion,
   RunningAiRunRecord,
   TerminalAiRunRecord
 } from "../repositories/ai-run-repository.js";
 
-export type RecordedAiReplyAction =
-  | "answer"
-  | "ask_clarifying_question"
-  | "handoff_to_manager";
+export type RecordedAiReplyAction = "answer" | "ask_clarifying_question" | "handoff_to_manager";
 
 export type RecordedAiPersistReplyInput = {
   executionContext: AiTurnExecutionContext;
@@ -73,6 +66,14 @@ export interface RecordedAiNoReplyApplier {
     run: RunningAiRunRecord;
     completion: AiRunTerminalCompletion;
   }): Promise<TerminalAiRunRecord>;
+  failAttempt?(input: {
+    run: RunningAiRunRecord;
+    completion: AiRunTerminalCompletion;
+  }): Promise<void>;
+  fenceAttempt?(input: {
+    run: RunningAiRunRecord;
+    completion: AiRunTerminalCompletion;
+  }): Promise<void>;
 }
 
 export type RecordedAiTurnOutcome = {
@@ -109,6 +110,13 @@ export interface RecordedAiTurnService {
     executionContext: AiTurnExecutionContext;
     turnInput: AiTurnInput;
     signal?: AbortSignal;
+    attempt?: {
+      attemptNumber: number;
+      idempotencyKey: string;
+      jobId?: string;
+      jobAttemptCount: number;
+      maxAttempts?: number;
+    };
     replyApplier: RecordedAiReplyApplier;
     noReplyApplier?: RecordedAiNoReplyApplier;
   }): Promise<RecordedAiTurnResult>;

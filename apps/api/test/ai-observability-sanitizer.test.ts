@@ -81,7 +81,10 @@ describe("AI observability metadata sanitizer", () => {
       channel: "site_widget",
       runtimeMode: "direct_openai",
       decisionProfile: "live_v2",
-      idempotencyKey: "ai-turn:550e8400-e29b-41d4-a716-446655440005:attempt:1",
+      idempotencyKey: "ai-turn:550e8400-e29b-41d4-a716-446655440005",
+      attemptIdempotencyKey: "ai-turn:550e8400-e29b-41d4-a716-446655440005:attempt:1",
+      attemptNumber: 1,
+      jobAttemptCount: 1,
       inputFingerprint: "a".repeat(64),
       versions: {
         policyVersion: "policy.v1",
@@ -100,12 +103,16 @@ describe("AI observability metadata sanitizer", () => {
 
     expect(sanitizeAiRunStart(input)).toMatchObject({
       idempotencyKey: input.idempotencyKey,
+      attemptIdempotencyKey: input.attemptIdempotencyKey,
+      attemptNumber: 1,
       decisionProfile: "live_v2"
     });
     expect(() =>
       sanitizeAiRunStart({
         ...input,
-        idempotencyKey: "ai-turn:550e8400-e29b-41d4-a716-446655440005:attempt:0"
+        attemptIdempotencyKey: "ai-turn:550e8400-e29b-41d4-a716-446655440005:attempt:0",
+        attemptNumber: 0,
+        jobAttemptCount: 0
       })
     ).toThrow();
   });

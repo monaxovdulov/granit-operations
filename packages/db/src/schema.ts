@@ -1,8 +1,10 @@
 import { sql } from "drizzle-orm";
 import {
+  type AnyPgColumn,
   bigint,
   boolean,
   check,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -114,7 +116,9 @@ export const channelIdentities = pgTable(
   "channel_identities",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    leadId: uuid("lead_id").references(() => leads.id, { onDelete: "set null" }),
+    leadId: uuid("lead_id").references(() => leads.id, {
+      onDelete: "set null"
+    }),
     channel: text("channel").notNull(),
     provider: text("provider").notNull(),
     providerAccountId: text("provider_account_id"),
@@ -137,16 +141,14 @@ export const channelIdentities = pgTable(
       table.channel,
       table.lastSeenAt
     ),
-    widgetSessionIdx: uniqueIndex("channel_identities_widget_session_id_idx").on(
-      table.widgetSessionId
-    ).where(sql`${table.widgetSessionId} IS NOT NULL`),
-    telegramChatIdx: uniqueIndex("channel_identities_telegram_chat_idx").on(
-      table.provider,
-      table.providerAccountId,
-      table.externalChatId
-    ).where(
-      sql`${table.channel} = 'telegram' AND ${table.providerAccountId} IS NOT NULL AND ${table.externalChatId} IS NOT NULL`
-    )
+    widgetSessionIdx: uniqueIndex("channel_identities_widget_session_id_idx")
+      .on(table.widgetSessionId)
+      .where(sql`${table.widgetSessionId} IS NOT NULL`),
+    telegramChatIdx: uniqueIndex("channel_identities_telegram_chat_idx")
+      .on(table.provider, table.providerAccountId, table.externalChatId)
+      .where(
+        sql`${table.channel} = 'telegram' AND ${table.providerAccountId} IS NOT NULL AND ${table.externalChatId} IS NOT NULL`
+      )
   })
 );
 
@@ -168,9 +170,7 @@ export const conversations = pgTable(
     status: text("status").notNull().default("open"),
     aiState: text("ai_state").notNull().default("ai_collecting_info"),
     agentAllowedToReply: boolean("agent_allowed_to_reply").notNull().default(false),
-    lastMessageSequence: bigint("last_message_sequence", { mode: "number" })
-      .notNull()
-      .default(0),
+    lastMessageSequence: bigint("last_message_sequence", { mode: "number" }).notNull().default(0),
     generationEpoch: bigint("generation_epoch", { mode: "number" }).notNull().default(0),
     sourcePageUrl: text("source_page_url"),
     widgetInstanceId: text("widget_instance_id"),
@@ -184,9 +184,7 @@ export const conversations = pgTable(
     ),
     leadIdx: index("conversations_lead_id_idx").on(table.leadId),
     widgetSessionIdx: index("conversations_widget_session_id_idx").on(table.widgetSessionId),
-    channelIdentityIdx: index("conversations_channel_identity_id_idx").on(
-      table.channelIdentityId
-    ),
+    channelIdentityIdx: index("conversations_channel_identity_id_idx").on(table.channelIdentityId),
     channelUpdatedIdx: index("conversations_channel_updated_idx").on(table.channel, table.updatedAt)
   })
 );
@@ -233,22 +231,24 @@ export const conversationMessages = pgTable(
     idempotencyIdx: uniqueIndex("conversation_messages_idempotency_key_idx").on(
       table.idempotencyKey
     ),
-    providerMessageIdx: uniqueIndex("conversation_messages_provider_message_idx").on(
-      table.channelIdentityId,
-      table.providerMessageId
-    ).where(sql`${table.providerMessageId} IS NOT NULL`),
-    providerUpdateIdx: uniqueIndex("conversation_messages_provider_update_idx").on(
-      table.channelIdentityId,
-      table.providerUpdateId
-    ).where(sql`${table.providerUpdateId} IS NOT NULL`),
+    providerMessageIdx: uniqueIndex("conversation_messages_provider_message_idx")
+      .on(table.channelIdentityId, table.providerMessageId)
+      .where(sql`${table.providerMessageId} IS NOT NULL`),
+    providerUpdateIdx: uniqueIndex("conversation_messages_provider_update_idx")
+      .on(table.channelIdentityId, table.providerUpdateId)
+      .where(sql`${table.providerUpdateId} IS NOT NULL`),
     conversationCreatedIdx: index("conversation_messages_conversation_created_idx").on(
       table.conversationId,
       table.createdAt
     ),
-    conversationSequenceIdx: uniqueIndex(
-      "conversation_messages_conversation_sequence_idx"
-    ).on(table.conversationId, table.messageSequence),
-    leadCreatedIdx: index("conversation_messages_lead_created_idx").on(table.leadId, table.createdAt)
+    conversationSequenceIdx: uniqueIndex("conversation_messages_conversation_sequence_idx").on(
+      table.conversationId,
+      table.messageSequence
+    ),
+    leadCreatedIdx: index("conversation_messages_lead_created_idx").on(
+      table.leadId,
+      table.createdAt
+    )
   })
 );
 
@@ -267,8 +267,12 @@ export const widgetAiJobs = pgTable(
       .notNull()
       .references(() => leads.id, { onDelete: "cascade" }),
     status: text("status").notNull().default("pending"),
-    expectedGenerationEpoch: bigint("expected_generation_epoch", { mode: "number" }).notNull(),
-    respondsThroughSequence: bigint("responds_through_sequence", { mode: "number" }).notNull(),
+    expectedGenerationEpoch: bigint("expected_generation_epoch", {
+      mode: "number"
+    }).notNull(),
+    respondsThroughSequence: bigint("responds_through_sequence", {
+      mode: "number"
+    }).notNull(),
     runtimeMode: text("runtime_mode").notNull().default("direct_openai"),
     attemptCount: integer("attempt_count").notNull().default(0),
     maxAttempts: integer("max_attempts").notNull().default(3),
@@ -282,9 +286,7 @@ export const widgetAiJobs = pgTable(
     completedAt: timestamp("completed_at", { withTimezone: true })
   },
   (table) => ({
-    inboundMessageIdx: uniqueIndex("widget_ai_jobs_inbound_message_idx").on(
-      table.inboundMessageId
-    ),
+    inboundMessageIdx: uniqueIndex("widget_ai_jobs_inbound_message_idx").on(table.inboundMessageId),
     inboundPublicMessageIdx: uniqueIndex("widget_ai_jobs_inbound_public_message_idx").on(
       table.inboundPublicMessageId
     ),
@@ -340,10 +342,7 @@ export const conversationSlots = pgTable(
       table.conversationId,
       table.name
     ),
-    leadUpdatedIdx: index("conversation_slots_lead_updated_idx").on(
-      table.leadId,
-      table.updatedAt
-    )
+    leadUpdatedIdx: index("conversation_slots_lead_updated_idx").on(table.leadId, table.updatedAt)
   })
 );
 
@@ -436,7 +435,9 @@ export const aiShadowComparisons = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     publicConversationId: uuid("public_conversation_id")
       .notNull()
-      .references(() => conversations.publicConversationId, { onDelete: "cascade" }),
+      .references(() => conversations.publicConversationId, {
+        onDelete: "cascade"
+      }),
     inboundPublicMessageId: uuid("inbound_public_message_id").notNull(),
     version: text("version").notNull(),
     inputFingerprint: text("input_fingerprint"),
@@ -450,9 +451,7 @@ export const aiShadowComparisons = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
   },
   (table) => ({
-    inboundIdx: uniqueIndex("ai_shadow_comparisons_inbound_idx").on(
-      table.inboundPublicMessageId
-    ),
+    inboundIdx: uniqueIndex("ai_shadow_comparisons_inbound_idx").on(table.inboundPublicMessageId),
     conversationCreatedIdx: index("ai_shadow_comparisons_conversation_created_idx").on(
       table.publicConversationId,
       table.createdAt
@@ -465,6 +464,7 @@ export const aiRuns = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     recordingContract: text("recording_contract").notNull().default("native_recorded"),
+    winningAttemptId: uuid("winning_attempt_id").references((): AnyPgColumn => aiRunAttempts.id),
     traceId: uuid("trace_id"),
     leadId: uuid("lead_id")
       .notNull()
@@ -523,7 +523,9 @@ export const aiRuns = pgTable(
     costEstimateMicrounits: integer("cost_estimate_microunits"),
     costRateVersion: text("cost_rate_version"),
     sendGateResult: text("send_gate_result").notNull().default("not_checked"),
-    sendGateCheckedAt: timestamp("send_gate_checked_at", { withTimezone: true }),
+    sendGateCheckedAt: timestamp("send_gate_checked_at", {
+      withTimezone: true
+    }),
     outcomeReason: text("outcome_reason"),
     failureCode: text("failure_code"),
     profileValidatorResult: text("profile_validator_result").notNull().default("not_run"),
@@ -548,14 +550,11 @@ export const aiRuns = pgTable(
       table.startedAt.desc()
     ),
     inboundMessageIdIdx: index("ai_runs_inbound_message_id_idx").on(table.inboundMessageId),
-    statusStartedIdx: index("ai_runs_status_started_idx").on(
-      table.status,
-      table.startedAt.desc()
-    ),
+    statusStartedIdx: index("ai_runs_status_started_idx").on(table.status, table.startedAt.desc()),
     inputFingerprintIdx: index("ai_runs_input_fingerprint_idx").on(table.inputFingerprint),
     recordingContractCheck: check(
       "ai_runs_recording_contract_check",
-      sql`${table.recordingContract} IN ('native_grounded', 'native_recorded', 'legacy_narrow')`
+      sql`${table.recordingContract} IN ('native_grounded', 'native_recorded', 'logical_recorded_v2', 'legacy_narrow')`
     ),
     channelCheck: check("ai_runs_channel_check", sql`${table.channel} IN ('site_widget')`),
     runtimeModeCheck: check(
@@ -577,6 +576,9 @@ export const aiRuns = pgTable(
     runtimeProfileCheck: check(
       "ai_runs_runtime_profile_check",
       sql`(${table.recordingContract} = 'native_recorded'
+          AND ((${table.runtimeMode} = 'direct_openai' AND ${table.decisionProfile} IN ('legacy_s05', 'live_v2'))
+            OR (${table.runtimeMode} = 'mastra_openai_api' AND ${table.decisionProfile} = 'live_v2')))
+        OR (${table.recordingContract} = 'logical_recorded_v2'
           AND ((${table.runtimeMode} = 'direct_openai' AND ${table.decisionProfile} IN ('legacy_s05', 'live_v2'))
             OR (${table.runtimeMode} = 'mastra_openai_api' AND ${table.decisionProfile} = 'live_v2')))
         OR (${table.recordingContract} IN ('native_grounded', 'legacy_narrow')
@@ -632,7 +634,7 @@ export const aiRuns = pgTable(
     ),
     modelObservationStateCheck: check(
       "ai_runs_model_observation_state_check",
-      sql`${table.recordingContract} <> 'native_recorded'
+      sql`${table.recordingContract} NOT IN ('native_recorded', 'logical_recorded_v2')
         OR (${table.status} = 'running'
           AND ${table.observedModelProvider} IS NULL
           AND ${table.observedModelName} IS NULL)
@@ -720,7 +722,7 @@ export const aiRuns = pgTable(
     ),
     timingCheck: check(
       "ai_runs_timing_check",
-      sql`(${table.recordingContract} = 'native_recorded'
+      sql`(${table.recordingContract} IN ('native_recorded', 'logical_recorded_v2')
         AND ((${table.status} = 'running' AND ${table.completedAt} IS NULL AND ${table.latencyMs} IS NULL)
         OR (${table.status} <> 'running'
           AND ${table.completedAt} IS NOT NULL
@@ -750,7 +752,7 @@ export const aiRuns = pgTable(
     ),
     contractEvidenceCheck: check(
       "ai_runs_contract_evidence_check",
-      sql`(${table.recordingContract} = 'native_recorded'
+      sql`(${table.recordingContract} IN ('native_recorded', 'logical_recorded_v2')
           AND ${table.traceId} IS NOT NULL
           AND ${table.idempotencyKey} IS NOT NULL
           AND ${table.policyVersion} IS NOT NULL
@@ -812,6 +814,161 @@ export const aiRuns = pgTable(
           AND ${table.decisionAction} IS NOT NULL
           AND ${table.decisionAction} = 'no_reply')
         OR ${table.status} IN ('blocked', 'failed')`
+    ),
+    winningAttemptStateCheck: check(
+      "ai_runs_winning_attempt_state_check",
+      sql`(${table.recordingContract} <> 'logical_recorded_v2' AND ${table.winningAttemptId} IS NULL)
+        OR (${table.recordingContract} = 'logical_recorded_v2' AND ${table.status} = 'running' AND ${table.winningAttemptId} IS NULL)
+        OR (${table.recordingContract} = 'logical_recorded_v2' AND ${table.status} = 'failed' AND ${table.winningAttemptId} IS NULL)
+        OR (${table.recordingContract} = 'logical_recorded_v2' AND ${table.status} NOT IN ('running', 'failed') AND ${table.winningAttemptId} IS NOT NULL)`
+    )
+  })
+);
+
+export const aiRunAttempts = pgTable(
+  "ai_run_attempts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    aiRunId: uuid("ai_run_id")
+      .notNull()
+      .references(() => aiRuns.id, { onDelete: "cascade" }),
+    attemptNumber: integer("attempt_number").notNull(),
+    jobId: uuid("job_id").references(() => widgetAiJobs.id, {
+      onDelete: "set null"
+    }),
+    jobAttemptCount: integer("job_attempt_count").notNull(),
+    maxAttempts: integer("max_attempts"),
+    idempotencyKey: text("idempotency_key").notNull(),
+    traceId: uuid("trace_id").notNull(),
+    inputFingerprint: text("input_fingerprint").notNull(),
+    runtimeRunId: text("runtime_run_id"),
+    policyVersion: text("policy_version").notNull(),
+    promptVersion: text("prompt_version").notNull(),
+    toolVersion: text("tool_version").notNull(),
+    assetVersion: text("asset_version"),
+    toneVersion: text("tone_version"),
+    factsVersion: text("facts_version"),
+    disclosureVersion: text("disclosure_version").notNull(),
+    configuredModelProvider: text("configured_model_provider").notNull(),
+    configuredModelName: text("configured_model_name").notNull(),
+    observedModelProvider: text("observed_model_provider"),
+    observedModelName: text("observed_model_name"),
+    reasoningEffort: text("reasoning_effort").notNull(),
+    modelProfileVersion: text("model_profile_version").notNull(),
+    runtimeVersion: text("runtime_version"),
+    inputTokens: integer("input_tokens"),
+    outputTokens: integer("output_tokens"),
+    totalTokens: integer("total_tokens"),
+    costEstimateMicrounits: integer("cost_estimate_microunits"),
+    costRateVersion: text("cost_rate_version"),
+    sendGateResult: text("send_gate_result").notNull().default("not_checked"),
+    sendGateCheckedAt: timestamp("send_gate_checked_at", {
+      withTimezone: true
+    }),
+    outcomeReason: text("outcome_reason"),
+    failureCode: text("failure_code"),
+    profileValidatorResult: text("profile_validator_result").notNull().default("not_run"),
+    status: text("status").notNull().default("running"),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    latencyMs: integer("latency_ms"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => ({
+    runNumberIdx: uniqueIndex("ai_run_attempts_run_number_idx").on(
+      table.aiRunId,
+      table.attemptNumber
+    ),
+    idRunIdx: uniqueIndex("ai_run_attempts_id_run_idx").on(table.id, table.aiRunId),
+    idempotencyKeyIdx: uniqueIndex("ai_run_attempts_idempotency_key_idx").on(table.idempotencyKey),
+    traceIdIdx: uniqueIndex("ai_run_attempts_trace_id_idx").on(table.traceId),
+    singleSuccessIdx: uniqueIndex("ai_run_attempts_single_success_idx")
+      .on(table.aiRunId)
+      .where(sql`${table.status} = 'succeeded'`),
+    runStartedIdx: index("ai_run_attempts_run_started_idx").on(
+      table.aiRunId,
+      table.startedAt.desc()
+    ),
+    jobAttemptIdx: index("ai_run_attempts_job_attempt_idx").on(table.jobId, table.jobAttemptCount),
+    attemptNumberCheck: check(
+      "ai_run_attempts_attempt_number_check",
+      sql`${table.attemptNumber} > 0 AND ${table.jobAttemptCount} > 0
+        AND (${table.maxAttempts} IS NULL OR ${table.maxAttempts} >= ${table.jobAttemptCount})`
+    ),
+    idempotencyKeyCheck: check(
+      "ai_run_attempts_idempotency_key_check",
+      sql`char_length(${table.idempotencyKey}) BETWEEN 1 AND 240
+        AND ${table.idempotencyKey} ~ '^[A-Za-z0-9._:/@+-]+$'`
+    ),
+    inputFingerprintCheck: check(
+      "ai_run_attempts_input_fingerprint_check",
+      sql`char_length(${table.inputFingerprint}) = 64
+        AND ${table.inputFingerprint} ~ '^[a-f0-9]{64}$'`
+    ),
+    runtimeRunIdCheck: check(
+      "ai_run_attempts_runtime_run_id_check",
+      sql`${table.runtimeRunId} IS NULL OR (char_length(${table.runtimeRunId}) BETWEEN 1 AND 200
+        AND ${table.runtimeRunId} ~ '^[A-Za-z0-9._:/@+-]+$')`
+    ),
+    configuredModelProviderCheck: check(
+      "ai_run_attempts_configured_model_provider_check",
+      sql`${table.configuredModelProvider} IN ('none', 'openai', 'fake')`
+    ),
+    observedModelProviderCheck: check(
+      "ai_run_attempts_observed_model_provider_check",
+      sql`${table.observedModelProvider} IS NULL OR ${table.observedModelProvider} IN ('none', 'openai', 'policy', 'fake')`
+    ),
+    reasoningEffortCheck: check(
+      "ai_run_attempts_reasoning_effort_check",
+      sql`${table.reasoningEffort} IN ('none', 'low', 'medium', 'high')`
+    ),
+    tokenCountsCheck: check(
+      "ai_run_attempts_token_counts_check",
+      sql`(${table.inputTokens} IS NULL OR ${table.inputTokens} >= 0)
+        AND (${table.outputTokens} IS NULL OR ${table.outputTokens} >= 0)
+        AND (${table.totalTokens} IS NULL OR ${table.totalTokens} >= 0)`
+    ),
+    costCheck: check(
+      "ai_run_attempts_cost_check",
+      sql`(${table.costEstimateMicrounits} IS NULL AND ${table.costRateVersion} IS NULL)
+        OR (${table.costEstimateMicrounits} IS NOT NULL
+          AND ${table.costRateVersion} IS NOT NULL
+          AND ${table.costEstimateMicrounits} >= 0
+          AND char_length(${table.costRateVersion}) BETWEEN 1 AND 160
+          AND ${table.costRateVersion} ~ '^[A-Za-z0-9._:/@+-]+$')`
+    ),
+    sendGateResultCheck: check(
+      "ai_run_attempts_send_gate_result_check",
+      sql`${table.sendGateResult} IN ('not_checked', 'allowed', 'blocked')`
+    ),
+    validatorResultCheck: check(
+      "ai_run_attempts_profile_validator_result_check",
+      sql`${table.profileValidatorResult} IN ('not_run', 'passed', 'rejected', 'failed')`
+    ),
+    statusCheck: check(
+      "ai_run_attempts_status_check",
+      sql`${table.status} IN ('running', 'succeeded', 'failed', 'fenced')`
+    ),
+    modelObservationCheck: check(
+      "ai_run_attempts_model_observation_check",
+      sql`(${table.status} = 'running' AND ${table.observedModelProvider} IS NULL AND ${table.observedModelName} IS NULL)
+        OR (${table.status} <> 'running'
+          AND ${table.observedModelProvider} IS NOT NULL
+          AND ((${table.observedModelProvider} = 'none' AND ${table.observedModelName} IS NULL)
+            OR (${table.observedModelProvider} <> 'none' AND ${table.observedModelName} IS NOT NULL)))`
+    ),
+    timingCheck: check(
+      "ai_run_attempts_timing_check",
+      sql`(${table.status} = 'running' AND ${table.completedAt} IS NULL AND ${table.latencyMs} IS NULL)
+        OR (${table.status} <> 'running' AND ${table.completedAt} IS NOT NULL
+          AND ${table.completedAt} >= ${table.startedAt} AND ${table.latencyMs} IS NOT NULL
+          AND ${table.latencyMs} >= 0)`
+    ),
+    sendGateTimestampCheck: check(
+      "ai_run_attempts_send_gate_timestamp_check",
+      sql`(${table.sendGateResult} = 'not_checked' AND ${table.sendGateCheckedAt} IS NULL)
+        OR (${table.sendGateResult} <> 'not_checked' AND ${table.sendGateCheckedAt} IS NOT NULL)`
     )
   })
 );
@@ -823,6 +980,7 @@ export const aiRunSpans = pgTable(
     aiRunId: uuid("ai_run_id")
       .notNull()
       .references(() => aiRuns.id, { onDelete: "cascade" }),
+    aiRunAttemptId: uuid("ai_run_attempt_id"),
     spanId: text("span_id").notNull(),
     parentSpanId: text("parent_span_id"),
     kind: text("kind").notNull(),
@@ -840,6 +998,14 @@ export const aiRunSpans = pgTable(
   (table) => ({
     runSpanIdIdx: uniqueIndex("ai_run_spans_run_span_id_idx").on(table.aiRunId, table.spanId),
     runCreatedIdx: index("ai_run_spans_run_created_idx").on(table.aiRunId, table.createdAt),
+    attemptCreatedIdx: index("ai_run_spans_attempt_created_idx")
+      .on(table.aiRunAttemptId, table.createdAt)
+      .where(sql`${table.aiRunAttemptId} IS NOT NULL`),
+    attemptRunFk: foreignKey({
+      name: "ai_run_spans_attempt_run_fkey",
+      columns: [table.aiRunAttemptId, table.aiRunId],
+      foreignColumns: [aiRunAttempts.id, aiRunAttempts.aiRunId]
+    }).onDelete("restrict"),
     expiresAtIdx: index("ai_run_spans_expires_at_idx").on(table.expiresAt),
     spanIdCheck: check(
       "ai_run_spans_span_id_check",
@@ -894,10 +1060,7 @@ export const aiRunSpans = pgTable(
         'recorder_failed'
       )`
     ),
-    expiryCheck: check(
-      "ai_run_spans_expiry_check",
-      sql`${table.expiresAt} > ${table.createdAt}`
-    )
+    expiryCheck: check("ai_run_spans_expiry_check", sql`${table.expiresAt} > ${table.createdAt}`)
   })
 );
 
@@ -1009,9 +1172,7 @@ export const managerNotificationOutbox = pgTable(
   (table) => ({
     leadIdx: index("manager_notification_outbox_lead_id_idx").on(table.leadId, table.createdAt),
     statusIdx: index("manager_notification_outbox_status_idx").on(table.status, table.updatedAt),
-    messageIdx: index("manager_notification_outbox_message_id_idx").on(
-      table.conversationMessageId
-    ),
+    messageIdx: index("manager_notification_outbox_message_id_idx").on(table.conversationMessageId),
     managerTelegramBindingIdx: index("manager_notification_outbox_manager_tg_binding_idx").on(
       table.managerTelegramBindingId,
       table.createdAt
@@ -1080,6 +1241,7 @@ export const aiQualityEvents = pgTable(
     aiRunId: uuid("ai_run_id")
       .notNull()
       .references(() => aiRuns.id, { onDelete: "cascade" }),
+    aiRunAttemptId: uuid("ai_run_attempt_id"),
     leadId: uuid("lead_id")
       .notNull()
       .references(() => leads.id, { onDelete: "cascade" }),
@@ -1100,6 +1262,14 @@ export const aiQualityEvents = pgTable(
   },
   (table) => ({
     runCreatedIdx: index("ai_quality_events_run_created_idx").on(table.aiRunId, table.createdAt),
+    attemptCreatedIdx: index("ai_quality_events_attempt_created_idx")
+      .on(table.aiRunAttemptId, table.createdAt)
+      .where(sql`${table.aiRunAttemptId} IS NOT NULL`),
+    attemptRunFk: foreignKey({
+      name: "ai_quality_events_attempt_run_fkey",
+      columns: [table.aiRunAttemptId, table.aiRunId],
+      foreignColumns: [aiRunAttempts.id, aiRunAttempts.aiRunId]
+    }).onDelete("restrict"),
     conversationCreatedIdx: index("ai_quality_events_conversation_created_idx").on(
       table.conversationId,
       table.createdAt.desc()
@@ -1211,16 +1381,12 @@ export const managerTelegramBindings = pgTable(
       table.externalChatId,
       table.status
     ),
-    managerProviderIdx: uniqueIndex("manager_telegram_bindings_manager_provider_idx").on(
-      table.managerUserId,
-      table.provider,
-      table.providerAccountId
-    ).where(sql`${table.status} = 'active'`),
-    chatUniqueIdx: uniqueIndex("manager_telegram_bindings_chat_unique_idx").on(
-      table.provider,
-      table.providerAccountId,
-      table.externalChatId
-    ).where(sql`${table.status} = 'active'`)
+    managerProviderIdx: uniqueIndex("manager_telegram_bindings_manager_provider_idx")
+      .on(table.managerUserId, table.provider, table.providerAccountId)
+      .where(sql`${table.status} = 'active'`),
+    chatUniqueIdx: uniqueIndex("manager_telegram_bindings_chat_unique_idx")
+      .on(table.provider, table.providerAccountId, table.externalChatId)
+      .where(sql`${table.status} = 'active'`)
   })
 );
 
@@ -1278,8 +1444,8 @@ export const managerTelegramReplyContexts = pgTable(
       table.conversationId,
       table.status
     ),
-    onePendingIdx: uniqueIndex("manager_telegram_reply_contexts_one_pending_idx").on(
-      table.managerUserId
-    ).where(sql`${table.status} = 'pending'`)
+    onePendingIdx: uniqueIndex("manager_telegram_reply_contexts_one_pending_idx")
+      .on(table.managerUserId)
+      .where(sql`${table.status} = 'pending'`)
   })
 );

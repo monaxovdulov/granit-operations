@@ -26,6 +26,7 @@ export type PersistRecordedSiteWidgetAiReplyInput = {
   jobCommit?: {
     jobId: string;
     attemptCount: number;
+    maxAttempts: number;
   };
 };
 
@@ -40,6 +41,21 @@ export type CompleteRecordedSiteWidgetAiNoReplyInput = {
   jobCommit?: {
     jobId: string;
     attemptCount: number;
+    maxAttempts: number;
+  };
+};
+
+export type FailRecordedSiteWidgetAiAttemptInput = {
+  run: RunningAiRunRecord;
+  completion: AiRunTerminalCompletion;
+  inboundPublicMessageId: string;
+  expectedGenerationEpoch?: number;
+  respondsThroughSequence?: number;
+  runtimeMode?: "direct_openai" | "mastra_openai_api";
+  jobCommit?: {
+    jobId: string;
+    attemptCount: number;
+    maxAttempts: number;
   };
 };
 
@@ -54,13 +70,15 @@ export interface RecordedSiteWidgetAiReplyRepository {
   completeRecordedSiteWidgetAiNoReply(
     input: CompleteRecordedSiteWidgetAiNoReplyInput
   ): Promise<TerminalAiRunRecord>;
+  failRecordedSiteWidgetAiAttempt(input: FailRecordedSiteWidgetAiAttemptInput): Promise<void>;
+  fenceRecordedSiteWidgetAiAttempt(input: {
+    run: RunningAiRunRecord;
+    completion: AiRunTerminalCompletion;
+  }): Promise<void>;
 }
 
 export interface RecordedSiteWidgetAiGateRepository {
-  readRecordedSiteWidgetAiGate(input: {
-    leadId: string;
-    conversationId: string;
-  }): Promise<{
+  readRecordedSiteWidgetAiGate(input: { leadId: string; conversationId: string }): Promise<{
     aiState: AiTurnAiState;
     agentAllowedToReply: boolean;
   }>;
@@ -75,7 +93,11 @@ export function isRecordedSiteWidgetAiReplyRepository(
     "persistRecordedSiteWidgetAiReply" in value &&
     typeof value.persistRecordedSiteWidgetAiReply === "function" &&
     "completeRecordedSiteWidgetAiNoReply" in value &&
-    typeof value.completeRecordedSiteWidgetAiNoReply === "function"
+    typeof value.completeRecordedSiteWidgetAiNoReply === "function" &&
+    "failRecordedSiteWidgetAiAttempt" in value &&
+    typeof value.failRecordedSiteWidgetAiAttempt === "function" &&
+    "fenceRecordedSiteWidgetAiAttempt" in value &&
+    typeof value.fenceRecordedSiteWidgetAiAttempt === "function"
   );
 }
 

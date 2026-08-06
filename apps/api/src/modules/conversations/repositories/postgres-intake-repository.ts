@@ -61,7 +61,11 @@ import {
 } from "../../ai/ai-dialog-contract.js";
 import { sanitizeAiObservabilityMetadata } from "../../ai/observability/ai-observability-sanitizer.js";
 import {
-  completeAiRunInTransaction
+  completeAiRunInTransaction,
+  failAiRunAttemptInTransaction,
+  fenceAiRunAttemptInTransaction,
+  finalizeExhaustedAiRunForJobInTransaction,
+  finalizeSupersededAiRunForJobInTransaction
 } from "../../ai/repositories/postgres-ai-run-repository.js";
 import type {
   AiRunSpanWrite,
@@ -71,6 +75,7 @@ import type {
 } from "../../ai/repositories/ai-run-repository.js";
 import type {
   CompleteRecordedSiteWidgetAiNoReplyInput,
+  FailRecordedSiteWidgetAiAttemptInput,
   PersistRecordedSiteWidgetAiReplyInput
 } from "../../ai/repositories/recorded-site-widget-ai-reply-repository.js";
 import {
@@ -240,7 +245,9 @@ export class PostgresIntakeRepository implements IntakeRepository {
     }
   }
 
-  async acceptInboundMessage(input: AcceptInboundMessageInput): Promise<AcceptInboundMessageResult> {
+  async acceptInboundMessage(
+    input: AcceptInboundMessageInput
+  ): Promise<AcceptInboundMessageResult> {
     if (input.serverTimestamped) {
       input = {
         ...input,
@@ -542,8 +549,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
                     mode: conversationRequirements.mode,
                     value: conversationRequirements.value,
                     source: conversationRequirements.source,
-                    sourcePublicMessageId:
-                      conversationRequirements.sourcePublicMessageId,
+                    sourcePublicMessageId: conversationRequirements.sourcePublicMessageId,
                     evidenceQuote: conversationRequirements.evidenceQuote,
                     evidenceStart: conversationRequirements.evidenceStart,
                     evidenceEnd: conversationRequirements.evidenceEnd,
@@ -594,6 +600,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
               id: string;
               status: string;
               attemptCount: number;
+              maxAttempts: number;
               terminalReason: string | null;
               expectedGenerationEpoch: number;
               respondsThroughSequence: number;
@@ -606,24 +613,35 @@ export class PostgresIntakeRepository implements IntakeRepository {
           effectiveAgentAllowedToReply &&
           aiTurnInput
         ) {
-          await tx
-            .update(widgetAiJobs)
-            .set({
-              status: "superseded",
-              terminalReason: "newer_inbound",
-              leaseExpiresAt: null,
-              completedAt: now,
-              updatedAt: now
-            })
+          const supersededJobs = await tx
+            .select({ id: widgetAiJobs.id, attemptCount: widgetAiJobs.attemptCount })
+            .from(widgetAiJobs)
             .where(
               and(
                 eq(widgetAiJobs.conversationId, conversation.id),
-                or(
-                  eq(widgetAiJobs.status, "pending"),
-                  eq(widgetAiJobs.status, "retrying")
-                )
+                or(eq(widgetAiJobs.status, "pending"), eq(widgetAiJobs.status, "retrying"))
               )
-            );
+            )
+            .for("update");
+          for (const superseded of supersededJobs) {
+            await finalizeSupersededAiRunForJobInTransaction(tx, {
+              jobId: superseded.id,
+              jobAttemptCount: superseded.attemptCount,
+              completedAt: now
+            });
+          }
+          if (supersededJobs.length > 0) {
+            await tx
+              .update(widgetAiJobs)
+              .set({
+                status: "superseded",
+                terminalReason: "newer_inbound",
+                leaseExpiresAt: null,
+                completedAt: now,
+                updatedAt: now
+              })
+              .where(inArray(widgetAiJobs.id, supersededJobs.map((job) => job.id)));
+          }
 
           [widgetAiJob] = await tx
             .insert(widgetAiJobs)
@@ -646,6 +664,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
               id: widgetAiJobs.id,
               status: widgetAiJobs.status,
               attemptCount: widgetAiJobs.attemptCount,
+              maxAttempts: widgetAiJobs.maxAttempts,
               terminalReason: widgetAiJobs.terminalReason,
               expectedGenerationEpoch: widgetAiJobs.expectedGenerationEpoch,
               respondsThroughSequence: widgetAiJobs.respondsThroughSequence
@@ -723,8 +742,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
       idempotencyKey: input.request.idempotency_key,
       requestFingerprint: input.requestFingerprint,
       automationRequested: input.agentAllowedToReply,
-      serverTimestamped:
-        input.request.schema_version === SITE_WIDGET_V2_CONTRACT_VERSION,
+      serverTimestamped: input.request.schema_version === SITE_WIDGET_V2_CONTRACT_VERSION,
       enqueueWidgetAiJob: input.enqueueAiJob,
       widgetAiJobMaxAttempts: input.aiJobMaxAttempts,
       widgetAiRuntimeMode: input.aiJobRuntimeMode,
@@ -1011,7 +1029,10 @@ export class PostgresIntakeRepository implements IntakeRepository {
         }
 
         if (input.aiRun) {
-          const modelEvidence = toGroundedModelEvidence(sanitizedMetadata, input.aiRun.modelVersion);
+          const modelEvidence = toGroundedModelEvidence(
+            sanitizedMetadata,
+            input.aiRun.modelVersion
+          );
           await tx.insert(aiRuns).values({
             recordingContract: "native_grounded",
             conversationId: input.conversationId,
@@ -1033,8 +1054,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
             policyVersion: input.aiRun.policyVersion ?? null,
             knowledgeVersion: input.aiRun.knowledgeVersion ?? null,
             modelName: input.aiRun.modelVersion ?? null,
-            generatorModelName:
-              input.aiRun.generatorModelName ?? input.aiRun.modelVersion ?? null,
+            generatorModelName: input.aiRun.generatorModelName ?? input.aiRun.modelVersion ?? null,
             verifierModelName: input.aiRun.verifierModelName ?? null,
             verifierVersion: input.aiRun.verifierVersion ?? null,
             verifierVerdict: input.aiRun.verifierVerdict ?? null,
@@ -1204,10 +1224,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
       .from(conversations)
       .innerJoin(aiRuntimeControls, eq(aiRuntimeControls.scope, "site_widget"))
       .where(
-        and(
-          eq(conversations.id, input.conversationId),
-          eq(conversations.leadId, input.leadId)
-        )
+        and(eq(conversations.id, input.conversationId), eq(conversations.leadId, input.leadId))
       )
       .limit(1);
 
@@ -1291,12 +1308,8 @@ export class PostgresIntakeRepository implements IntakeRepository {
     input: CompleteRecordedSiteWidgetAiNoReplyInput
   ): Promise<TerminalAiRunRecord> {
     return this.db.transaction(async (tx) => {
-      const expectedGenerationEpoch = requiredRecordedIdentity(
-        input.expectedGenerationEpoch
-      );
-      const respondsThroughSequence = requiredRecordedIdentity(
-        input.respondsThroughSequence
-      );
+      const expectedGenerationEpoch = requiredRecordedIdentity(input.expectedGenerationEpoch);
+      const respondsThroughSequence = requiredRecordedIdentity(input.respondsThroughSequence);
       const [currentConversation] = await tx
         .select({ id: conversations.id })
         .from(conversations)
@@ -1361,13 +1374,81 @@ export class PostgresIntakeRepository implements IntakeRepository {
     });
   }
 
-  async recordSiteWidgetAiDegradation(
-    input: RecordSiteWidgetAiDegradationInput
+  async failRecordedSiteWidgetAiAttempt(
+    input: FailRecordedSiteWidgetAiAttemptInput
   ): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      if (!input.jobCommit) {
+        await failAiRunAttemptInTransaction(tx, input);
+        return;
+      }
+      const expectedGenerationEpoch = requiredRecordedIdentity(input.expectedGenerationEpoch);
+      const respondsThroughSequence = requiredRecordedIdentity(input.respondsThroughSequence);
+      const [currentJob] = await tx
+        .select({ id: widgetAiJobs.id })
+        .from(widgetAiJobs)
+        .innerJoin(conversations, eq(widgetAiJobs.conversationId, conversations.id))
+        .where(
+          and(
+            eq(widgetAiJobs.id, input.jobCommit.jobId),
+            eq(widgetAiJobs.status, "processing"),
+            eq(widgetAiJobs.attemptCount, input.jobCommit.attemptCount),
+            eq(widgetAiJobs.maxAttempts, input.jobCommit.maxAttempts),
+            isNotNull(widgetAiJobs.leaseExpiresAt),
+            gt(widgetAiJobs.leaseExpiresAt, input.completion.completedAt),
+            eq(widgetAiJobs.leadId, input.run.leadId),
+            eq(widgetAiJobs.conversationId, input.run.conversationId),
+            eq(widgetAiJobs.inboundPublicMessageId, input.inboundPublicMessageId),
+            eq(widgetAiJobs.runtimeMode, input.runtimeMode ?? "direct_openai"),
+            eq(widgetAiJobs.expectedGenerationEpoch, expectedGenerationEpoch),
+            eq(widgetAiJobs.respondsThroughSequence, respondsThroughSequence),
+            eq(conversations.status, "open"),
+            eq(conversations.agentAllowedToReply, true),
+            eq(conversations.generationEpoch, expectedGenerationEpoch),
+            sql`(
+              SELECT max(visitor_message.message_sequence)
+              FROM conversation_messages visitor_message
+              WHERE visitor_message.conversation_id = ${input.run.conversationId}
+                AND visitor_message.direction = 'inbound'
+                AND visitor_message.sender_role = 'visitor'
+            ) = ${respondsThroughSequence}`
+          )
+        )
+        .limit(1)
+        .for("update", { of: widgetAiJobs });
+
+      if (!currentJob) {
+        await fenceAiRunAttemptInTransaction(tx, input);
+        return;
+      }
+      if (input.jobCommit.attemptCount >= input.jobCommit.maxAttempts) {
+        await tx
+          .update(widgetAiJobs)
+          .set({
+            status: "failed",
+            terminalReason: "worker_failed",
+            lastError: "AI job exhausted its attempt budget",
+            leaseExpiresAt: null,
+            completedAt: input.completion.completedAt,
+            updatedAt: input.completion.completedAt
+          })
+          .where(eq(widgetAiJobs.id, input.jobCommit.jobId));
+      }
+      await failAiRunAttemptInTransaction(tx, input);
+    });
+  }
+
+  fenceRecordedSiteWidgetAiAttempt(input: {
+    run: RunningAiRunRecord;
+    completion: AiRunTerminalCompletion;
+  }): Promise<void> {
+    return this.db.transaction((tx) => fenceAiRunAttemptInTransaction(tx, input));
+  }
+
+  async recordSiteWidgetAiDegradation(input: RecordSiteWidgetAiDegradationInput): Promise<void> {
     if (
       input.jobCommit &&
-      (input.expectedGenerationEpoch === undefined ||
-        input.respondsThroughSequence === undefined)
+      (input.expectedGenerationEpoch === undefined || input.respondsThroughSequence === undefined)
     ) {
       throw new Error("queued AI degradation requires response-window identity");
     }
@@ -1407,7 +1488,9 @@ export class PostgresIntakeRepository implements IntakeRepository {
               : undefined
           )
         )
-        .returning({ publicConversationId: conversations.publicConversationId });
+        .returning({
+          publicConversationId: conversations.publicConversationId
+        });
 
       if (!conversation) {
         throw new Error("conversation not found for AI degradation");
@@ -1458,13 +1541,11 @@ export class PostgresIntakeRepository implements IntakeRepository {
             null,
           modelName: modelVersion ?? null,
           generatorModelName: modelVersion ?? null,
-          verifierModelName:
-            readOptionalString(sanitizedMetadata, "verifier_model_name") ?? null,
+          verifierModelName: readOptionalString(sanitizedMetadata, "verifier_model_name") ?? null,
           verifierVersion: readOptionalString(sanitizedMetadata, "verifier_version") ?? null,
           verifierVerdict: readOptionalString(sanitizedMetadata, "verifier_verdict") ?? null,
           catalogVersion: readOptionalString(sanitizedMetadata, "catalog_version") ?? null,
-          catalogContentHash:
-            readOptionalString(sanitizedMetadata, "catalog_content_hash") ?? null,
+          catalogContentHash: readOptionalString(sanitizedMetadata, "catalog_content_hash") ?? null,
           configuredModelProvider: modelEvidence.configuredProvider,
           configuredModelName: modelEvidence.modelName,
           observedModelProvider: modelEvidence.observedProvider,
@@ -1568,16 +1649,9 @@ export class PostgresIntakeRepository implements IntakeRepository {
     const leaseMs = Math.max(5_000, Math.min(input.leaseMs, 120_000));
 
     const claimed = await this.db.transaction(async (tx) => {
-      await tx
-        .update(widgetAiJobs)
-        .set({
-          status: "failed",
-          terminalReason: "worker_failed",
-          lastError: "AI job exhausted its lease and retry budget",
-          leaseExpiresAt: null,
-          updatedAt: input.now,
-          completedAt: input.now
-        })
+      const exhaustedJobs = await tx
+        .select({ id: widgetAiJobs.id, attemptCount: widgetAiJobs.attemptCount })
+        .from(widgetAiJobs)
         .where(
           and(
             eq(widgetAiJobs.status, "processing"),
@@ -1585,17 +1659,39 @@ export class PostgresIntakeRepository implements IntakeRepository {
             lte(widgetAiJobs.leaseExpiresAt, input.now),
             sql`${widgetAiJobs.attemptCount} >= ${widgetAiJobs.maxAttempts}`
           )
-        );
+        )
+        .for("update", { skipLocked: true });
+      for (const exhausted of exhaustedJobs) {
+        await finalizeExhaustedAiRunForJobInTransaction(tx, {
+          jobId: exhausted.id,
+          jobAttemptCount: exhausted.attemptCount,
+          completedAt: input.now,
+          runningAttemptStatus: "fenced"
+        });
+        await tx
+          .update(widgetAiJobs)
+          .set({
+            status: "failed",
+            terminalReason: "worker_failed",
+            lastError: "AI job exhausted its lease and retry budget",
+            leaseExpiresAt: null,
+            updatedAt: input.now,
+            completedAt: input.now
+          })
+          .where(
+            and(
+              eq(widgetAiJobs.id, exhausted.id),
+              eq(widgetAiJobs.status, "processing"),
+              eq(widgetAiJobs.attemptCount, exhausted.attemptCount),
+              isNotNull(widgetAiJobs.leaseExpiresAt),
+              lte(widgetAiJobs.leaseExpiresAt, input.now)
+            )
+          );
+      }
 
-      await tx
-        .update(widgetAiJobs)
-        .set({
-          status: "superseded",
-          terminalReason: "turn_not_current",
-          leaseExpiresAt: null,
-          updatedAt: input.now,
-          completedAt: input.now
-        })
+      const invalidatedJobs = await tx
+        .select({ id: widgetAiJobs.id, attemptCount: widgetAiJobs.attemptCount })
+        .from(widgetAiJobs)
         .where(
           and(
             or(
@@ -1625,7 +1721,27 @@ export class PostgresIntakeRepository implements IntakeRepository {
                 )
             )`
           )
-        );
+        )
+        .for("update", { skipLocked: true });
+      for (const invalidated of invalidatedJobs) {
+        await finalizeSupersededAiRunForJobInTransaction(tx, {
+          jobId: invalidated.id,
+          jobAttemptCount: invalidated.attemptCount,
+          completedAt: input.now
+        });
+      }
+      if (invalidatedJobs.length > 0) {
+        await tx
+          .update(widgetAiJobs)
+          .set({
+            status: "superseded",
+            terminalReason: "turn_not_current",
+            leaseExpiresAt: null,
+            updatedAt: input.now,
+            completedAt: input.now
+          })
+          .where(inArray(widgetAiJobs.id, invalidatedJobs.map((job) => job.id)));
+      }
 
       const [row] = await tx
         .select({
@@ -1675,10 +1791,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
             )`,
             or(
               and(
-                or(
-                  eq(widgetAiJobs.status, "pending"),
-                  eq(widgetAiJobs.status, "retrying")
-                ),
+                or(eq(widgetAiJobs.status, "pending"), eq(widgetAiJobs.status, "retrying")),
                 lte(widgetAiJobs.availableAt, input.now)
               ),
               and(
@@ -1752,10 +1865,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
     };
   }
 
-  async isSiteWidgetAiJobCurrent(input: {
-    jobId: string;
-    attemptCount: number;
-  }): Promise<boolean> {
+  async isSiteWidgetAiJobCurrent(input: { jobId: string; attemptCount: number }): Promise<boolean> {
     const [row] = await this.db
       .select({ id: widgetAiJobs.id })
       .from(widgetAiJobs)
@@ -1792,27 +1902,53 @@ export class PostgresIntakeRepository implements IntakeRepository {
   async finishSiteWidgetAiJob(input: FinishSiteWidgetAiJobInput): Promise<void> {
     const retrying = input.status === "retrying";
 
-    await this.db
-      .update(widgetAiJobs)
-      .set({
-        status: input.status,
-        terminalReason: input.terminalReason ?? null,
-        outputPublicMessageId: input.outputPublicMessageId ?? null,
-        lastError: input.lastError?.slice(0, 500) ?? null,
-        availableAt: retrying ? input.retryAt ?? input.completedAt : input.completedAt,
-        leaseExpiresAt: null,
-        updatedAt: input.completedAt,
-        completedAt: retrying ? null : input.completedAt
-      })
-      .where(
-        and(
-          eq(widgetAiJobs.id, input.jobId),
-          eq(widgetAiJobs.status, "processing"),
-          eq(widgetAiJobs.attemptCount, input.attemptCount),
-          isNotNull(widgetAiJobs.leaseExpiresAt),
-          gt(widgetAiJobs.leaseExpiresAt, input.completedAt)
+    await this.db.transaction(async (tx) => {
+      const [job] = await tx
+        .select({ id: widgetAiJobs.id, maxAttempts: widgetAiJobs.maxAttempts })
+        .from(widgetAiJobs)
+        .where(
+          and(
+            eq(widgetAiJobs.id, input.jobId),
+            eq(widgetAiJobs.status, "processing"),
+            eq(widgetAiJobs.attemptCount, input.attemptCount),
+            isNotNull(widgetAiJobs.leaseExpiresAt),
+            gt(widgetAiJobs.leaseExpiresAt, input.completedAt)
+          )
         )
-      );
+        .limit(1)
+        .for("update");
+      if (!job) return;
+
+      if (input.status === "failed" && input.attemptCount >= job.maxAttempts) {
+        await finalizeExhaustedAiRunForJobInTransaction(tx, {
+          jobId: input.jobId,
+          jobAttemptCount: input.attemptCount,
+          completedAt: input.completedAt,
+          runningAttemptStatus: "failed"
+        });
+      }
+      if (input.status === "superseded") {
+        await finalizeSupersededAiRunForJobInTransaction(tx, {
+          jobId: input.jobId,
+          jobAttemptCount: input.attemptCount,
+          completedAt: input.completedAt
+        });
+      }
+
+      await tx
+        .update(widgetAiJobs)
+        .set({
+          status: input.status,
+          terminalReason: input.terminalReason ?? null,
+          outputPublicMessageId: input.outputPublicMessageId ?? null,
+          lastError: input.lastError?.slice(0, 500) ?? null,
+          availableAt: retrying ? (input.retryAt ?? input.completedAt) : input.completedAt,
+          leaseExpiresAt: null,
+          updatedAt: input.completedAt,
+          completedAt: retrying ? null : input.completedAt
+        })
+        .where(eq(widgetAiJobs.id, job.id));
+    });
   }
 
   async findSiteWidgetAiReply(
@@ -1844,9 +1980,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
       );
     }
 
-    existing ??= await this.findExistingAiMessageByIdempotencyKey(
-      `ai:${inboundPublicMessageId}`
-    );
+    existing ??= await this.findExistingAiMessageByIdempotencyKey(`ai:${inboundPublicMessageId}`);
 
     return existing
       ? {
@@ -1896,9 +2030,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
       })
       .from(widgetAiJobs)
       .where(eq(widgetAiJobs.conversationId, session.conversationId));
-    const jobs = new Map(
-      jobRows.map((job) => [job.inboundPublicMessageId, job] as const)
-    );
+    const jobs = new Map(jobRows.map((job) => [job.inboundPublicMessageId, job] as const));
 
     return {
       publicSessionId: session.publicSessionId,
@@ -2184,10 +2316,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
         })
         .where(eq(conversations.id, conversation.id));
 
-      await tx
-        .update(leads)
-        .set({ updatedAt: changedAt })
-        .where(eq(leads.id, input.leadId));
+      await tx.update(leads).set({ updatedAt: changedAt }).where(eq(leads.id, input.leadId));
 
       await tx.insert(leadTimelineEvents).values({
         leadId: input.leadId,
@@ -2209,9 +2338,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
     return found ? this.getManagerLead(input.leadId) : null;
   }
 
-  async recordAiReviewLabel(
-    input: RecordAiReviewLabelInput
-  ): Promise<ManagerLeadDetail | null> {
+  async recordAiReviewLabel(input: RecordAiReviewLabelInput): Promise<ManagerLeadDetail | null> {
     const inserted = await this.db.transaction(async (tx) => {
       const [run] = await tx
         .select({ id: aiRuns.id })
@@ -2631,6 +2758,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
         id: widgetAiJobs.id,
         status: widgetAiJobs.status,
         attemptCount: widgetAiJobs.attemptCount,
+        maxAttempts: widgetAiJobs.maxAttempts,
         terminalReason: widgetAiJobs.terminalReason,
         expectedGenerationEpoch: widgetAiJobs.expectedGenerationEpoch,
         respondsThroughSequence: widgetAiJobs.respondsThroughSequence
@@ -2668,10 +2796,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
       .from(conversations)
       .innerJoin(widgetSessions, eq(conversations.widgetSessionId, widgetSessions.id))
       .where(
-        and(
-          eq(conversations.leadId, leadId),
-          eq(widgetSessions.publicSessionId, publicSessionId)
-        )
+        and(eq(conversations.leadId, leadId), eq(widgetSessions.publicSessionId, publicSessionId))
       )
       .limit(1);
 
@@ -2692,7 +2817,10 @@ export class PostgresIntakeRepository implements IntakeRepository {
         .leftJoin(channelIdentities, eq(conversations.channelIdentityId, channelIdentities.id))
         .leftJoin(widgetSessions, eq(channelIdentities.widgetSessionId, widgetSessions.id))
         .leftJoin(conversationMessages, eq(conversationMessages.conversationId, conversations.id))
-        .leftJoin(messageDeliveries, eq(messageDeliveries.conversationMessageId, conversationMessages.id))
+        .leftJoin(
+          messageDeliveries,
+          eq(messageDeliveries.conversationMessageId, conversationMessages.id)
+        )
         .where(eq(conversations.leadId, leadId))
         .orderBy(conversations.createdAt, conversationMessages.createdAt),
       this.db
@@ -2777,110 +2905,101 @@ export class PostgresIntakeRepository implements IntakeRepository {
     leadId: string,
     lead: typeof leads.$inferSelect
   ): Promise<ManagerStructuredIntake> {
-    const [
-      slotRows,
-      requirementRows,
-      conflictRows,
-      latestRunRows,
-      latestHandoffRows,
-      reviewRows
-    ] = await Promise.all([
-      this.db
-        .select({
-          publicConversationId: conversations.publicConversationId,
-          name: conversationSlots.name,
-          value: conversationSlots.value,
-          source: conversationSlots.source,
-          sourcePublicMessageId: conversationSlots.sourcePublicMessageId,
-          evidenceQuote: conversationSlots.evidenceQuote,
-          evidenceStart: conversationSlots.evidenceStart,
-          evidenceEnd: conversationSlots.evidenceEnd,
-          confidencePermille: conversationSlots.confidencePermille,
-          updatedAt: conversationSlots.updatedAt
-        })
-        .from(conversationSlots)
-        .innerJoin(conversations, eq(conversationSlots.conversationId, conversations.id))
-        .where(eq(conversationSlots.leadId, leadId))
-        .orderBy(desc(conversationSlots.updatedAt)),
-      this.db
-        .select({
-          publicConversationId: conversations.publicConversationId,
-          category: conversationRequirements.category,
-          mode: conversationRequirements.mode,
-          value: conversationRequirements.value,
-          sourcePublicMessageId: conversationRequirements.sourcePublicMessageId,
-          evidenceQuote: conversationRequirements.evidenceQuote,
-          evidenceStart: conversationRequirements.evidenceStart,
-          evidenceEnd: conversationRequirements.evidenceEnd,
-          confidencePermille: conversationRequirements.confidencePermille,
-          updatedAt: conversationRequirements.updatedAt
-        })
-        .from(conversationRequirements)
-        .innerJoin(
-          conversations,
-          eq(conversationRequirements.conversationId, conversations.id)
-        )
-        .where(eq(conversationRequirements.leadId, leadId))
-        .orderBy(desc(conversationRequirements.updatedAt)),
-      this.db
-        .select({
-          publicConversationId: conversations.publicConversationId,
-          name: conversationSlotEvents.name,
-          value: conversationSlotEvents.value,
-          sourcePublicMessageId: conversationSlotEvents.sourcePublicMessageId,
-          evidenceQuote: conversationSlotEvents.evidenceQuote,
-          evidenceStart: conversationSlotEvents.evidenceStart,
-          evidenceEnd: conversationSlotEvents.evidenceEnd,
-          previousValue: conversationSlotEvents.previousValue,
-          applied: conversationSlotEvents.applied,
-          createdAt: conversationSlotEvents.createdAt
-        })
-        .from(conversationSlotEvents)
-        .innerJoin(conversations, eq(conversationSlotEvents.conversationId, conversations.id))
-        .where(
-          and(
-            eq(conversationSlotEvents.leadId, leadId),
-            eq(conversationSlotEvents.conflict, true)
+    const [slotRows, requirementRows, conflictRows, latestRunRows, latestHandoffRows, reviewRows] =
+      await Promise.all([
+        this.db
+          .select({
+            publicConversationId: conversations.publicConversationId,
+            name: conversationSlots.name,
+            value: conversationSlots.value,
+            source: conversationSlots.source,
+            sourcePublicMessageId: conversationSlots.sourcePublicMessageId,
+            evidenceQuote: conversationSlots.evidenceQuote,
+            evidenceStart: conversationSlots.evidenceStart,
+            evidenceEnd: conversationSlots.evidenceEnd,
+            confidencePermille: conversationSlots.confidencePermille,
+            updatedAt: conversationSlots.updatedAt
+          })
+          .from(conversationSlots)
+          .innerJoin(conversations, eq(conversationSlots.conversationId, conversations.id))
+          .where(eq(conversationSlots.leadId, leadId))
+          .orderBy(desc(conversationSlots.updatedAt)),
+        this.db
+          .select({
+            publicConversationId: conversations.publicConversationId,
+            category: conversationRequirements.category,
+            mode: conversationRequirements.mode,
+            value: conversationRequirements.value,
+            sourcePublicMessageId: conversationRequirements.sourcePublicMessageId,
+            evidenceQuote: conversationRequirements.evidenceQuote,
+            evidenceStart: conversationRequirements.evidenceStart,
+            evidenceEnd: conversationRequirements.evidenceEnd,
+            confidencePermille: conversationRequirements.confidencePermille,
+            updatedAt: conversationRequirements.updatedAt
+          })
+          .from(conversationRequirements)
+          .innerJoin(conversations, eq(conversationRequirements.conversationId, conversations.id))
+          .where(eq(conversationRequirements.leadId, leadId))
+          .orderBy(desc(conversationRequirements.updatedAt)),
+        this.db
+          .select({
+            publicConversationId: conversations.publicConversationId,
+            name: conversationSlotEvents.name,
+            value: conversationSlotEvents.value,
+            sourcePublicMessageId: conversationSlotEvents.sourcePublicMessageId,
+            evidenceQuote: conversationSlotEvents.evidenceQuote,
+            evidenceStart: conversationSlotEvents.evidenceStart,
+            evidenceEnd: conversationSlotEvents.evidenceEnd,
+            previousValue: conversationSlotEvents.previousValue,
+            applied: conversationSlotEvents.applied,
+            createdAt: conversationSlotEvents.createdAt
+          })
+          .from(conversationSlotEvents)
+          .innerJoin(conversations, eq(conversationSlotEvents.conversationId, conversations.id))
+          .where(
+            and(
+              eq(conversationSlotEvents.leadId, leadId),
+              eq(conversationSlotEvents.conflict, true)
+            )
           )
-        )
-        .orderBy(desc(conversationSlotEvents.createdAt)),
-      this.db
-        .select({
-          id: aiRuns.id,
-          status: aiRuns.status,
-          verifierVerdict: aiRuns.verifierVerdict,
-          generatorModelName: aiRuns.generatorModelName,
-          verifierModelName: aiRuns.verifierModelName,
-          verifierVersion: aiRuns.verifierVersion,
-          catalogVersion: aiRuns.catalogVersion,
-          createdAt: aiRuns.createdAt
-        })
-        .from(aiRuns)
-        .where(and(eq(aiRuns.leadId, leadId), ne(aiRuns.status, "running")))
-        .orderBy(desc(aiRuns.createdAt))
-        .limit(1),
-      this.db
-        .select({
-          reason: conversationHandoffs.reason,
-          summary: conversationHandoffs.summary,
-          status: conversationHandoffs.status,
-          createdAt: conversationHandoffs.createdAt
-        })
-        .from(conversationHandoffs)
-        .where(eq(conversationHandoffs.leadId, leadId))
-        .orderBy(desc(conversationHandoffs.createdAt))
-        .limit(1),
-      this.db
-        .select({
-          aiRunId: aiReviewLabels.aiRunId,
-          label: aiReviewLabels.label,
-          note: aiReviewLabels.note,
-          createdAt: aiReviewLabels.createdAt
-        })
-        .from(aiReviewLabels)
-        .where(eq(aiReviewLabels.leadId, leadId))
-        .orderBy(desc(aiReviewLabels.createdAt))
-    ]);
+          .orderBy(desc(conversationSlotEvents.createdAt)),
+        this.db
+          .select({
+            id: aiRuns.id,
+            status: aiRuns.status,
+            verifierVerdict: aiRuns.verifierVerdict,
+            generatorModelName: aiRuns.generatorModelName,
+            verifierModelName: aiRuns.verifierModelName,
+            verifierVersion: aiRuns.verifierVersion,
+            catalogVersion: aiRuns.catalogVersion,
+            createdAt: aiRuns.createdAt
+          })
+          .from(aiRuns)
+          .where(and(eq(aiRuns.leadId, leadId), ne(aiRuns.status, "running")))
+          .orderBy(desc(aiRuns.createdAt))
+          .limit(1),
+        this.db
+          .select({
+            reason: conversationHandoffs.reason,
+            summary: conversationHandoffs.summary,
+            status: conversationHandoffs.status,
+            createdAt: conversationHandoffs.createdAt
+          })
+          .from(conversationHandoffs)
+          .where(eq(conversationHandoffs.leadId, leadId))
+          .orderBy(desc(conversationHandoffs.createdAt))
+          .limit(1),
+        this.db
+          .select({
+            aiRunId: aiReviewLabels.aiRunId,
+            label: aiReviewLabels.label,
+            note: aiReviewLabels.note,
+            createdAt: aiReviewLabels.createdAt
+          })
+          .from(aiReviewLabels)
+          .where(eq(aiReviewLabels.leadId, leadId))
+          .orderBy(desc(aiReviewLabels.createdAt))
+      ]);
 
     const slots = slotRows.map((slot) => ({
       publicConversationId: slot.publicConversationId,
@@ -2916,9 +3035,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
           !AI_REQUIREMENT_CATEGORIES.includes(
             requirement.category as (typeof AI_REQUIREMENT_CATEGORIES)[number]
           ) ||
-          !AI_REQUIREMENT_MODES.includes(
-            requirement.mode as (typeof AI_REQUIREMENT_MODES)[number]
-          )
+          !AI_REQUIREMENT_MODES.includes(requirement.mode as (typeof AI_REQUIREMENT_MODES)[number])
         ) {
           return [];
         }
@@ -2926,8 +3043,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
         return [
           {
             publicConversationId: requirement.publicConversationId,
-            category:
-              requirement.category as (typeof AI_REQUIREMENT_CATEGORIES)[number],
+            category: requirement.category as (typeof AI_REQUIREMENT_CATEGORIES)[number],
             mode: requirement.mode as (typeof AI_REQUIREMENT_MODES)[number],
             value: requirement.value,
             sourceMessageId: requirement.sourcePublicMessageId,
@@ -3256,8 +3372,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
       this.db
         .select({
           summary: conversationAiMemory.summary,
-          coveredThroughPublicMessageId:
-            conversationAiMemory.coveredThroughPublicMessageId,
+          coveredThroughPublicMessageId: conversationAiMemory.coveredThroughPublicMessageId,
           updatedAt: conversationAiMemory.updatedAt
         })
         .from(conversationAiMemory)
@@ -3326,9 +3441,7 @@ function requiredRecordedIdentity(value: number | undefined): number {
   return value;
 }
 
-function withRecordedCommitSpans(
-  completion: AiRunTerminalCompletion
-): AiRunTerminalCompletion {
+function withRecordedCommitSpans(completion: AiRunTerminalCompletion): AiRunTerminalCompletion {
   return {
     ...completion,
     spans: [
@@ -3339,20 +3452,12 @@ function withRecordedCommitSpans(
   };
 }
 
-function withRecordedBlockedSpan(
-  completion: AiRunTerminalCompletion
-): AiRunTerminalCompletion {
+function withRecordedBlockedSpan(completion: AiRunTerminalCompletion): AiRunTerminalCompletion {
   return {
     ...completion,
     spans: [
       ...completion.spans,
-      recordedBoundarySpan(
-        "send_gate",
-        "send_gate_check",
-        "blocked",
-        false,
-        "send_gate_blocked"
-      )
+      recordedBoundarySpan("send_gate", "send_gate_check", "blocked", false, "send_gate_blocked")
     ]
   };
 }
@@ -3379,6 +3484,7 @@ function toSiteWidgetAiJobSummary(row: {
   id: string;
   status: string;
   attemptCount: number;
+  maxAttempts: number;
   terminalReason: string | null;
   expectedGenerationEpoch: number;
   respondsThroughSequence: number;
@@ -3387,15 +3493,14 @@ function toSiteWidgetAiJobSummary(row: {
     id: row.id,
     status: toSiteWidgetAiJobStatus(row.status),
     attemptCount: row.attemptCount,
+    maxAttempts: row.maxAttempts,
     terminalReason: row.terminalReason ?? undefined,
     expectedGenerationEpoch: row.expectedGenerationEpoch,
     respondsThroughSequence: row.respondsThroughSequence
   };
 }
 
-function readWidgetCatalogReferences(
-  metadata: Record<string, unknown>
-): WidgetCatalogReference[] {
+function readWidgetCatalogReferences(metadata: Record<string, unknown>): WidgetCatalogReference[] {
   const raw = metadata.catalog_references;
 
   if (!Array.isArray(raw)) {
@@ -3450,8 +3555,7 @@ async function advanceAiRollingSummary(
   const [memory] = await tx
     .select({
       summary: conversationAiMemory.summary,
-      coveredThroughPublicMessageId:
-        conversationAiMemory.coveredThroughPublicMessageId,
+      coveredThroughPublicMessageId: conversationAiMemory.coveredThroughPublicMessageId,
       coveredThroughCreatedAt: conversationAiMemory.coveredThroughCreatedAt,
       updatedAt: conversationAiMemory.updatedAt
     })
@@ -3459,9 +3563,7 @@ async function advanceAiRollingSummary(
     .where(eq(conversationAiMemory.conversationId, conversationId))
     .limit(1);
   const recentEligible = recentRows
-    .filter(
-      (row) => row.publicMessageId !== currentPublicMessageId && isAiContextMessageRow(row)
-    )
+    .filter((row) => row.publicMessageId !== currentPublicMessageId && isAiContextMessageRow(row))
     .slice(0, 12);
   const oldestRecent = recentEligible.at(-1);
 
@@ -3657,43 +3759,41 @@ function buildSiteWidgetAiTurnInput(
   });
 }
 
-function buildPersistedSiteWidgetAiTurnInput(input: {
-  channel: string;
-  publicConversationId: string;
-  agentAllowedToReply: boolean;
-  aiState: string;
-  publicSessionId: string | null;
-  publicMessageId: string;
-  messageBody: string;
-  sourcePageUrl: string | null;
-  conversationSourcePageUrl: string | null;
-  submittedAt: Date;
-  widgetInstanceId: string | null;
-  sessionWidgetInstanceId: string | null;
-  referrerUrl: string | null;
-  pageTitle: string | null;
-  visitorContext: Record<string, unknown> | null;
-  contactName: string;
-  contactPhone: string | null;
-  contactEmail: string | null;
-  contactPreferred: string | null;
-  contactCity: string | null;
-  requestFingerprint: string;
-}, context: {
-  recentMessages: AiTurnInput["compactContext"]["messages"];
-  rollingSummary?: AiTurnInput["compactContext"]["rollingSummary"];
-  persistedSlots: AiKnownSlots;
-  persistedRequirements: AiTurnInput["knownRequirements"];
-}): AiTurnInput | undefined {
+function buildPersistedSiteWidgetAiTurnInput(
+  input: {
+    channel: string;
+    publicConversationId: string;
+    agentAllowedToReply: boolean;
+    aiState: string;
+    publicSessionId: string | null;
+    publicMessageId: string;
+    messageBody: string;
+    sourcePageUrl: string | null;
+    conversationSourcePageUrl: string | null;
+    submittedAt: Date;
+    widgetInstanceId: string | null;
+    sessionWidgetInstanceId: string | null;
+    referrerUrl: string | null;
+    pageTitle: string | null;
+    visitorContext: Record<string, unknown> | null;
+    contactName: string;
+    contactPhone: string | null;
+    contactEmail: string | null;
+    contactPreferred: string | null;
+    contactCity: string | null;
+    requestFingerprint: string;
+  },
+  context: {
+    recentMessages: AiTurnInput["compactContext"]["messages"];
+    rollingSummary?: AiTurnInput["compactContext"]["rollingSummary"];
+    persistedSlots: AiKnownSlots;
+    persistedRequirements: AiTurnInput["knownRequirements"];
+  }
+): AiTurnInput | undefined {
   const pageUrl = input.sourcePageUrl ?? input.conversationSourcePageUrl;
   const widgetInstanceId = input.widgetInstanceId ?? input.sessionWidgetInstanceId;
 
-  if (
-    input.channel !== "site_widget" ||
-    !input.publicSessionId ||
-    !pageUrl ||
-    !widgetInstanceId
-  ) {
+  if (input.channel !== "site_widget" || !input.publicSessionId || !pageUrl || !widgetInstanceId) {
     return undefined;
   }
 
@@ -3803,10 +3903,7 @@ function toAiKnownSlots(rows: AiSlotRow[]): AiKnownSlots {
   const slots: AiKnownSlots = {};
 
   for (const row of rows) {
-    if (
-      !AI_SLOT_NAMES.includes(row.name as AiSlotName) ||
-      !isAiSlotSource(row.source)
-    ) {
+    if (!AI_SLOT_NAMES.includes(row.name as AiSlotName) || !isAiSlotSource(row.source)) {
       continue;
     }
 
@@ -3852,9 +3949,7 @@ type AiRequirementRow = {
   updatedAt: Date;
 };
 
-function toAiKnownRequirements(
-  rows: AiRequirementRow[]
-): AiTurnInput["knownRequirements"] {
+function toAiKnownRequirements(rows: AiRequirementRow[]): AiTurnInput["knownRequirements"] {
   return rows.flatMap((row) => {
     if (
       !AI_REQUIREMENT_CATEGORIES.includes(
@@ -3889,7 +3984,9 @@ function toAiKnownRequirements(
   });
 }
 
-function isAiSlotSource(value: string): value is "contact" | "visitor_message" | "ai_extraction" | "manager" {
+function isAiSlotSource(
+  value: string
+): value is "contact" | "visitor_message" | "ai_extraction" | "manager" {
   return (
     value === "contact" ||
     value === "visitor_message" ||
@@ -4130,10 +4227,7 @@ async function enqueueTelegramManagerNotifications(
     .where(
       and(
         eq(managerTelegramBindings.provider, "telegram_bot"),
-        eq(
-          managerTelegramBindings.providerAccountId,
-          input.input.providerAccountId ?? ""
-        ),
+        eq(managerTelegramBindings.providerAccountId, input.input.providerAccountId ?? ""),
         eq(managerTelegramBindings.status, "active")
       )
     );
@@ -4494,10 +4588,13 @@ function toInboundLeadInsert(
     sourcePageUrl: input.sourcePageUrl ?? null,
     sourceFormKind: input.channel === "site_widget" ? "site_widget" : null,
     contactName:
-      input.contact?.name ?? input.displayName ?? (input.channel === "telegram" ? "Telegram" : "Site visitor"),
+      input.contact?.name ??
+      input.displayName ??
+      (input.channel === "telegram" ? "Telegram" : "Site visitor"),
     contactPhone: input.contact?.phone ?? null,
     contactEmail: input.contact?.email ?? null,
-    contactPreferred: input.contact?.preferredContact ?? (input.channel === "telegram" ? "telegram" : null),
+    contactPreferred:
+      input.contact?.preferredContact ?? (input.channel === "telegram" ? "telegram" : null),
     contactCity: input.contact?.city ?? null,
     requestText: input.message.text || input.message.caption || null,
     requestProductInterest: null,
@@ -4604,9 +4701,7 @@ function toAiSlotName(value: string): AiSlotName {
   throw new Error(`invalid AI slot name ${value}`);
 }
 
-function toManagerSlotSource(
-  value: string
-): ManagerStructuredIntake["slots"][number]["source"] {
+function toManagerSlotSource(value: string): ManagerStructuredIntake["slots"][number]["source"] {
   if (
     value === "contact" ||
     value === "visitor_message" ||
@@ -4624,9 +4719,7 @@ function toManagerEvidence(value: {
   evidenceStart: number | null;
   evidenceEnd: number | null;
 }) {
-  return value.evidenceQuote !== null &&
-    value.evidenceStart !== null &&
-    value.evidenceEnd !== null
+  return value.evidenceQuote !== null && value.evidenceStart !== null && value.evidenceEnd !== null
     ? {
         quote: value.evidenceQuote,
         start: value.evidenceStart,
@@ -4644,11 +4737,7 @@ function toManagerAiRunStatus(
 
   if (value === "persisted") return "replied";
   if (value === "handed_off") return "handoff";
-  if (
-    value === "blocked" ||
-    value === "fallback_unavailable" ||
-    value === "failed"
-  ) {
+  if (value === "blocked" || value === "fallback_unavailable" || value === "failed") {
     return "degraded";
   }
 
@@ -4747,16 +4836,10 @@ function toProfileValidatorResult(value: string | undefined) {
   return "not_run";
 }
 
-function toGroundedModelEvidence(
-  metadata: Record<string, unknown>,
-  modelName: string | undefined
-) {
+function toGroundedModelEvidence(metadata: Record<string, unknown>, modelName: string | undefined) {
   const provider = readOptionalString(metadata, "model_provider");
   const observedProvider =
-    provider === "openai" ||
-    provider === "fake" ||
-    provider === "policy" ||
-    provider === "none"
+    provider === "openai" || provider === "fake" || provider === "policy" || provider === "none"
       ? provider
       : null;
   const configuredProvider =
@@ -4770,7 +4853,7 @@ function toGroundedModelEvidence(
     configuredProvider,
     modelName: modelName ?? null,
     observedProvider,
-    observedModelName: observedProvider && observedProvider !== "none" ? modelName ?? null : null
+    observedModelName: observedProvider && observedProvider !== "none" ? (modelName ?? null) : null
   };
 }
 
@@ -4816,20 +4899,31 @@ function toCanonicalDegradationEvidence(reason: string) {
   return { outcomeReason, failureCode };
 }
 
-function toAiQualityEvent(reason: string): Pick<
-  ManagerAiQualitySummary,
-  "eventType" | "reasonCode" | "severity"
-> {
+function toAiQualityEvent(
+  reason: string
+): Pick<ManagerAiQualitySummary, "eventType" | "reasonCode" | "severity"> {
   if (reason === "missing_openai_config") {
-    return { eventType: "degradation", reasonCode: reason, severity: "warning" };
+    return {
+      eventType: "degradation",
+      reasonCode: reason,
+      severity: "warning"
+    };
   }
 
   if (reason === "model_error" || reason === "semantic_verifier_error") {
-    return { eventType: "model_failure", reasonCode: reason, severity: "critical" };
+    return {
+      eventType: "model_failure",
+      reasonCode: reason,
+      severity: "critical"
+    };
   }
 
   if (reason === "turn_timeout") {
-    return { eventType: "model_failure", reasonCode: reason, severity: "error" };
+    return {
+      eventType: "model_failure",
+      reasonCode: reason,
+      severity: "error"
+    };
   }
 
   if (
@@ -4837,7 +4931,11 @@ function toAiQualityEvent(reason: string): Pick<
     reason === "unsafe_model_response" ||
     reason === "grounding_validation_failed"
   ) {
-    return { eventType: "policy_violation", reasonCode: reason, severity: "error" };
+    return {
+      eventType: "policy_violation",
+      reasonCode: reason,
+      severity: "error"
+    };
   }
 
   if (reason === "agent_reply_blocked") {
@@ -4845,7 +4943,11 @@ function toAiQualityEvent(reason: string): Pick<
   }
 
   if (reason === "ai_persistence_unconfirmed") {
-    return { eventType: "runtime_failure", reasonCode: reason, severity: "critical" };
+    return {
+      eventType: "runtime_failure",
+      reasonCode: reason,
+      severity: "critical"
+    };
   }
 
   return {

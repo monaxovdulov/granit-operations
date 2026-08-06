@@ -1,9 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import {
-  SITE_WIDGET_MESSAGE_EVENT_TYPE,
-  SITE_WIDGET_V2_CONTRACT_VERSION
-} from "@granit/contracts";
+import { SITE_WIDGET_MESSAGE_EVENT_TYPE, SITE_WIDGET_V2_CONTRACT_VERSION } from "@granit/contracts";
 
 import {
   buildSiteWidgetAiTurnExecutionContext,
@@ -20,10 +17,7 @@ import type {
   TerminalAiRunRecord
 } from "../../src/modules/ai/repositories/ai-run-repository.js";
 import type { PersistRecordedSiteWidgetAiReplyInput } from "../../src/modules/ai/repositories/recorded-site-widget-ai-reply-repository.js";
-import type {
-  AiKnownSlots,
-  AiSlotName
-} from "../../src/modules/ai/ai-dialog-contract.js";
+import type { AiKnownSlots, AiSlotName } from "../../src/modules/ai/ai-dialog-contract.js";
 import {
   AiControlVersionConflictError,
   AgentReplyBlockedError,
@@ -77,12 +71,61 @@ import {
 } from "../../src/repositories/intake-repository.js";
 import { sanitizeAiObservabilityMetadata } from "../../src/modules/ai/observability/ai-observability-sanitizer.js";
 
+function memoryRunningAiRun(id: string, input: BeginAiRunInput): RunningAiRunRecord {
+  const attemptId = randomUUID();
+  return {
+    ...input,
+    id,
+    status: "running",
+    attempt: {
+      id: attemptId,
+      attemptNumber: input.attemptNumber,
+      ...(input.jobId ? { jobId: input.jobId } : {}),
+      jobAttemptCount: input.jobAttemptCount,
+      ...(input.maxAttempts === undefined ? {} : { maxAttempts: input.maxAttempts }),
+      idempotencyKey: input.attemptIdempotencyKey,
+      traceId: input.traceId,
+      inputFingerprint: input.inputFingerprint,
+      startedAt: input.startedAt
+    }
+  };
+}
+
+function sameMemoryAttemptConfiguration(
+  existing: RunningAiRunRecord,
+  input: BeginAiRunInput
+): boolean {
+  return (
+    existing.versions.policyVersion === input.versions.policyVersion &&
+    existing.versions.promptVersion === input.versions.promptVersion &&
+    existing.versions.toolVersion === input.versions.toolVersion &&
+    existing.versions.assetVersion === input.versions.assetVersion &&
+    existing.versions.toneVersion === input.versions.toneVersion &&
+    existing.versions.factsVersion === input.versions.factsVersion &&
+    existing.versions.disclosureVersion === input.versions.disclosureVersion &&
+    existing.versions.modelProfileVersion === input.versions.modelProfileVersion &&
+    existing.versions.runtimeVersion === input.versions.runtimeVersion &&
+    existing.model.modelProvider === input.model.modelProvider &&
+    existing.model.requestedModelName === input.model.requestedModelName &&
+    existing.model.reasoningEffort === input.model.reasoningEffort
+  );
+}
+
 export class MemoryIntakeRepository implements IntakeRepository {
   saveCalls = 0;
   aiSaveCalls = 0;
   lastAiSaveInput?: SaveSiteWidgetAiMessageInput;
   private readonly managerReviewTransitions: Array<Record<string, unknown>> = [];
   private readonly recordedAiRuns: any[] = [];
+  private readonly recordedAiAttempts: Array<{
+    id: string;
+    aiRunId: string;
+    attemptNumber: number;
+    jobId?: string;
+    jobAttemptCount: number;
+    startedAt: Date;
+    status: "running" | "succeeded" | "failed" | "fenced";
+  }> = [];
   private managerAiControl: ManagerAiControl = {
     enabled: true,
     version: 1,
@@ -161,10 +204,18 @@ export class MemoryIntakeRepository implements IntakeRepository {
     return [...this.recordedAiRuns];
   }
 
-  async readRecordedSiteWidgetAiGate(input: {
-    leadId: string;
-    conversationId: string;
-  }): Promise<{ aiState: AiTurnInput["gateSnapshot"]["aiState"]; agentAllowedToReply: boolean }> {
+  listAiAttempts() {
+    return structuredClone(this.recordedAiAttempts);
+  }
+
+  listWidgetAiJobs() {
+    return structuredClone([...this.widgetAiJobs.values()]);
+  }
+
+  async readRecordedSiteWidgetAiGate(input: { leadId: string; conversationId: string }): Promise<{
+    aiState: AiTurnInput["gateSnapshot"]["aiState"];
+    agentAllowedToReply: boolean;
+  }> {
     const leadId = this.conversationLeads.get(input.conversationId);
     const publicSessionId = this.conversationSessions.get(input.conversationId);
     const lead = leadId ? this.leads.get(leadId) : undefined;
@@ -188,17 +239,11 @@ export class MemoryIntakeRepository implements IntakeRepository {
     const conversationId =
       typeof input.conversationId === "string" ? input.conversationId : undefined;
     const inboundPublicMessageId =
-      typeof input.inboundPublicMessageId === "string"
-        ? input.inboundPublicMessageId
-        : undefined;
+      typeof input.inboundPublicMessageId === "string" ? input.inboundPublicMessageId : undefined;
     const expectedGenerationEpoch =
-      typeof input.expectedGenerationEpoch === "number"
-        ? input.expectedGenerationEpoch
-        : undefined;
+      typeof input.expectedGenerationEpoch === "number" ? input.expectedGenerationEpoch : undefined;
     const respondsThroughSequence =
-      typeof input.respondsThroughSequence === "number"
-        ? input.respondsThroughSequence
-        : undefined;
+      typeof input.respondsThroughSequence === "number" ? input.respondsThroughSequence : undefined;
     const jobCommit =
       typeof input.jobCommit === "object" && input.jobCommit !== null
         ? (input.jobCommit as { jobId?: unknown; attemptCount?: unknown })
@@ -222,9 +267,7 @@ export class MemoryIntakeRepository implements IntakeRepository {
           expectedGenerationEpoch,
           respondsThroughSequence,
           runtimeMode:
-            input.runtimeMode === "mastra_openai_api"
-              ? "mastra_openai_api"
-              : "direct_openai"
+            input.runtimeMode === "mastra_openai_api" ? "mastra_openai_api" : "direct_openai"
         })
       ) {
         throw new AgentReplyBlockedError();
@@ -294,23 +337,79 @@ export class MemoryIntakeRepository implements IntakeRepository {
     if (this.options.failAiRunBegin) {
       throw new Error("memory AI run begin unavailable");
     }
+    this.assertCurrentJobAttemptForBegin(input);
 
-    const existing = this.recordedAiRuns.find(
-      (run) => run.idempotencyKey === input.idempotencyKey
-    );
+    const existing = this.recordedAiRuns.find((run) => run.idempotencyKey === input.idempotencyKey);
 
     if (existing) {
-      return existing.status === "running"
-        ? { kind: "running_replay" as const, run: existing }
-        : { kind: "terminal_replay" as const, run: existing };
+      if (
+        existing.leadId !== input.leadId ||
+        existing.conversationId !== input.conversationId ||
+        existing.inboundMessageId !== input.inboundMessageId ||
+        existing.runtimeMode !== input.runtimeMode ||
+        existing.decisionProfile !== input.decisionProfile ||
+        existing.inputFingerprint !== input.inputFingerprint
+      ) {
+        throw new AgentReplyBlockedError();
+      }
+      if (existing.status !== "running") {
+        return { kind: "terminal_replay" as const, run: existing };
+      }
+      if (existing.attempt.attemptNumber === input.attemptNumber) {
+        if (
+          existing.attempt.idempotencyKey !== input.attemptIdempotencyKey ||
+          existing.attempt.inputFingerprint !== input.inputFingerprint ||
+          existing.attempt.jobId !== input.jobId ||
+          existing.attempt.jobAttemptCount !== input.jobAttemptCount ||
+          existing.attempt.maxAttempts !== input.maxAttempts ||
+          !sameMemoryAttemptConfiguration(existing, input)
+        ) {
+          throw new AgentReplyBlockedError();
+        }
+        return { kind: "running_replay" as const, run: existing };
+      }
+      const latestAttemptNumber = Math.max(
+        ...this.recordedAiAttempts
+          .filter((attempt) => attempt.aiRunId === existing.id)
+          .map((attempt) => attempt.attemptNumber)
+      );
+      if (input.attemptNumber <= latestAttemptNumber) {
+        throw new AgentReplyBlockedError();
+      }
+      for (const attempt of this.recordedAiAttempts) {
+        if (
+          attempt.aiRunId === existing.id &&
+          attempt.status === "running" &&
+          attempt.attemptNumber < input.attemptNumber
+        ) {
+          attempt.status = "fenced";
+        }
+      }
+      const next = memoryRunningAiRun(existing.id, input);
+      this.recordedAiAttempts.push({
+        id: next.attempt.id,
+        aiRunId: next.id,
+        attemptNumber: next.attempt.attemptNumber,
+        ...(next.attempt.jobId ? { jobId: next.attempt.jobId } : {}),
+        jobAttemptCount: next.attempt.jobAttemptCount,
+        startedAt: next.attempt.startedAt,
+        status: "running"
+      });
+      Object.assign(existing, next);
+      return { kind: "started" as const, run: existing };
     }
 
-    const run: RunningAiRunRecord = {
-      ...input,
-      id: randomUUID(),
-      status: "running"
-    };
+    const run = memoryRunningAiRun(randomUUID(), input);
     this.recordedAiRuns.push(run);
+    this.recordedAiAttempts.push({
+      id: run.attempt.id,
+      aiRunId: run.id,
+      attemptNumber: run.attempt.attemptNumber,
+      ...(run.attempt.jobId ? { jobId: run.attempt.jobId } : {}),
+      jobAttemptCount: run.attempt.jobAttemptCount,
+      startedAt: run.attempt.startedAt,
+      status: "running"
+    });
 
     return { kind: "started" as const, run };
   }
@@ -323,10 +422,13 @@ export class MemoryIntakeRepository implements IntakeRepository {
       throw new Error("memory AI run completion unavailable");
     }
 
+    const failedTerminal = input.completion.status === "failed";
     const completed: TerminalAiRunRecord = {
       ...input.run,
-      ...input.completion
+      ...input.completion,
+      ...(failedTerminal ? {} : { winningAttemptId: input.run.attempt.id })
     };
+    this.setRecordedAttemptStatus(input.run, failedTerminal ? "failed" : "succeeded");
     const index = this.recordedAiRuns.findIndex((run) => run.id === input.run.id);
 
     if (index >= 0) {
@@ -338,6 +440,111 @@ export class MemoryIntakeRepository implements IntakeRepository {
     return completed;
   }
 
+  async failAttempt(input: {
+    run: RunningAiRunRecord;
+    completion: AiRunTerminalCompletion;
+  }): Promise<void> {
+    this.setRecordedAttemptStatus(input.run, "failed");
+    if (
+      input.run.attempt.maxAttempts !== undefined &&
+      input.run.attempt.jobAttemptCount >= input.run.attempt.maxAttempts
+    ) {
+      const index = this.recordedAiRuns.findIndex((run) => run.id === input.run.id);
+      if (index >= 0) {
+        this.recordedAiRuns[index] = {
+          ...input.run,
+          ...input.completion,
+          status: "failed"
+        };
+      }
+    }
+  }
+
+  async fenceAttempt(input: {
+    run: RunningAiRunRecord;
+    completion: AiRunTerminalCompletion;
+  }): Promise<void> {
+    void input.completion;
+    const attempt = this.recordedAiAttempts.find(
+      (candidate) => candidate.id === input.run.attempt.id
+    );
+    if (attempt?.status === "running") attempt.status = "fenced";
+  }
+
+  private setRecordedAttemptStatus(
+    run: RunningAiRunRecord,
+    status: "succeeded" | "failed" | "fenced"
+  ) {
+    const attempt = this.recordedAiAttempts.find((candidate) => candidate.id === run.attempt.id);
+    if (!attempt || attempt.status !== "running") {
+      throw new AgentReplyBlockedError();
+    }
+    attempt.status = status;
+  }
+
+  private assertCurrentJobAttemptForBegin(input: BeginAiRunInput): void {
+    if (!input.jobId) return;
+    const job = this.widgetAiJobs.get(input.jobId);
+    if (
+      input.maxAttempts === undefined ||
+      input.attemptNumber !== input.jobAttemptCount ||
+      !input.attemptIdempotencyKey.endsWith(`:attempt:${input.attemptNumber}`) ||
+      !job ||
+      job.status !== "processing" ||
+      job.attemptCount !== input.jobAttemptCount ||
+      job.maxAttempts !== input.maxAttempts ||
+      job.leadId !== input.leadId ||
+      job.conversationId !== input.conversationId ||
+      job.inboundPublicMessageId !== input.inboundMessageId ||
+      job.runtimeMode !== input.runtimeMode ||
+      !job.leaseExpiresAt ||
+      job.leaseExpiresAt <= input.startedAt
+    ) {
+      throw new AgentReplyBlockedError();
+    }
+  }
+
+  private finalizeTerminalAiRunForJob(
+    jobId: string,
+    jobAttemptCount: number,
+    completedAt: Date,
+    cause: "attempt_budget_exhausted" | "superseded"
+  ): void {
+    const attempts = this.recordedAiAttempts
+      .filter((attempt) => attempt.jobId === jobId)
+      .sort((left, right) => right.attemptNumber - left.attemptNumber);
+    const current = attempts.filter((attempt) => attempt.jobAttemptCount === jobAttemptCount);
+    if (current.length > 1) throw new AgentReplyBlockedError();
+    const attempt = current[0] ?? attempts[0];
+    if (!attempt) return;
+    if (attempt.status === "succeeded") throw new AgentReplyBlockedError();
+    const runIndex = this.recordedAiRuns.findIndex((run) => run.id === attempt.aiRunId);
+    const run = runIndex >= 0 ? this.recordedAiRuns[runIndex] : undefined;
+    if (!run || run.status !== "running") return;
+
+    if (attempt.status === "running") {
+      attempt.status = cause === "superseded" ? "fenced" : "failed";
+    }
+    const outcomeReason =
+      cause === "superseded" ? "execution_context_mismatch" : "generator_failed";
+    const failureCode =
+      cause === "superseded" ? "execution_context_mismatch" : "runtime_failure";
+    this.recordedAiRuns[runIndex] = {
+      ...run,
+      status: "failed",
+      normalizedAction: "no_reply",
+      outcomeReason,
+      failureCode,
+      validatorResult: "not_run",
+      observedModelProvider: "none",
+      sendGateResult: "not_checked",
+      completedAt,
+      latencyMs: Math.max(0, completedAt.getTime() - run.startedAt.getTime()),
+      spans: [],
+      qualityEvents: []
+    };
+  }
+
   async completeRecordedSiteWidgetAiNoReply(input: {
     run: RunningAiRunRecord;
     completion: AiRunTerminalCompletion;
@@ -346,11 +553,9 @@ export class MemoryIntakeRepository implements IntakeRepository {
     expectedGenerationEpoch?: number;
     respondsThroughSequence?: number;
     runtimeMode?: "direct_openai" | "mastra_openai_api";
-    jobCommit?: { jobId: string; attemptCount: number };
+    jobCommit?: { jobId: string; attemptCount: number; maxAttempts: number };
   }): Promise<TerminalAiRunRecord> {
-    const job = input.jobCommit
-      ? this.widgetAiJobs.get(input.jobCommit.jobId)
-      : undefined;
+    const job = input.jobCommit ? this.widgetAiJobs.get(input.jobCommit.jobId) : undefined;
 
     if (
       input.jobCommit &&
@@ -427,7 +632,6 @@ export class MemoryIntakeRepository implements IntakeRepository {
         job.terminalReason = memoryRecordedJobTerminalReason(input.completion);
         job.leaseExpiresAt = undefined;
       }
-
     } catch (error) {
       if (runIndex >= 0 && previousRun) {
         this.recordedAiRuns[runIndex] = previousRun;
@@ -446,6 +650,48 @@ export class MemoryIntakeRepository implements IntakeRepository {
     }
 
     return completed;
+  }
+
+  async failRecordedSiteWidgetAiAttempt(input: {
+    run: RunningAiRunRecord;
+    completion: AiRunTerminalCompletion;
+    inboundPublicMessageId: string;
+    expectedGenerationEpoch?: number;
+    respondsThroughSequence?: number;
+    runtimeMode?: "direct_openai" | "mastra_openai_api";
+    jobCommit?: { jobId: string; attemptCount: number; maxAttempts: number };
+  }): Promise<void> {
+    const job = input.jobCommit ? this.widgetAiJobs.get(input.jobCommit.jobId) : undefined;
+    if (
+      input.jobCommit &&
+      !this.isCurrentSiteWidgetAiJobAttempt({
+        jobId: input.jobCommit.jobId,
+        attemptCount: input.jobCommit.attemptCount,
+        leadId: input.run.leadId,
+        conversationId: input.run.conversationId,
+        inboundPublicMessageId: input.inboundPublicMessageId,
+        expectedGenerationEpoch: input.expectedGenerationEpoch,
+        respondsThroughSequence: input.respondsThroughSequence,
+        runtimeMode: input.runtimeMode ?? "direct_openai",
+        maxAttempts: input.jobCommit.maxAttempts
+      })
+    ) {
+      await this.fenceAttempt(input);
+      return;
+    }
+    await this.failAttempt(input);
+    if (input.jobCommit && job && input.jobCommit.attemptCount >= job.maxAttempts) {
+      job.status = "failed";
+      job.terminalReason = "worker_failed";
+      job.leaseExpiresAt = undefined;
+    }
+  }
+
+  fenceRecordedSiteWidgetAiAttempt(input: {
+    run: RunningAiRunRecord;
+    completion: AiRunTerminalCompletion;
+  }): Promise<void> {
+    return this.fenceAttempt(input);
   }
 
   async persistRecordedSiteWidgetAiReply(input: PersistRecordedSiteWidgetAiReplyInput) {
@@ -468,10 +714,12 @@ export class MemoryIntakeRepository implements IntakeRepository {
         requestFingerprint: input.requestFingerprint,
         expectedGenerationEpoch:
           input.expectedGenerationEpoch ??
-          this.conversationGenerationEpochs.get(input.run.conversationId) ?? 0,
+          this.conversationGenerationEpochs.get(input.run.conversationId) ??
+          0,
         respondsThroughSequence:
           input.respondsThroughSequence ??
-          this.conversationLatestVisitorSequences.get(input.run.conversationId) ?? 0,
+          this.conversationLatestVisitorSequences.get(input.run.conversationId) ??
+          0,
         runtimeMode: input.runtimeMode,
         jobCommit: input.jobCommit,
         body: input.reply.replyDraft,
@@ -555,8 +803,7 @@ export class MemoryIntakeRepository implements IntakeRepository {
         ? await this.completeRecordedSiteWidgetAiNoReply({
             run: input.run,
             completion,
-            publicConversationId:
-              this.conversationPublicIds.get(input.run.conversationId) ?? "",
+            publicConversationId: this.conversationPublicIds.get(input.run.conversationId) ?? "",
             inboundPublicMessageId: input.inboundPublicMessageId,
             expectedGenerationEpoch: input.expectedGenerationEpoch,
             respondsThroughSequence: input.respondsThroughSequence,
@@ -579,12 +826,10 @@ export class MemoryIntakeRepository implements IntakeRepository {
     run: RunningAiRunRecord;
     publicMessageId: string;
     idempotencyKey: string;
-    jobCommit?: { jobId: string; attemptCount: number };
+    jobCommit?: { jobId: string; attemptCount: number; maxAttempts: number };
   }) {
     this.widgetAiIdempotency.delete(input.idempotencyKey);
-    const committedJob = input.jobCommit
-      ? this.widgetAiJobs.get(input.jobCommit.jobId)
-      : undefined;
+    const committedJob = input.jobCommit ? this.widgetAiJobs.get(input.jobCommit.jobId) : undefined;
     if (
       committedJob?.status === "replied" &&
       committedJob.attemptCount === input.jobCommit?.attemptCount
@@ -746,7 +991,9 @@ export class MemoryIntakeRepository implements IntakeRepository {
     };
   }
 
-  async acceptInboundMessage(input: AcceptInboundMessageInput): Promise<AcceptInboundMessageResult> {
+  async acceptInboundMessage(
+    input: AcceptInboundMessageInput
+  ): Promise<AcceptInboundMessageResult> {
     if (input.channel === "site_widget") {
       const saved = await this.saveAcceptedSiteWidgetMessage({
         publicMessageId: input.publicMessageId,
@@ -859,13 +1106,19 @@ export class MemoryIntakeRepository implements IntakeRepository {
     const contentType = input.message.contentType ?? "text";
     const needsManager = Boolean(input.needsManagerReason) || contentType !== "text";
     const publicConversationId =
-      (conversationId ? this.conversationPublicIds.get(conversationId) : undefined) ??
-      randomUUID();
+      (conversationId ? this.conversationPublicIds.get(conversationId) : undefined) ?? randomUUID();
 
     if (!leadId || !conversationId || !lead) {
       leadId = randomUUID();
       conversationId = randomUUID();
-      lead = toManagerTelegramLead(input, leadId, conversationId, publicConversationId, channelIdentityId, now);
+      lead = toManagerTelegramLead(
+        input,
+        leadId,
+        conversationId,
+        publicConversationId,
+        channelIdentityId,
+        now
+      );
       if (needsManager && this.hasActiveManagerTelegramDestination(input.providerAccountId)) {
         lead = markTelegramNotificationPending(lead);
       }
@@ -984,11 +1237,10 @@ export class MemoryIntakeRepository implements IntakeRepository {
         throw new IdempotencyConflictError();
       }
 
-      const conversationId = this.sessionConversations.get(existing.publicSessionId) ?? randomUUID();
-      const publicConversationId =
-        this.conversationPublicIds.get(conversationId) ?? randomUUID();
-      const channelIdentityId =
-        this.conversationIdentityIds.get(conversationId) ?? randomUUID();
+      const conversationId =
+        this.sessionConversations.get(existing.publicSessionId) ?? randomUUID();
+      const publicConversationId = this.conversationPublicIds.get(conversationId) ?? randomUUID();
+      const channelIdentityId = this.conversationIdentityIds.get(conversationId) ?? randomUUID();
       const conversation = this.leads
         .get(existing.leadId)
         ?.conversations.find(
@@ -1010,24 +1262,27 @@ export class MemoryIntakeRepository implements IntakeRepository {
               })
             )
           : undefined) ?? this.widgetAiIdempotency.get(`ai:${existing.publicMessageId}`);
-      const replayAiTurnInput = buildMemorySiteWidgetAiTurnInput(input, {
-        publicConversationId,
-        publicMessageId: existing.publicMessageId,
-        agentAllowedToReply,
-        aiState
-      }, {
-        recentMessages: toMemoryAiRecentMessages(
-          conversation?.messages ?? [],
-          existing.publicMessageId
-        ),
-        rollingSummary: toMemoryAiRollingSummary(
-          conversation?.messages ?? [],
-          existing.publicMessageId
-        ),
-        persistedSlots: this.aiSlotsByConversation.get(conversationId) ?? {},
-        persistedRequirements:
-          this.aiRequirementsByConversation.get(conversationId) ?? []
-      });
+      const replayAiTurnInput = buildMemorySiteWidgetAiTurnInput(
+        input,
+        {
+          publicConversationId,
+          publicMessageId: existing.publicMessageId,
+          agentAllowedToReply,
+          aiState
+        },
+        {
+          recentMessages: toMemoryAiRecentMessages(
+            conversation?.messages ?? [],
+            existing.publicMessageId
+          ),
+          rollingSummary: toMemoryAiRollingSummary(
+            conversation?.messages ?? [],
+            existing.publicMessageId
+          ),
+          persistedSlots: this.aiSlotsByConversation.get(conversationId) ?? {},
+          persistedRequirements: this.aiRequirementsByConversation.get(conversationId) ?? []
+        }
+      );
 
       return {
         leadId: existing.leadId,
@@ -1042,8 +1297,10 @@ export class MemoryIntakeRepository implements IntakeRepository {
         aiState,
         replayed: true,
         turnIdentity: {
-          expectedGenerationEpoch: existingJob?.expectedGenerationEpoch ?? existing.expectedGenerationEpoch,
-          respondsThroughSequence: existingJob?.respondsThroughSequence ?? existing.respondsThroughSequence
+          expectedGenerationEpoch:
+            existingJob?.expectedGenerationEpoch ?? existing.expectedGenerationEpoch,
+          respondsThroughSequence:
+            existingJob?.respondsThroughSequence ?? existing.respondsThroughSequence
         },
         aiReply: aiReply
           ? {
@@ -1076,7 +1333,14 @@ export class MemoryIntakeRepository implements IntakeRepository {
       conversationId = randomUUID();
       const publicConversationId = randomUUID();
       const channelIdentityId = randomUUID();
-      lead = toManagerWidgetLead(input, leadId, conversationId, publicConversationId, channelIdentityId, now);
+      lead = toManagerWidgetLead(
+        input,
+        leadId,
+        conversationId,
+        publicConversationId,
+        channelIdentityId,
+        now
+      );
       this.leads.set(leadId, lead);
       this.sessionLeads.set(publicSessionId, leadId);
       this.sessionConversations.set(publicSessionId, conversationId);
@@ -1184,8 +1448,7 @@ export class MemoryIntakeRepository implements IntakeRepository {
           input.publicMessageId
         ),
         persistedSlots: this.aiSlotsByConversation.get(conversationId) ?? {},
-        persistedRequirements:
-          this.aiRequirementsByConversation.get(conversationId) ?? []
+        persistedRequirements: this.aiRequirementsByConversation.get(conversationId) ?? []
       }
     );
     let widgetAiJob: SiteWidgetAiJobSummary | undefined;
@@ -1196,6 +1459,12 @@ export class MemoryIntakeRepository implements IntakeRepository {
           previous.conversationId === conversationId &&
           (previous.status === "pending" || previous.status === "retrying")
         ) {
+          this.finalizeTerminalAiRunForJob(
+            previous.id,
+            previous.attemptCount,
+            new Date(now),
+            "superseded"
+          );
           previous.status = "superseded";
           previous.terminalReason = "newer_inbound";
         }
@@ -1210,7 +1479,10 @@ export class MemoryIntakeRepository implements IntakeRepository {
         publicInboundMessageId: input.publicMessageId,
         requestFingerprint: input.requestFingerprint
       });
-      const job: ClaimedSiteWidgetAiJob & { availableAt: Date; leaseExpiresAt?: Date } = {
+      const job: ClaimedSiteWidgetAiJob & {
+        availableAt: Date;
+        leaseExpiresAt?: Date;
+      } = {
         id: jobId,
         status: "pending",
         attemptCount: 0,
@@ -1269,7 +1541,12 @@ export class MemoryIntakeRepository implements IntakeRepository {
       throw new TelegramOutboundBlockedError();
     }
 
-    const { channel: _channel, provider: _provider, publicConversationId: _publicConversationId, ...siteWidgetInput } = input;
+    const {
+      channel: _channel,
+      provider: _provider,
+      publicConversationId: _publicConversationId,
+      ...siteWidgetInput
+    } = input;
     return this.saveSiteWidgetAiMessage(siteWidgetInput);
   }
 
@@ -1322,9 +1599,7 @@ export class MemoryIntakeRepository implements IntakeRepository {
       throw new AgentReplyBlockedError();
     }
 
-    const committedJob = input.jobCommit
-      ? this.widgetAiJobs.get(input.jobCommit.jobId)
-      : undefined;
+    const committedJob = input.jobCommit ? this.widgetAiJobs.get(input.jobCommit.jobId) : undefined;
 
     if (
       input.jobCommit &&
@@ -1389,9 +1664,7 @@ export class MemoryIntakeRepository implements IntakeRepository {
               agentAllowedToReply:
                 input.agentAllowedToReplyAfterSend ?? candidate.agentAllowedToReply,
               aiState:
-                input.agentAllowedToReplyAfterSend === false
-                  ? "needs_manager"
-                  : candidate.aiState,
+                input.agentAllowedToReplyAfterSend === false ? "needs_manager" : candidate.aiState,
               updatedAt: createdAt,
               messages: [
                 ...candidate.messages,
@@ -1486,8 +1759,7 @@ export class MemoryIntakeRepository implements IntakeRepository {
               aiRunId: input.inboundPublicMessageId,
               status: input.handoff ? "handoff" : "replied",
               verdict: input.aiRun.verifierVerdict,
-              generatorModelName:
-                input.aiRun.generatorModelName ?? input.aiRun.modelVersion,
+              generatorModelName: input.aiRun.generatorModelName ?? input.aiRun.modelVersion,
               verifierModelName: input.aiRun.verifierModelName,
               verifierVersion: input.aiRun.verifierVersion,
               catalogVersion: input.aiRun.catalogVersion,
@@ -1499,9 +1771,7 @@ export class MemoryIntakeRepository implements IntakeRepository {
     }
 
     if (input.requirementUpdates?.length) {
-      const requirements = [
-        ...(this.aiRequirementsByConversation.get(input.conversationId) ?? [])
-      ];
+      const requirements = [...(this.aiRequirementsByConversation.get(input.conversationId) ?? [])];
 
       for (const requirement of input.requirementUpdates) {
         const existingIndex = requirements.findIndex(
@@ -1564,8 +1834,7 @@ export class MemoryIntakeRepository implements IntakeRepository {
               aiRunId: input.inboundPublicMessageId,
               status: input.handoff ? "handoff" : "replied",
               verdict: input.aiRun.verifierVerdict,
-              generatorModelName:
-                input.aiRun.generatorModelName ?? input.aiRun.modelVersion,
+              generatorModelName: input.aiRun.generatorModelName ?? input.aiRun.modelVersion,
               verifierModelName: input.aiRun.verifierModelName,
               verifierVersion: input.aiRun.verifierVersion,
               catalogVersion: input.aiRun.catalogVersion,
@@ -1600,9 +1869,7 @@ export class MemoryIntakeRepository implements IntakeRepository {
     };
   }
 
-  async recordSiteWidgetAiDegradation(
-    input: RecordSiteWidgetAiDegradationInput
-  ): Promise<void> {
+  async recordSiteWidgetAiDegradation(input: RecordSiteWidgetAiDegradationInput): Promise<void> {
     const lead = this.leads.get(input.leadId);
     const publicSessionId = this.conversationSessions.get(input.conversationId);
 
@@ -1610,9 +1877,7 @@ export class MemoryIntakeRepository implements IntakeRepository {
       throw new Error("memory conversation not found for AI degradation");
     }
 
-    const committedJob = input.jobCommit
-      ? this.widgetAiJobs.get(input.jobCommit.jobId)
-      : undefined;
+    const committedJob = input.jobCommit ? this.widgetAiJobs.get(input.jobCommit.jobId) : undefined;
     if (
       input.jobCommit &&
       (!committedJob ||
@@ -1736,7 +2001,7 @@ export class MemoryIntakeRepository implements IntakeRepository {
     const job = Array.from(this.widgetAiJobs.values())
       .filter(
         (candidate) =>
-          ((candidate.status === "pending" || candidate.status === "retrying")
+          (candidate.status === "pending" || candidate.status === "retrying"
             ? candidate.availableAt <= input.now
             : candidate.status === "processing" &&
               Boolean(candidate.leaseExpiresAt && candidate.leaseExpiresAt <= input.now)) &&
@@ -1765,24 +2030,21 @@ export class MemoryIntakeRepository implements IntakeRepository {
     return structuredClone(job);
   }
 
-  async isSiteWidgetAiJobCurrent(input: {
-    jobId: string;
-    attemptCount: number;
-  }): Promise<boolean> {
+  async isSiteWidgetAiJobCurrent(input: { jobId: string; attemptCount: number }): Promise<boolean> {
     const job = this.widgetAiJobs.get(input.jobId);
 
     return Boolean(
       job &&
-        this.isCurrentSiteWidgetAiJobAttempt({
-          jobId: input.jobId,
-          attemptCount: input.attemptCount,
-          leadId: job.leadId,
-          conversationId: job.conversationId,
-          inboundPublicMessageId: job.inboundPublicMessageId,
-          expectedGenerationEpoch: job.expectedGenerationEpoch,
-          respondsThroughSequence: job.respondsThroughSequence,
-          runtimeMode: job.runtimeMode
-        })
+      this.isCurrentSiteWidgetAiJobAttempt({
+        jobId: input.jobId,
+        attemptCount: input.attemptCount,
+        leadId: job.leadId,
+        conversationId: job.conversationId,
+        inboundPublicMessageId: job.inboundPublicMessageId,
+        expectedGenerationEpoch: job.expectedGenerationEpoch,
+        respondsThroughSequence: job.respondsThroughSequence,
+        runtimeMode: job.runtimeMode
+      })
     );
   }
 
@@ -1797,6 +2059,23 @@ export class MemoryIntakeRepository implements IntakeRepository {
       job.leaseExpiresAt <= input.completedAt
     ) {
       return;
+    }
+
+    if (input.status === "failed" && input.attemptCount >= job.maxAttempts) {
+      this.finalizeTerminalAiRunForJob(
+        input.jobId,
+        input.attemptCount,
+        input.completedAt,
+        "attempt_budget_exhausted"
+      );
+    }
+    if (input.status === "superseded") {
+      this.finalizeTerminalAiRunForJob(
+        input.jobId,
+        input.attemptCount,
+        input.completedAt,
+        "superseded"
+      );
     }
 
     job.status = input.status;
@@ -1814,6 +2093,7 @@ export class MemoryIntakeRepository implements IntakeRepository {
     expectedGenerationEpoch?: number;
     respondsThroughSequence?: number;
     runtimeMode: "direct_openai" | "mastra_openai_api";
+    maxAttempts?: number;
   }): boolean {
     const job = this.widgetAiJobs.get(input.jobId);
     const publicSessionId = this.conversationSessions.get(input.conversationId);
@@ -1825,22 +2105,22 @@ export class MemoryIntakeRepository implements IntakeRepository {
 
     return Boolean(
       job &&
-        job.status === "processing" &&
-        job.attemptCount === input.attemptCount &&
-        job.leaseExpiresAt &&
-        job.leaseExpiresAt > now &&
-        job.leadId === input.leadId &&
-        job.conversationId === input.conversationId &&
-        job.inboundPublicMessageId === input.inboundPublicMessageId &&
-        job.expectedGenerationEpoch === input.expectedGenerationEpoch &&
-        job.respondsThroughSequence === input.respondsThroughSequence &&
-        job.runtimeMode === input.runtimeMode &&
-        this.conversationGenerationEpochs.get(job.conversationId) ===
-          input.expectedGenerationEpoch &&
-        this.conversationLatestVisitorSequences.get(job.conversationId) ===
-          input.respondsThroughSequence &&
-        conversation?.agentAllowedToReply &&
-        this.managerAiControl.enabled
+      job.status === "processing" &&
+      job.attemptCount === input.attemptCount &&
+      (input.maxAttempts === undefined || job.maxAttempts === input.maxAttempts) &&
+      job.leaseExpiresAt &&
+      job.leaseExpiresAt > now &&
+      job.leadId === input.leadId &&
+      job.conversationId === input.conversationId &&
+      job.inboundPublicMessageId === input.inboundPublicMessageId &&
+      job.expectedGenerationEpoch === input.expectedGenerationEpoch &&
+      job.respondsThroughSequence === input.respondsThroughSequence &&
+      job.runtimeMode === input.runtimeMode &&
+      this.conversationGenerationEpochs.get(job.conversationId) === input.expectedGenerationEpoch &&
+      this.conversationLatestVisitorSequences.get(job.conversationId) ===
+        input.respondsThroughSequence &&
+      conversation?.agentAllowedToReply &&
+      this.managerAiControl.enabled
     );
   }
 
@@ -2006,13 +2286,13 @@ export class MemoryIntakeRepository implements IntakeRepository {
     return updatedLead;
   }
 
-  async recordAiReviewLabel(
-    input: RecordAiReviewLabelInput
-  ): Promise<ManagerLeadDetail | null> {
+  async recordAiReviewLabel(input: RecordAiReviewLabelInput): Promise<ManagerLeadDetail | null> {
     const lead = this.leads.get(input.leadId);
 
-    if (!lead?.structuredIntake.verification ||
-        lead.structuredIntake.verification.aiRunId !== input.aiRunId) {
+    if (
+      !lead?.structuredIntake.verification ||
+      lead.structuredIntake.verification.aiRunId !== input.aiRunId
+    ) {
       return null;
     }
 
@@ -2712,13 +2992,12 @@ function toManagerWidgetLead(
   };
 }
 
-function toMemoryWidgetAiJobSummary(
-  job: ClaimedSiteWidgetAiJob
-): SiteWidgetAiJobSummary {
+function toMemoryWidgetAiJobSummary(job: ClaimedSiteWidgetAiJob): SiteWidgetAiJobSummary {
   return {
     id: job.id,
     status: job.status,
     attemptCount: job.attemptCount,
+    maxAttempts: job.maxAttempts,
     terminalReason: job.terminalReason,
     expectedGenerationEpoch: job.expectedGenerationEpoch,
     respondsThroughSequence: job.respondsThroughSequence,
@@ -2727,9 +3006,7 @@ function toMemoryWidgetAiJobSummary(
   };
 }
 
-function readMemoryCatalogReferences(
-  metadata: Record<string, unknown>
-): WidgetCatalogReference[] {
+function readMemoryCatalogReferences(metadata: Record<string, unknown>): WidgetCatalogReference[] {
   if (!Array.isArray(metadata.catalog_references)) {
     return [];
   }
@@ -2996,15 +3273,27 @@ function toMemoryAiQualityEvent(
   reason: string
 ): Pick<ManagerAiQualitySummary, "eventType" | "reasonCode" | "severity"> {
   if (reason === "missing_openai_config") {
-    return { eventType: "degradation", reasonCode: reason, severity: "warning" };
+    return {
+      eventType: "degradation",
+      reasonCode: reason,
+      severity: "warning"
+    };
   }
 
   if (reason === "model_error" || reason === "semantic_verifier_error") {
-    return { eventType: "model_failure", reasonCode: reason, severity: "critical" };
+    return {
+      eventType: "model_failure",
+      reasonCode: reason,
+      severity: "critical"
+    };
   }
 
   if (reason === "turn_timeout") {
-    return { eventType: "model_failure", reasonCode: reason, severity: "error" };
+    return {
+      eventType: "model_failure",
+      reasonCode: reason,
+      severity: "error"
+    };
   }
 
   if (
@@ -3012,7 +3301,11 @@ function toMemoryAiQualityEvent(
     reason === "unsafe_model_response" ||
     reason === "grounding_validation_failed"
   ) {
-    return { eventType: "policy_violation", reasonCode: reason, severity: "error" };
+    return {
+      eventType: "policy_violation",
+      reasonCode: reason,
+      severity: "error"
+    };
   }
 
   if (reason === "agent_reply_blocked") {
@@ -3020,7 +3313,11 @@ function toMemoryAiQualityEvent(
   }
 
   if (reason === "ai_persistence_unconfirmed") {
-    return { eventType: "runtime_failure", reasonCode: reason, severity: "critical" };
+    return {
+      eventType: "runtime_failure",
+      reasonCode: reason,
+      severity: "critical"
+    };
   }
 
   return {

@@ -69,6 +69,7 @@ export type SiteWidgetAiJobSummary = WidgetAiTurnIdentity & {
   id: string;
   status: SiteWidgetAiJobStatus;
   attemptCount: number;
+  maxAttempts: number;
   terminalReason?: string;
   runtimeMode?: "direct_openai" | "mastra_openai_api";
   queueWaitMs?: number;
@@ -111,6 +112,7 @@ export type RecordSiteWidgetAiDegradationInput = {
   jobCommit?: {
     jobId: string;
     attemptCount: number;
+    maxAttempts: number;
   };
 };
 
@@ -141,18 +143,13 @@ export interface PublicIntakeRepository {
   saveSiteWidgetAiMessage(
     input: SaveSiteWidgetAiMessageInput
   ): Promise<SaveSiteWidgetAiMessageResult>;
-  findSiteWidgetAiReply?(
-    inboundPublicMessageId: string
-  ): Promise<SiteWidgetStoredAiReply | null>;
+  findSiteWidgetAiReply?(inboundPublicMessageId: string): Promise<SiteWidgetStoredAiReply | null>;
   recordSiteWidgetAiDegradation?(input: RecordSiteWidgetAiDegradationInput): Promise<void>;
   getSiteWidgetHistory?(publicSessionId: string): Promise<SiteWidgetHistoryResult | null>;
   claimSiteWidgetAiJob?(input: {
     leaseMs: number;
     now: Date;
   }): Promise<ClaimedSiteWidgetAiJob | null>;
-  isSiteWidgetAiJobCurrent?(input: {
-    jobId: string;
-    attemptCount: number;
-  }): Promise<boolean>;
+  isSiteWidgetAiJobCurrent?(input: { jobId: string; attemptCount: number }): Promise<boolean>;
   finishSiteWidgetAiJob?(input: FinishSiteWidgetAiJobInput): Promise<void>;
 }
