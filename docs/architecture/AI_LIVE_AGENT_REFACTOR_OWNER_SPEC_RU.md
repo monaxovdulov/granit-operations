@@ -1,5 +1,14 @@
 # Итоговая оценка
 
+> **Актуализация 2026-08-06:** current-state описания и «Приоритет переделки»
+> ниже являются историческим baseline исходного owner review. PR0a—PR2 и
+> CONV-1—CONV-3A уже реализованы; Mastra runtime и executable `legacy_s05`
+> удалены. Текущий implementation order задают
+> `docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md` и её active card: CONV-4,
+> затем CONV-5 и общий teach-back. Сохраняются архитектурные инварианты этого
+> документа, но он не задаёт второй active roadmap и не описывает current
+> runtime без сверки с кодом на текущем SHA.
+
 В проекте хорошо сделана **операционная надёжность**:
 
 * входящее сообщение сохраняется до запуска ИИ;

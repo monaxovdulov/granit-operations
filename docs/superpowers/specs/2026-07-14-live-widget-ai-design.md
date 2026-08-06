@@ -1,14 +1,16 @@
 # Live Widget AI - ускоренный staging-only дизайн
 
-Status: owner-confirmed design; W0/G1Q/P2/P3/G4/M1/M2/G5/G6 passed; bounded M3 staging smoke in progress
+Status: historical/superseded design; not current runtime or sequencing authority
 Date: 2026-07-14
 Repo: `granit-operations`
-Related plan: `docs/tasks/AI_DIALOG_MASTRA_OBSERVABILITY_FIRST_SLICE_RU.md`
+Retired plan provenance: `docs/tasks/ARCHIVE_RU.md`
 
-Этот файл создан по brainstorming convention. Он не является cross-repo task/ADR и не заменяет
-owner-approved sequencing в `granit-plan-app`. Канонический проверяемый implementation plan для
-`granit-operations` находится по ссылке выше; отдельный W0 task должен быть создан в owning repo
-`granit-site-cms` после G0.
+Этот файл создан по brainstorming convention и сохраняется только как
+исторический design provenance. Его прежний внешний sequencing и Mastra-путь
+заменены repo-local `docs/source-of-truth.md` и активной Goal
+`docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md`; они определяют текущий runtime и
+порядок. Ссылка на archive выше ведёт к provenance удалённого task-плана, а не к
+действующей инструкции.
 
 ## Результат
 

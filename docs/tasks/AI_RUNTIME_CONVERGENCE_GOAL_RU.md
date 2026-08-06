@@ -1,6 +1,7 @@
 # Goal: AI Runtime Convergence и очистка репозитория
 
-Статус: `implementing`; Goal запущена 2026-08-04. Обязательный
+Статус: `implementing`; активный срез — CONV-4 по карточке
+`AI_REF_CONV_4_ACTIVE_DOCUMENTATION_RU.md`. Goal запущена 2026-08-04. Обязательный
 current-main repair PR2 получил свежий independent `accept` и опубликован
 в `origin/main` commit `ca1cdb798829674e40b4eab7e4e948476e71d61c`. CONV-1
 получил свежий independent `accept` и опубликован в `origin/main` commit
@@ -10,8 +11,8 @@ independent `accept` и опубликован в `origin/main` commit
 для attempt-scoped retry. CONV-3 получил независимый `accept` и опубликован в
 commit `8122a8ef44568d6b97dccee54dee074c4a1c4733`. Владелец выбрал более
 системную модель logical run + child attempt ledger и явно вставил CONV-3A
-перед CONV-4. Активный срез — planned CONV-3A по карточке
-`AI_RUNTIME_CONVERGENCE_CONV_3A_ATTEMPT_LEDGER_RU.md`.
+перед CONV-4. CONV-3A получил пятый independent `accept` и опубликован в
+`origin/main` commit `e4cfe371a96ff5a7a3262c19c02776a36d979936`.
 
 Goal ID: `AI-RUNTIME-CONVERGENCE`.
 
@@ -46,22 +47,25 @@ Goal ID: `AI-RUNTIME-CONVERGENCE`.
 
 ## 2. Почему Goal нужна
 
-Текущий код содержит архитектурный разрыв:
+Следующее описание фиксирует историческое состояние на старте Goal, до
+принятых CONV-1—CONV-3A; это не описание current runtime после commit
+`e4cfe371a96ff5a7a3262c19c02776a36d979936`:
 
 ```text
 direct_openai       -> legacy_s05
 mastra_openai_api   -> live_v2
 ```
 
-Mastra не владеет очередью, состоянием, send gate или persistence, поэтому не
-даёт уникальной системной возможности. Но live-v2 generator и часть проверок
-пока подключены через Mastra-mode. Простое удаление dependency уничтожит
-современный path вместе с ненужной оболочкой.
+В том baseline Mastra не владел очередью, состоянием, send gate или persistence
+и не давал уникальной системной возможности, но live-v2 generator и часть
+проверок были подключены через Mastra-mode. CONV-1—CONV-3 закрыли этот разрыв:
+current runtime один, direct и app-owned; Mastra dependency/runtime и executable
+`legacy_s05` удалены.
 
-В документации repo-local source of truth уже принят, но active task index всё
-ещё содержит много завершённых S01-S15, AI_DIALOG и Mastra-планов. Git history,
-release evidence и accepted ADR должны сохранить provenance без превращения
-всех старых планов в обязательный контекст новой сессии.
+До CONV-4 active task index всё ещё содержал много завершённых S01-S15,
+AI_DIALOG и Mastra-планов. Git history, release evidence и accepted ADR должны
+сохранить provenance без превращения всех старых планов в обязательный контекст
+новой сессии.
 
 ## 3. Источники истины
 
@@ -158,8 +162,8 @@ reasoning `medium` вместо ранее предложенной `gpt-5.6-sol
 слой проверок из-за этой замены не добавляется; применяются обычные критерии
 приёмки CONV-2, без неявной подмены на Sol.
 
-Точная compact card реализации:
-`docs/tasks/AI_RUNTIME_CONVERGENCE_CONV_2_TURN_CONTRACT_RU.md`.
+Retired compact card и publication provenance перечислены в
+`docs/tasks/ARCHIVE_RU.md`.
 
 Разрешено после отдельного owner stop-gate для точного output contract:
 
@@ -188,8 +192,8 @@ reasoning `medium` вместо ранее предложенной `gpt-5.6-sol
 
 ### CONV-3: Mastra и executable legacy removal
 
-Точная compact card реализации:
-`docs/tasks/AI_RUNTIME_CONVERGENCE_CONV_3_RUNTIME_REMOVAL_RU.md`.
+Retired compact card и publication provenance перечислены в
+`docs/tasks/ARCHIVE_RU.md`.
 
 Owner decision 2026-08-05: состояние `watching` остаётся reply-capable при
 `agentAllowedToReply=true`; явный manager takeover закрывает send gate.
@@ -230,8 +234,8 @@ Mastra и legacy_s05 paths.
 
 ### CONV-3A: Logical run и durable attempt ledger
 
-Точная compact card реализации:
-`docs/tasks/AI_RUNTIME_CONVERGENCE_CONV_3A_ATTEMPT_LEDGER_RU.md`.
+Retired compact card и publication provenance перечислены в
+`docs/tasks/ARCHIVE_RU.md`.
 
 Owner decision 2026-08-05: минимальная модель из migration `0021`, где каждая
 lease attempt является отдельным `ai_run`, заменяется versioned двухуровневой
@@ -268,6 +272,9 @@ ai_run_attempts  -> физические lease/model attempts, включая fa
 После independent `accept` автоматически перейти к CONV-4.
 
 ### CONV-4: Active documentation reduction
+
+Точная compact card реализации:
+`docs/tasks/AI_REF_CONV_4_ACTIVE_DOCUMENTATION_RU.md`.
 
 Один результат: новый агент получает обязательный AI-контекст из небольшого
 repo-local набора, а история остаётся доступной без участия в active routing.
@@ -414,18 +421,17 @@ docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md.
 Сначала прочитай AGENTS.md, README.md, docs/source-of-truth.md,
 docs/AGENT_WORKFLOW.md, AI refactor playbook, minimal Goal governance, ADR-012,
 owner architecture docs, эту Goal и
-docs/tasks/AI_RUNTIME_CONVERGENCE_CONV_3A_ATTEMPT_LEDGER_RU.md.
+docs/tasks/AI_REF_CONV_4_ACTIVE_DOCUMENTATION_RU.md.
 
 Фактическая опубликованная база передачи:
-1fb13c6e6ca743b06495a9a1740b33b5c810dfc8. Сначала заново проверь
-HEAD/origin/main, dirty tree, current schema, callers и FK/read consumers;
-`output/` не трогай. Начни только CONV-3A: один logical `ai_run` и отдельные
-durable `ai_run_attempts` по уже одобренной карточке. Не смешивай CONV-4,
-public contract, prompt/model/policy, deploy или платные вызовы.
+e4cfe371a96ff5a7a3262c19c02776a36d979936. Сначала заново проверь
+HEAD/origin/main, dirty tree, active-doc routes и inbound links; `output/` не
+трогай. Продолжи только CONV-4 по точному deletion allowlist карточки. Не
+изменяй code/schema/tests, accepted ADR/release evidence, public contract,
+prompt/model/policy, deploy или внешние repo.
 
-До рабочего кода уточни в карточке migration/backfill/atomic ownership. После
-technical_done остановись для свежего независимого Reviewer. Только после
-independent `accept` сделай понятный русский commit и обычный push; затем
-перейди к CONV-4. Субагенты/Multi-agent/Terra/Ultra, force-push и deploy
+После technical_done остановись для свежего независимого Reviewer. Только
+после independent `accept` сделай понятный русский commit и обычный push;
+затем перейди к CONV-5. Субагенты/Multi-agent/Terra/Ultra, force-push и deploy
 запрещены.
 ```

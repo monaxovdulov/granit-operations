@@ -4,7 +4,7 @@ Status: local_implementation_passed
 Date: 2026-07-15
 Repo: `granit-operations`
 Slice: P2 after accepted G1Q, before P3 and every Mastra dependency
-Task link: `docs/tasks/AI_DIALOG_OBSERVABILITY_P2_RU.md`
+Retired task provenance: `docs/tasks/ARCHIVE_RU.md`
 Implementation SHA: `c08128e6bdf3e1b8f859e6349b4d6fb626de1287`
 Parent SHA: `fa10c7c1b9c9ac092f2b991eeb9a5fbaf55caf1f`
 

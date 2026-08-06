@@ -4,7 +4,7 @@ Status: local_implementation_passed
 Date: 2026-07-14
 Repo: `granit-operations`
 Slice: P1 before Live Dialog Core P1Q
-Task link: `docs/tasks/AI_DIALOG_APP_TURN_BOUNDARY_P1_RU.md`
+Retired task provenance: `docs/tasks/ARCHIVE_RU.md`
 Implementation head: `84e61de`
 Contracts: `granit_ai_turn_input.stage_a.v1`, `granit_ai_turn_execution_context.v1`,
 `legacy_s05`

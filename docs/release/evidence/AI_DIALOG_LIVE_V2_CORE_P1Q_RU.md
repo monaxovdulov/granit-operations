@@ -4,8 +4,7 @@ Status: core_local_checks_passed; superseded for gate status by G1Q evidence; no
 Date: 2026-07-14
 Repo: `granit-operations`
 Slice: P1Q core before G1Q/P2
-Task link: `docs/tasks/AI_DIALOG_LIVE_V2_CORE_P1Q_RU.md`
-Facts review: `docs/tasks/AI_DIALOG_LIVE_V2_FACTS_P1Q_REVIEW_RU.md`
+Retired task and facts-review provenance: `docs/tasks/ARCHIVE_RU.md`
 Facts source audit: `docs/release/evidence/AI_DIALOG_P1Q_FACTS_SOURCE_AUDIT_RU.md`
 Successor G1Q evidence: `docs/release/evidence/AI_DIALOG_LIVE_V2_FACTS_G1Q_RU.md`
 Implementation commit: `78c9947`

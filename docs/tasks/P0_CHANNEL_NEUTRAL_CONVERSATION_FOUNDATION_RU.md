@@ -421,7 +421,8 @@ Telegram outbound block proof:
 Before coding:
 
 - `git status --short` and identify existing dirty files.
-- Read this doc, `docs/tasks/SERIOUS_AI_LAYER_RU.md`, `docs/AI_POLICY.md`, `docs/LEAD_LIFECYCLE.md`, `docs/contracts/widget-intake-contract.md`.
+- This record is historical; retired AI-plan provenance is in
+  `docs/tasks/ARCHIVE_RU.md`. Current work starts from `docs/source-of-truth.md`.
 - Read planning docs in `../../granit-plan-app/docs/tasks/P0_CHANNEL_NEUTRAL_CONVERSATION_FOUNDATION_RU.md`, `../../granit-plan-app/docs/PROJECT_STATUS_RU.md`, `../../granit-plan-app/docs/TASK_BOARD_RU.md`, and Telegram audit/review docs.
 
 After coding:

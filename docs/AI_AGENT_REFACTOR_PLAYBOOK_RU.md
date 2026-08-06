@@ -226,9 +226,13 @@ Per-slice учебные интервью отменены. Карточка с�
 доказательства, rollback и границу deploy. После этого Goal получает
 `understanding_verified` и может быть закрыта.
 
-## 12. Текущий roadmap
+## 12. Исторический umbrella roadmap
 
-Актуальный umbrella порядок:
+Этот порядок был исходным baseline. Текущий активный порядок задаётся Goal
+`docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md`: CONV-4, затем CONV-5 и общий
+Teach-back.
+
+Первоначальный umbrella порядок:
 
 ```text
 PR 0a -> PR 0b -> PR 0c -> PR 1 -> PR 2 -> PR 3 -> PR 4

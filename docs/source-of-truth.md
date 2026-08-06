@@ -22,7 +22,8 @@ The active decision hierarchy is:
 3. `docs/architecture/AI_LIVE_AGENT_REFACTOR_OWNER_SPEC_RU.md`;
 4. `docs/architecture/AI_REFACTOR_MINIMAL_GOAL_GOVERNANCE_RU.md`;
 5. `docs/AI_AGENT_REFACTOR_PLAYBOOK_RU.md`;
-6. the current compact `docs/tasks/AI_REF_*.md` card and exact-SHA evidence;
+6. `docs/tasks/AI_REF_CONV_4_ACTIVE_DOCUMENTATION_RU.md`, единственная active
+   AI-card, и exact-SHA evidence;
 7. current code, contracts, migrations and tests for factual implementation
    details not decided above.
 
@@ -48,14 +49,29 @@ public intake
   -> app-owned observability and manager controls
 ```
 
-`Mastra` is not the primary runtime or roadmap owner. The existing
-`mastra_openai_api` path is a bounded staging adapter only. It may not own
-business state, queue semantics, manager takeover, send gates, migrations or
-public contracts.
+Mastra dependency/runtime и executable `legacy_s05` path удалены принятым
+CONV-3. Единственный production assembly использует app-owned direct model
+boundary; возвращение второго runtime требует нового accepted ADR/owner gate.
 
-The active implementation order is `PR0a -> PR0b -> PR0c -> PR1 -> ... -> PR9`
-from `AI_REFACTOR_MINIMAL_GOAL_GOVERNANCE_RU.md`, not an older `S01-S15` AI
-delivery sequence.
+Активный порядок определяется Goal `AI-RUNTIME-CONVERGENCE`: сейчас CONV-4,
+затем CONV-5 и общий teach-back. PR0a—PR9, AI_DIALOG/Mastra и S01—S15 —
+исторические этапы, не active routing.
+
+## Active AI Route
+
+Новый агент читает только:
+
+1. корневой `README.md` и этот source map;
+2. ADR-010 и ADR-012;
+3. `AI_LIVE_AGENT_REFACTOR_FINAL_OWNER_REVIEW_RU.md` и
+   `AI_LIVE_AGENT_REFACTOR_OWNER_SPEC_RU.md`;
+4. `AI_REFACTOR_MINIMAL_GOAL_GOVERNANCE_RU.md` и
+   `AI_AGENT_REFACTOR_PLAYBOOK_RU.md`;
+5. `AI_RUNTIME_CONVERGENCE_GOAL_RU.md` и active card из
+   `docs/tasks/README.md`.
+
+Завершённые task records сведены в `docs/tasks/ARCHIVE_RU.md`; archive и Git
+history сохраняют provenance, но не расширяют обязательный контекст.
 
 The current customer-facing landing source is decided by
 `docs/adr/ADR-011-CUSTOMER_FACING_LANDING_SOURCE_RU.md`.

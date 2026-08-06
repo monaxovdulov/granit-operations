@@ -130,7 +130,7 @@ flowchart TD
 | Модуль | За что отвечает | Что может знать | Что не должен делать | Ключевые файлы |
 |---|---|---|---|---|
 | `apps/api/src/routes` | Маршруты HTTP, вебхук, проверка входа, коды ответа | URL, headers, cookies, body, текущего менеджера | Писать напрямую в БД, вызывать методы отправки Telegram, решать AI-policy | [public-intake.ts](../../apps/api/src/routes/public-intake.ts), [telegram.ts](../../apps/api/src/routes/telegram.ts), [manager.ts](../../apps/api/src/routes/manager.ts), [manager-auth.ts](../../apps/api/src/routes/manager-auth.ts) |
-| `apps/api/src/services` | Валидация публичных контрактов, нормализация Telegram update, запуск логики widget AI | Входные DTO, форму Telegram update, repository interface | Владеть schema, хранить бизнес-истину, отправлять Telegram-сообщения из вебхука | [public-widget-intake-service.ts](../../apps/api/src/services/public-widget-intake-service.ts), [telegram-bot-service.ts](../../apps/api/src/services/telegram-bot-service.ts), [widget-ai-service.ts](../../apps/api/src/services/widget-ai-service.ts) |
+| `apps/api/src/services` и AI-модуль | Валидация публичных контрактов, нормализация Telegram update, запуск логики widget AI | Входные DTO, форму Telegram update, repository interface | Владеть schema, хранить бизнес-истину, отправлять Telegram-сообщения из вебхука | [public-widget-intake-service.ts](../../apps/api/src/services/public-widget-intake-service.ts), [telegram-bot-service.ts](../../apps/api/src/services/telegram-bot-service.ts), [grounded-widget-ai-service.ts](../../apps/api/src/modules/ai/services/grounded-widget-ai-service.ts) |
 | `apps/api/src/repositories` | Переходы состояния и сохранение в БД | Транзакции, idempotency, таблицы, события таймлайна | Знать Fastify `request/reply`, cookies, Telegram/OpenAI clients | [intake-repository.ts](../../apps/api/src/repositories/intake-repository.ts), [postgres-intake-repository.ts](../../apps/api/src/repositories/postgres-intake-repository.ts) |
 | `packages/db` | Таблицы, индексы, миграции, DB connection | Структуру Postgres | HTTP/UI/provider logic | [schema.ts](../../packages/db/src/schema.ts), [0006](../../packages/db/migrations/0006_p0_channel_neutral_conversation.sql), [0007](../../packages/db/migrations/0007_telegram_manager_mini_panel.sql), [0009](../../packages/db/migrations/0009_telegram_delivery_processing_uncertain.sql) |
 | `apps/manager/src` | Панель менеджера: список заявок, карточка, статусы, takeover, token привязки Telegram | Форму ответов manager API и локальное UI state | Писать в БД напрямую, вызывать Telegram Bot API, хранить каноническое состояние | [App.tsx](../../apps/manager/src/App.tsx), [api.ts](../../apps/manager/src/api.ts), [types.ts](../../apps/manager/src/types.ts) |
@@ -265,7 +265,8 @@ flowchart TD
 - Production supervised scheduler sign-off; rootless staging timer smoke passed, but no production timer is approved by this document.
 - Scheduler/systemd/deploy для отправщика `manager_notification_outbox`.
 - Backup/restore/rollback proof.
-- Закрытие G01-G17 из [23-production-ready-first-release.md](/home/devuser/ai-projects/granit-plan-app/ai-agent-stack-wiki/wiki/23-production-ready-first-release.md).
+- Выполнение текущего repo-local
+  [staging go-live readiness](../tasks/STAGING_GO_LIVE_READINESS_RU.md).
 - Явное подтверждение владельца и ответственного за релиз.
 
 Что нельзя считать готовым:

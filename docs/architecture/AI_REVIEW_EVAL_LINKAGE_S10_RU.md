@@ -3,16 +3,16 @@
 Status: forward contract only; no S10 tables, mutation API or promotion UI in P3
 Date: 2026-07-15
 Repo: `granit-operations`
-Authority: `docs/tasks/AI_DIALOG_MASTRA_OBSERVABILITY_FIRST_SLICE_RU.md`
+Authority: ADR-010, current schema/code and active AI Goal; retired plan is
+indexed in `docs/tasks/ARCHIVE_RU.md`
 
 ## Назначение
 
 Будущие review labels и eval cases должны ссылаться на durable app-owned evidence из P2/P3, не
 копировать raw transcript/provider payload и не зависеть от short-lived spans.
 
-В старом `SERIOUS_AI_LAYER_RU.md` review loop мог называться S11. В текущем authoritative plan
-этот будущий этап называется S10; это один и тот же будущий контур, а не разрешение реализовать
-два разных workflow.
+В retired plan review loop мог называться S11. Здесь S10 означает тот же
+будущий контур, а не разрешение реализовать два разных workflow.
 
 ## Обязательные ссылки
 

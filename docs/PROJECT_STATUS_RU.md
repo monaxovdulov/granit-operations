@@ -27,10 +27,10 @@
 6. Telegram outbound delivery sender accepted after controlled staging smoke for manager-authored replies.
 7. Telegram manager reply worker accepted after local checks and controlled staging worker smoke.
 8. Telegram supervised scheduler passed staging smoke as `systemctl --user` timer + one-shot + Postgres advisory lock: migration applied, lock busy/uncertain/stop/restart/no-resend checked.
-9. AI roadmap PR0a-PR2 реализовал real PostgreSQL harness, canonical AI
-   migrations, bounded hotfixes, turn identity/commit fence и latest-wins fresh
-   context на app-owned durable queue. Direct runtime остаётся default; Mastra
-   ограничен bounded staging adapter ролью.
+9. AI roadmap PR0a-PR2 и CONV-1—CONV-3A реализовал real PostgreSQL harness,
+   turn identity/commit fence, latest-wins fresh context, один direct runtime и
+   logical run/attempt ledger. Mastra dependency/runtime и executable
+   `legacy_s05` удалены.
 
 Что это означает: путь "менеджер написал ответ -> Postgres delivery state -> Telegram sendMessage -> sent/retrying/failed/blocked status" проверен для manager-authored replies. Это не approval для Telegram AI outbound и не production approval.
 
@@ -42,7 +42,7 @@
 | Manager auth/UI/status history / S02-S03 | `accepted for staging acceleration` | `docs/release/evidence/S02_MANAGER_AUTH_YANDEX_RU.md`, `docs/release/evidence/S03_MANAGER_UI_MANTINE_RU.md`, `docs/release/evidence/S03_MIN_LIFECYCLE_RU.md` |
 | Website widget baseline / S04-S06 | `audited/staging evidence` | `docs/release/evidence/S04_WIDGET_PERSISTENCE_RU.md`, `docs/release/evidence/S05_WEBSITE_SAFE_AI_RU.md`, `docs/release/evidence/S06_MANAGER_TAKEOVER_RU.md` |
 | Customer-facing staging feature baseline | `accepted as current feature baseline; smoke pending` | `docs/release/evidence/STAGING_FEATURE_BASELINE_20260803_RU.md` |
-| AI refactor PR0a-PR2 | `PR0a-PR1 accepted; PR2 merged with independent evidence gap recorded` | `docs/tasks/AI_REF_PR2_LATEST_WINS_FRESH_TURN_RU.md` |
+| AI refactor / runtime convergence | `PR0a-PR2 and CONV-1—CONV-3A accepted/published; CONV-4 active` | `docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md` |
 | P0 channel-neutral conversation | `merged into main` | `docs/release/evidence/P0_CHANNEL_NEUTRAL_CONVERSATION_FOUNDATION_RU.md` |
 | Telegram inbound + manager mini-panel | `reviewed locally; staging prep accepted` | `docs/release/evidence/TELEGRAM_INBOUND_MANAGER_MINI_PANEL_RU.md` |
 | Telegram manual delivery sender | `accepted after controlled staging smoke` | `docs/release/evidence/TELEGRAM_OUTBOUND_DELIVERY_SENDER_RU.md` |
@@ -53,8 +53,8 @@
 
 1. Не включать Telegram AI outbound. Текущий scheduler проверяет только ответы менеджера.
 2. Не включать `manager_notification_outbox` sender внутри этого решения; это отдельный scope.
-3. Закрыть независимую evidence для PR2, затем выполнять PR3
-   `ModelTurnOutput -> ValidatedTurnPlan -> CommittedTurn` по repo-local roadmap.
+3. Завершить CONV-4 active documentation reduction, затем CONV-5 guardrails по
+   active Goal.
 4. Production остается заблокирован до G01-G17, backup/restore, rollback evidence, monitoring/watch policy and explicit owner sign-off.
 
 ## Блокеры
@@ -82,7 +82,8 @@
 - Supervised scheduler ADR: `docs/adr/ADR-003-TELEGRAM-MANAGER-REPLY-SUPERVISED-SCHEDULER_RU.md`
 - Supervised scheduler runbook: `docs/runbooks/TELEGRAM_MANAGER_REPLY_SUPERVISED_SCHEDULER_RU.md`
 - Repo-local source of truth: `docs/source-of-truth.md`
-- Current AI roadmap: `docs/architecture/AI_REFACTOR_MINIMAL_GOAL_GOVERNANCE_RU.md`
+- Current AI roadmap: `docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md`
+- AI Goal governance: `docs/architecture/AI_REFACTOR_MINIMAL_GOAL_GOVERNANCE_RU.md`
 - Repo-local authority ADR: `docs/adr/ADR-012-REPO_LOCAL_AI_SOURCE_OF_TRUTH_RU.md`
-- AI boundary Stage A task: `docs/tasks/AI_DIALOG_BOUNDARY_STAGE_A_RU.md`
+- Retired AI task plans: `docs/tasks/ARCHIVE_RU.md`
 - AI boundary Stage A evidence: `docs/release/evidence/AI_DIALOG_BOUNDARY_STAGE_A_RU.md`

@@ -4,7 +4,7 @@ Status: accepted
 Date: 2026-07-14
 Repo: `granit-operations`
 Slice: G0 / P0 acceptance-record slice
-Task link: `docs/tasks/AI_DIALOG_MASTRA_OBSERVABILITY_FIRST_SLICE_RU.md`
+Retired task provenance: `docs/tasks/ARCHIVE_RU.md`
 Contract/version: `site_widget.v1`
 
 ## Решение

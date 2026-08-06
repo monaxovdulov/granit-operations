@@ -4,7 +4,7 @@ Status: local_implementation_passed
 Date: 2026-05-29
 Repo: `granit-operations`
 Slice: AI dialog risk reduction Stage A
-Task link: `docs/tasks/AI_DIALOG_BOUNDARY_STAGE_A_RU.md`
+Retired task provenance: `docs/tasks/ARCHIVE_RU.md`
 Contract/version: `granit_ai_turn_input.stage_a.v1`
 
 ## Что Проверяли

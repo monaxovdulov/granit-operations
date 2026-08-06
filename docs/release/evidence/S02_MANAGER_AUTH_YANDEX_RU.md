@@ -4,7 +4,7 @@ Status: accepted_staging_owner_checked
 Date: 2026-05-12
 Repo: `granit-operations`
 Slice: S02
-Task link: `docs/tasks/S02_MANAGER_AUTH_YANDEX_RU.md`
+Retired task provenance: `docs/tasks/ARCHIVE_RU.md`
 Contract/version: manager auth backend slice
 
 Update 2026-05-13: `/manager` is explicitly treated as a public static login
@@ -83,7 +83,7 @@ S02 auth is accepted for continuing to S04. This is not production approval.
 ## Blockers / Watch Items
 
 - Temporary Fastify HTML shell was replaced by the React/Vite/Mantine app in
-  `docs/tasks/S03_MANAGER_UI_MANTINE_RU.md`.
+  `docs/release/evidence/S03_MANAGER_UI_MANTINE_RU.md`.
 - Keep `X-Robots-Tag: noindex, nofollow` while staging is not production-approved.
 - Owner browser login check after the latest rebuild passed. API smoke also
   covered the protected session behavior.

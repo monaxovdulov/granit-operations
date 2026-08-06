@@ -23,7 +23,7 @@ enabling Mastra in the application:
 
 The full dated source analysis, package integrity, network/storage defaults, telemetry opt-outs
 and G6 re-check obligation are in
-`docs/tasks/AI_DIALOG_MASTRA_G4_REVIEW_RU.md`.
+the retired review task indexed in `docs/tasks/ARCHIVE_RU.md`.
 
 ## Locked artifacts
 

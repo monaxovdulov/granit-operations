@@ -63,9 +63,9 @@ Adding a manager in the first release is done by owner request to Codex/admin. A
 
 ## Links
 
-- Task: `docs/tasks/S01_PROVIDER_EVIDENCE_REVIEW_SIGNOFF_RU.md`
+- Retired S01 task provenance: `docs/tasks/ARCHIVE_RU.md`
 - Evidence: `docs/release/evidence/S01_PUBLIC_INTAKE_PROVIDER_RU.md`
 - Manager auth plan: `docs/MANAGER_AUTH_YANDEX_RU.md`
-- Manager auth task: `docs/tasks/S02_MANAGER_AUTH_YANDEX_RU.md`
+- Manager auth evidence: `docs/release/evidence/S02_MANAGER_AUTH_YANDEX_RU.md`
 - Site staging task: `../../../granit-site-cms/docs/tasks/STAGING_DEPLOY_FOR_NEO.md`
 - Source-of-truth docs: `../../../granit-plan-app/ai-agent-stack-wiki/wiki/19-system-boundaries.md`

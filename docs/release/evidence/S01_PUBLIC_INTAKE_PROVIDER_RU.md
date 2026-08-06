@@ -6,8 +6,7 @@ Repo: `granit-operations`
 Slice: S01
 Task links:
 
-- [Provider evidence review sign-off](../../tasks/S01_PROVIDER_EVIDENCE_REVIEW_SIGNOFF_RU.md)
-- [Reviewable chunks and checks](../../tasks/S01_REVIEWABLE_CHUNKS_AND_CHECKS_RU.md)
+- Retired S01 task provenance: [archive index](../../tasks/ARCHIVE_RU.md)
 - [Public intake contract](../../PUBLIC_INTAKE_CONTRACT.md)
 - [S01 form intake](../../S01_FORM_INTAKE.md)
 - [Provider contract detail](../../contracts/public-intake-contract.md)
@@ -63,7 +62,7 @@ Contract/version: `site_form.v1`
 ## Blockers / Watch Items
 
 - This evidence is accepted only as S01 staging/review evidence, not production approval.
-- Dirty API/db/package/governance changes are split in `docs/tasks/S01_REVIEWABLE_CHUNKS_AND_CHECKS_RU.md` and still need separate review/commit decisions.
+- The former dirty-tree split is historical and indexed in `docs/tasks/ARCHIVE_RU.md`.
 - Backup/restore/rollback proof belongs to a later production release gate unless explicitly scoped.
 
 ## Sign-Off

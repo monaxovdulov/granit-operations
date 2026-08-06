@@ -4,7 +4,7 @@ Status: passed; exact owner acceptance recorded; 15-row repo snapshot verified; 
 Date: 2026-07-14
 Repo: `granit-operations`
 Gate: G1Q
-Source review: `docs/tasks/AI_DIALOG_LIVE_V2_FACTS_P1Q_REVIEW_RU.md`
+Retired source-review task: `docs/tasks/ARCHIVE_RU.md`
 Source audit: `docs/release/evidence/AI_DIALOG_P1Q_FACTS_SOURCE_AUDIT_RU.md`
 Implementation commit: `1d737e0b8a055bd5ff313584540d30d4cc85be0a`
 

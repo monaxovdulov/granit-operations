@@ -1,9 +1,13 @@
 # Widget Intake Contract
 
-Status: Consult-first Stage B additive AI dialog
+Status: current `site_widget.v2` durable async contract; later sections retain
+historical S04/S05/consult-first provenance
 Provider: `granit-operations`
-Consumer: `granit-site-cms`
-Versions: `site_widget.v1` (legacy synchronous), `site_widget.v2` (durable async)
+Current browser integration / paired-smoke target: `landing-granit-static`.
+`granit-site-cms` is a historical/future CMS consumer, not the current landing
+source.
+Supported version: `site_widget.v2` (durable async). `site_widget.v1` is retired
+and rejected before persistence with `unsupported_schema_version`.
 
 ## Flow
 
@@ -28,7 +32,6 @@ POST /public/intake/site-widget/messages
 
 The endpoint accepts:
 
-- `schema_version: "site_widget.v1"` for backwards-compatible synchronous callers;
 - `schema_version: "site_widget.v2"` for immediate durable acknowledgement and history polling;
 - `event_type: "site_widget.message_submitted"`;
 - source channel `site_widget`.
@@ -54,7 +57,11 @@ Public success may be returned only after all S04 state is accepted and persiste
 - `conversation_messages`;
 - manager timeline event.
 
-For `site_widget.v2`, an eligible `widget_ai_jobs` row and the complete bounded AI-turn input are inserted in that same transaction. The client-supplied `submitted_at` is replaced by an authoritative server timestamp before persistence and acknowledgement.
+For `site_widget.v2`, an eligible `widget_ai_jobs` row and its response-window
+identity are inserted in that same transaction. The worker assembles the bounded
+AI-turn input from authoritative fresh persisted state after claim; the job does
+not persist a turn snapshot. The client-supplied `submitted_at` is replaced by
+an authoritative server timestamp before persistence and acknowledgement.
 
 ## V2 Async Response
 
@@ -75,12 +82,13 @@ Allowed public response fields:
 - `schema_version`;
 - `status: "accepted" | "replayed"`;
 - `public_session_id`;
+- `public_conversation_id`;
 - `public_message_id`;
+- authoritative `submitted_at`;
 - `action: "show_widget_saved"`;
-- `automation.status: "disabled" | "fallback" | "replied"`;
-- for `automation.status: "replied"`, only public AI message id and safe reply text;
-- for `automation.status: "replied"`, `conversation_state: "ai_active" | "manager_pending"`;
-- for `automation.status: "fallback"`, a public fallback reason without raw provider/internal errors;
+- `automation.status: "processing" | "disabled" | "replied" | "degraded" | "manager_pending"`;
+- only the status-specific `next_step`, `conversation_state`, bounded
+  `poll_after_ms` or allowlisted public reason defined by the v2 schema;
 - safe localized `message_to_user`.
 
 Forbidden public response fields:
@@ -103,7 +111,7 @@ Forbidden public response fields:
 - final price/date/warranty promises;
 - direct site access to operations database or manager APIs.
 
-## S05 AI Addendum
+## S05 Historical AI Addendum
 
 AI remains server-side in `granit-operations`; `OPENAI_API_KEY` is never exposed to the public site.
 

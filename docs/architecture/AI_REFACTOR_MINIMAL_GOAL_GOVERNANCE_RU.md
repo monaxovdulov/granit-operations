@@ -2,11 +2,17 @@
 
 Статус: принят владельцем 2026-08-03
 
+Актуализация 2026-08-06: правила одной Goal, одного среза и независимой приёмки
+остаются действующими. Первоначальный roadmap PR0a—PR9 ниже является
+историческим baseline. Текущий порядок задаёт Goal
+`docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md`: CONV-4, затем CONV-5 и общий
+Teach-back.
+
 Репозиторий: `granit-operations`
 
-Заменяет ежедневный шестиролевой процесс из
-`AI_REFACTOR_AGENT_GOVERNANCE_DESIGN_RU.md`. Старый документ остаётся
-исследовательским provenance.
+Заменяет ежедневный шестиролевой governance-v1. Старый design удалён из
+active tree в CONV-4; его исследовательский provenance остаётся в Git history
+и `docs/tasks/ARCHIVE_RU.md`.
 
 ## 1. Решение владельца
 
@@ -16,7 +22,7 @@
 Активная Goal:
 
 - thread ID: `019fc912-6005-73f2-ba46-ccb40eb26334`;
-- порядок: `PR0a -> PR0b -> PR0c -> PR1 -> ... -> PR9`;
+- первоначальный порядок: `PR0a -> PR0b -> PR0c -> PR1 -> ... -> PR9`;
 - один технически активный срез;
 - автоматический переход к следующему после независимого `accept`;
 - общий teach-back после завершения roadmap.
@@ -159,7 +165,7 @@ migration strategy или roadmap.
 указанного среза. Красная обязательная проверка, `needs_redesign` или один из
 стоп-гейтов блокируют переход.
 
-## 10. Текущий roadmap Goal
+## 10. Исторический roadmap исходной Goal
 
 ```text
 PR 0a  real PostgreSQL baseline

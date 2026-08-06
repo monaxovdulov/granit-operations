@@ -4,7 +4,7 @@ Status: technical checks passed; preview deployed; production not approved
 Date: 2026-07-14
 Repo: `granit-operations` (cross-repo evidence index)
 Slice: W0 parallel consumer lane
-Task link: `docs/tasks/AI_DIALOG_MASTRA_OBSERVABILITY_FIRST_SLICE_RU.md`
+Retired task provenance: `docs/tasks/ARCHIVE_RU.md`
 Contract: unchanged `site_widget.v1`
 
 ## Что Проверяли

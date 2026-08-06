@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
   "repo": "granit-operations",
-  "updated_at": "2026-08-06T03:01:00Z",
-  "git_head": "1fb13c6e6ca743b06495a9a1740b33b5c810dfc8",
+  "updated_at": "2026-08-06T05:55:00Z",
+  "git_head": "e4cfe371a96ff5a7a3262c19c02776a36d979936",
   "mode": "implementation",
-  "state": "ai_runtime_convergence_conv3a_attempt_ledger_accepted_pending_publish",
+  "state": "ai_runtime_convergence_conv4_active_documentation_accepted_pending_publish",
   "dirty_worktree": {
-    "status": "conv3a_accepted_uncommitted",
-    "summary": "Fifth fresh independent review accepted the stable CONV-3A diff without findings; publication is pending; output/ remains untouched"
+    "status": "conv4_documentation_cleanup_accepted_uncommitted",
+    "summary": "Third fresh independent review accepted the stable CONV-4 docs/state diff without findings; publication is pending and output/ remains untouched"
   },
   "context": {
     "last_scan_at": "2026-08-04T23:37:25Z",
@@ -19,9 +19,9 @@
     "last_refresh_at": "2026-08-04T23:37:25Z"
   },
   "task": {
-    "type": "ai-runtime-convergence-conv3a",
-    "summary": "Separate one logical AI run from durable lease/model attempts before documentation cleanup.",
-    "source": "docs/tasks/AI_RUNTIME_CONVERGENCE_CONV_3A_ATTEMPT_LEDGER_RU.md; Goal remains docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md",
+    "type": "ai-runtime-convergence-conv4",
+    "summary": "Reduce active AI documentation to one repo-local route while preserving unique owner decisions and historical provenance.",
+    "source": "docs/tasks/AI_REF_CONV_4_ACTIVE_DOCUMENTATION_RU.md; Goal remains docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md",
     "owner_decisions": {
       "conv2_runtime_model": {
         "decided_at": "2026-08-05",
@@ -114,6 +114,57 @@
       "fingerprint": "a2f0bc2a2420aad7b5813c1aa9e313adc82960952f5d91e8a0473977cd82304c",
       "reason": "fresh read-only Code Scout found no blocker, high, medium or low findings across failed/winner semantics, immutable replay, job identity, concurrency, migrations/FKs, privacy and false-green tests; independent test execution was unavailable because the read-only temp filesystem rejected Vitest/typecheck scratch directories"
     },
+    "conv3a_publication": {
+      "commit": "e4cfe371a96ff5a7a3262c19c02776a36d979936",
+      "remote_main": "e4cfe371a96ff5a7a3262c19c02776a36d979936",
+      "status": "published",
+      "reason": "ordinary fast-forward push after origin/main remained at the reviewed base; output/, force-push, deploy and external migration were not used"
+    },
+    "conv4_executor_evidence": {
+      "status": "technical_done",
+      "base_head": "e4cfe371a96ff5a7a3262c19c02776a36d979936",
+      "fingerprint": "c21bea7ff95a7913c6f3857031532039203dff68772f82e0b413ac8d5deae4d8",
+      "scope": "docs/state only; 30 exact allowlisted deletions plus active-route, archive and inbound-link repairs",
+      "reason": "docs/tasks 48 to 21; 128 Markdown files have no broken relative links; one AI_REF card remains; active set has no external planning authority; accepted ADR/evidence and executable files were not deleted or changed; diff check and state JSON parse passed"
+    },
+    "conv4_first_independent_review": {
+      "session_id": "019fd506-07b6-7712-a6f3-8651a5de43b0",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "high",
+      "status": "changes_requested",
+      "fingerprint": "c21bea7ff95a7913c6f3857031532039203dff68772f82e0b413ac8d5deae4d8",
+      "reason": "found stale deleted CONV-3A source in machine state, conflicting active roadmap/runtime wording, unique PR0B/PR2 owner decisions missing from canonical provenance, and a historical design still phrased as current"
+    },
+    "conv4_repair_evidence": {
+      "status": "technical_done",
+      "base_head": "e4cfe371a96ff5a7a3262c19c02776a36d979936",
+      "fingerprint": "8ef621241878d6fb71d2977dea3bf0cdd0511c887b5064bcc6b9a34a8a2a5861",
+      "scope": "docs/state only; same 30 exact allowlisted deletions plus four reviewer-requested routing/provenance repairs",
+      "reason": "machine state routes to CONV-4; active authorities reconcile current Goal and removed Mastra; PR0B/PR2 owner decisions and v2 contract narrative are preserved; 128 Markdown files have zero broken repo-local links; exact deletion, scope, JSON and diff checks passed"
+    },
+    "conv4_second_independent_review": {
+      "session_id": "019fd517-2329-7d60-b6d8-10bf5afd6d03",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "high",
+      "status": "changes_requested",
+      "fingerprint": "8ef621241878d6fb71d2977dea3bf0cdd0511c887b5064bcc6b9a34a8a2a5861",
+      "reason": "found remaining historical PR0a-PR9 and Mastra wording in mandatory owner docs and Goal, stale granit-site-cms paired-smoke routing, and a false persisted turn-snapshot claim in the current widget v2 contract"
+    },
+    "conv4_second_repair_evidence": {
+      "status": "technical_done",
+      "base_head": "e4cfe371a96ff5a7a3262c19c02776a36d979936",
+      "fingerprint": "c89b49a847bf45813d3708bde8cd26ca60e4982fafe85f047a612f957c4fba76",
+      "scope": "docs/state only; same 30 exact allowlisted deletions plus owner-doc, consumer-routing and fresh-turn narrative reconciliation",
+      "reason": "both owner docs explicitly mark their baseline and PR0a-PR9 roadmap historical; Goal marks pre-CONV runtime diagnosis historical; current contracts route paired smoke to landing-granit-static and describe response-window identity plus fresh post-claim turn assembly; exact deletion/reference, 128-file link, scope, diff and JSON checks passed"
+    },
+    "conv4_third_independent_review": {
+      "session_id": "019fd523-6f6f-7741-9133-3556d176c55e",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "high",
+      "status": "accepted",
+      "fingerprint": "c89b49a847bf45813d3708bde8cd26ca60e4982fafe85f047a612f957c4fba76",
+      "reason": "fresh read-only Code Scout found no blocker, high, medium or low findings; independently confirmed exact base/stat/fingerprint/allowlist, one active AI card, archive provenance, active authority, current consumer routing, executable v2/fresh-turn semantics, false-green link checks, docs-only scope, diff check and JSON parse"
+    },
     "independent_review": {
       "session_id": "019fcf04-8f4c-7663-a4f9-91376542cf42",
       "status": "accepted",
@@ -194,5 +245,5 @@
       "reason": "ordinary fast-forward push from the reviewed b678a37 base; force-push, deploy and external runtime activation were not used"
     }
   },
-  "next_action": "Recheck origin/main, stage only the explicit CONV-3A file set excluding output/, commit in Russian, push by ordinary fast-forward, then continue CONV-4."
+  "next_action": "Fetch and recheck origin/main, stage only the accepted CONV-4 docs/state diff excluding output/, commit in Russian, push by ordinary fast-forward, then continue CONV-5."
 }

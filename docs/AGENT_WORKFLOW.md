@@ -6,7 +6,8 @@ Repo role: intake API, manager workflow, Postgres operational state, app-owned w
 ## Before Editing
 
 1. Read `docs/source-of-truth.md`.
-2. Read planning source-of-truth docs for boundaries and slice order.
+2. Follow the active route in `docs/source-of-truth.md` and
+   `docs/tasks/README.md` for boundaries and slice order.
 3. Check `git status --short`.
 4. Read `.agents/state/granit-dev-workflow.json` if it exists.
 5. Do not overwrite unrelated dirty work.
@@ -42,8 +43,8 @@ Examples:
 
 Architecture, repo boundaries, release/deploy policy, AI gates and implementation
 order for this repository are decided in repo-local owner docs and ADRs. The
-active AI order is `PR0a-PR9`; historical external planning links are provenance
-only.
+active AI order is the current `AI-RUNTIME-CONVERGENCE` Goal/card; PR0a—PR9 and
+historical external planning links are provenance only.
 
 ## Task Rules
 

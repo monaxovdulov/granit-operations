@@ -4,7 +4,7 @@ Status: staging_smoke_passed
 Date: 2026-05-13
 Repo: `granit-operations`
 Slice: S04
-Task link: `docs/tasks/S04_WIDGET_PERSISTENCE_RU.md`
+Retired task provenance: `docs/tasks/ARCHIVE_RU.md`
 Contract/version: `site_widget.v1`
 
 ## Что Проверяли

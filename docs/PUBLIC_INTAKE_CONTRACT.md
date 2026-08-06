@@ -1,13 +1,18 @@
 # Public Intake Contract
 
-Status: initial placeholder
+Status: current provider summary; S01/S04/S05 sections retain historical context
 
 Provider: `granit-operations`
-Consumer: `granit-site-cms`
+Current browser integration / paired-smoke target: `landing-granit-static`.
+`granit-site-cms` is a historical/future CMS consumer, not the current landing
+source.
 Initial version: `site_form.v1`
-Widget version: `site_widget.v1`
+Current widget version: `site_widget.v2`; `site_widget.v1` is retired and
+rejected before persistence with `unsupported_schema_version`
 
-Operations publishes the versioned public intake contract. `granit-site-cms` pins the exact supported version and must not import operations implementation code.
+Operations publishes the versioned public intake contract. Every browser
+consumer pins the exact supported version and must not import operations
+implementation code.
 
 S01 flow:
 
@@ -43,11 +48,13 @@ Safe public receipt:
 - allowed public response fields include public submission id, accepted action, retry/fallback action, and public validation errors;
 - forbidden public response fields include internal `lead_id`, `conversation_id`, `trace_id`, manager ids, eval labels, handoff internals, raw internal errors, database details, and private notification destinations.
 
-Contract changes require provider checks. Before staging traffic reaches the affected path, run paired smoke with `granit-site-cms`.
+Contract changes require provider checks. Before staging traffic reaches the
+affected path, run paired smoke with the current browser integration target,
+`landing-granit-static`.
 
 Existing detail: `docs/contracts/public-intake-contract.md`.
 
-S04 adds the website widget message contract:
+S04 historically added the first website widget message contract:
 
 ```text
 POST /public/intake/site-widget/messages
@@ -59,10 +66,19 @@ The endpoint must create or update a lead, widget session, conversation, and inb
 
 Existing detail: `docs/contracts/widget-intake-contract.md`.
 
-S05 keeps `site_widget.v1` and adds response-only automation states:
+S05 historically kept `site_widget.v1` and added response-only automation
+states. These shapes are provenance, not the current supported contract:
 
 - `automation.status: "disabled"` remains the safe default while AI is off;
 - `automation.status: "fallback"` means the visitor message was persisted but AI did not return a confirmed persisted reply;
 - `automation.status: "replied"` includes only safe public AI reply text and the AI reply public message id after the outbound message is persisted.
 
 The public response still must not include internal `lead_id`, `conversation_id`, or `trace_id`.
+
+The current provider contract accepts only `site_widget.v2`. It returns a
+durable acknowledgement without waiting for model generation; `processing` +
+`poll_history` is the authoritative thinking signal and completed state is read
+from public history. Exact current artifacts are
+`packages/contracts/src/site-widget/v1.ts`,
+`packages/contracts/schemas/site-widget.v2.json` and
+`docs/contracts/widget-intake-contract.md`.

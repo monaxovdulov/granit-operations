@@ -1,90 +1,26 @@
 # Task Docs
 
-Use this directory for repo-local task records. A task doc explains what the agent changed or checked, what was out of scope, what files were touched, which checks ran, where evidence lives, and what remains blocked.
+Этот каталог хранит task records, но только явно указанная карточка является
+активным AI-маршрутом. Наличие другого файла в каталоге не делает его текущей
+инструкцией.
 
-Template:
+## Active AI route
 
-```text
-docs/tasks/TEMPLATE_RU.md
-```
+1. `../source-of-truth.md` — карта полномочий и фактического состояния.
+2. `AI_RUNTIME_CONVERGENCE_GOAL_RU.md` — утверждённая долгоживущая Goal.
+3. `AI_REF_CONV_4_ACTIVE_DOCUMENTATION_RU.md` — единственная active AI-card:
+   CONV-4 сокращает активную документацию перед CONV-5 guardrails.
 
-Current task records:
+Шаблон новой карточки: `AI_REFACTOR_SLICE_TEMPLATE_RU.md`.
 
-- `AI_RUNTIME_CONVERGENCE_CONV_3A_ATTEMPT_LEDGER_RU.md` - единственная
-  активная AI-карточка: owner-approved разделение одного logical `ai_run` и
-  дочерних durable lease/model attempts перед CONV-4.
-- `AI_RUNTIME_CONVERGENCE_CONV_1_DIRECT_LIVE_V2_ADAPTER_RU.md` - independently
-  `accepted` and published card: direct OpenAI Responses parity adapter for the existing
-  provider-neutral live-v2 pipeline, without runtime cutover or model call;
-  commit `aff347bb00d07f8ee40f86203bd27a6a99b5b40f`.
-- `AI_RUNTIME_CONVERGENCE_GOAL_RU.md` - active multi-slice Goal for direct
-  live-v2 convergence, Mastra/legacy removal, active-doc reduction and
-  anti-clutter guardrails; prerequisite PR2 backlog repair is independently
-  `accepted` and published; CONV-1—CONV-3 are accepted/published, and planned
-  CONV-3A attempt ledger is the next technical slice before CONV-4.
-- `AI_REF_SOURCE_OF_TRUTH_REALIGNMENT_RU.md` - owner-approved move to
-  repo-local AI authority: current code, app-owned queue/direct runtime and
-  `PR0a-PR9` replace external planning dependencies.
-- `AI_REF_PR0A_POSTGRES_TEST_HARNESS_RU.md` through
-  `AI_REF_PR2_LATEST_WINS_FRESH_TURN_RU.md` - current AI refactor slice records.
+## Historical records
 
-- `S01_PROVIDER_EVIDENCE_REVIEW_SIGNOFF_RU.md` - planned owner/release review for S01 operations provider evidence.
-- `S01_REVIEWABLE_CHUNKS_AND_CHECKS_RU.md` - planned split of dirty operations changes into reviewable chunks and checks.
-- `S02_MANAGER_AUTH_YANDEX_RU.md` - protected manager login through Yandex ID plus operations allowlist/roles.
-- `S03_MANAGER_UI_MANTINE_RU.md` - React/Vite/Mantine manager panel over the protected S02 API.
-- `S03_MIN_LIFECYCLE_RU.md` - minimal manager statuses and status-change history before widget persistence.
-- `S04_WIDGET_PERSISTENCE_RU.md` - website widget message persistence before AI replies.
-- `SERIOUS_AI_LAYER_RU.md` - preparation plan for the serious backend AI layer after S05 website safe AI.
-- `AI_DIALOG_BOUNDARY_STAGE_A_RU.md` - local Stage A implementation of the neutral AI turn boundary before Mastra runtime, Telegram AI outbound or production AI approval.
-- `AI_DIALOG_APP_TURN_BOUNDARY_P1_RU.md` - locally passed G1/P1 implementation of bounded causal
-  history, app-owned identity, structural legacy decision orchestration and frozen direct S05
-  golden checks before P1Q.
-- `AI_DIALOG_LIVE_V2_CORE_P1Q_RU.md` - provider-neutral P1Q core at
-  `core_local_checks_passed` in `78c9947`, with accepted production facts snapshot at `1d737e0`:
-  strict `live_v2` context, candidate validation, deterministic apply semantics, exact 15-row
-  asset and fixed synthetic fixtures passed; G1Q passed, runtime remains disabled/not deployed.
-- `AI_DIALOG_LIVE_V2_FACTS_P1Q_REVIEW_RU.md` - exact accepted 15-row facts table pinned to
-  `granit-site-cms@23f2ee8...`, materialized as schema-validated `facts.v1.ts` with review boundary
-  `2026-10-14`.
-- `AI_DIALOG_OBSERVABILITY_P2_RU.md` - verified P2 implementation record for additive app-owned
-  run/span/quality persistence, configured/observed provider truth, atomic outbound/run linkage,
-  fail-closed recovery and terminal replay on the frozen direct path; exact-SHA evidence follows
-  the implementation commit, and no `live_v2`, Mastra or model call is enabled.
-- `AI_DIALOG_PRIVACY_VISIBILITY_P3_RU.md` - passed P3 record for protected manager-visible AI
-  quality state, strict repo-owned asset manifest, centralized observability allowlist and bounded
-  expired-span retention cleanup before any Mastra dependency.
-- `AI_DIALOG_MASTRA_OBSERVABILITY_FIRST_SLICE_RU.md` - historical implementation record, not the active roadmap: G0/G1/W0,
-  G1Q/P2/P3/G4/M1/M2/G5/G6 passed; exact G6 base `ad40c27...` was approved, but the first M3
-  Mastra call failed closed before trusted provider observation and M3 remains blocked
-  `P1 -> P1Q -> P2 -> P3 -> M1 disabled -> M2 local/fake -> G6 owner gate -> M3 authenticated
-  staging` (`OPENAI_API_KEY`, `gpt-5.6-sol`, medium), with frozen direct OpenAI emergency rollback
-  and future `codex_subscription` outside the slice.
-- `MODULAR_MONOLITH_REFACTOR_RU.md` - planned refactor to make `ops-api` a clearer modular monolith without changing runtime topology, public contracts, DB schema or production state.
-- `OPS_API_THICK_MODULE_REFACTOR_NEXT_TASKS_RU.md` - thick-module refactor task pack; P1/P2 and compatibility-export slices are accepted via ADR-004 through ADR-009, optional UI/test cleanup is deferred, and 2026-06-04 follow-up deepening candidates are recorded.
-- `P0_CHANNEL_NEUTRAL_CONVERSATION_FOUNDATION_RU.md` - implementation handoff for channel-neutral widget/Telegram conversation foundation before Telegram adapter and production.
-- `TELEGRAM_INBOUND_MANAGER_MINI_PANEL_RU.md` - Telegram inbound webhook plus manager binding/takeover/reply mini-panel after P0.
-- `TELEGRAM_OUTBOUND_DELIVERY_SENDER_RU.md` - separate sender path for pending Telegram manager replies with retry/failure visibility.
-- `TELEGRAM_MANAGER_REPLY_WORKER_RU.md` - explicit Postgres-backed worker for automatic delivery of manager-authored Telegram replies only; staging smoke accepted, not production approval.
-- `TELEGRAM_MANAGER_REPLY_WORKER_SUPERVISED_SCHEDULER_RU.md` - systemd timer plus one-shot plus Postgres advisory lock for supervised manager reply delivery; staging smoke passed, not production approval.
-- `TELEGRAM_POST_SUPERVISED_SCHEDULER_NEXT_TASKS_RU.md` - ordered next task pack for supervised staging smoke, `uncertain` policy, notification sender, backup/rollback, release bundle, AI handoff policy and branch cleanup.
-- `TELEGRAM_SAFE_SENDER_NEXT_TASK_PACK_RU.md` - plain-language next-session task pack for audit, safe refactor, local manual smoke and staging smoke preparation after the local Telegram sender slice.
-- `STAGING_GO_LIVE_READINESS_RU.md` - explicit owner goal and ordered safety path for production-like staging enablement before notification sender, AI handoff expansion, Mastra or Telegram AI outbound.
-- `STAGING_WIDGET_AI_RAG_ROLLOUT_RU.md` - next-agent route for staging website widget AI enablement and catalog/RAG integration against the active `landing-granit-static` consumer.
+`ARCHIVE_RU.md` перечисляет retired AI/S01—S04 task records, их canonical
+replacement и published commits. Archive index и Git history сохраняют
+provenance, но не задают текущий roadmap.
 
-Required fields:
+Accepted ADR остаются в `../adr/`, а воспроизводимые отчёты проверок — в
+`../release/evidence/`.
 
-- ID;
-- title;
-- repo;
-- slice;
-- owner/agent;
-- status;
-- scope;
-- out of scope;
-- files touched;
-- checks run;
-- evidence links;
-- blockers;
-- next action.
-
-GitHub Issues may later mirror task status externally, but these files remain the durable repo record.
+Operations/staging/Telegram task records, оставшиеся в этом каталоге, не входят
+в active AI route и выполняются только по отдельному текущему поручению.

@@ -3,7 +3,16 @@
 Status: accepted by owner
 Date: 2026-08-04
 Repo scope: `granit-operations`
-Related task: `docs/tasks/AI_REF_SOURCE_OF_TRUTH_REALIGNMENT_RU.md`
+Related active Goal: `docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md`;
+retired task provenance: `docs/tasks/ARCHIVE_RU.md`
+
+Current-state reconciliation (2026-08-06): this ADR's ownership decision remains
+accepted, while its original PR0a—PR9 sequencing and bounded-Mastra wording are
+historical. The current implementation order is the active
+`AI-RUNTIME-CONVERGENCE` Goal/card. CONV-3 removed the Mastra dependency/runtime
+and executable `legacy_s05`; returning a second runtime requires a new accepted
+ADR and owner stop-gate. Historical wording below is retained as decision
+provenance, not active routing.
 
 ## Context
 
@@ -36,12 +45,15 @@ app-owned PostgreSQL queue
   -> atomic persisted reply/job outcome
 ```
 
-Активный roadmap: `PR0a -> PR0b -> PR0c -> PR1 -> ... -> PR9`.
+Первоначально утверждённый roadmap:
+`PR0a -> PR0b -> PR0c -> PR1 -> ... -> PR9`; его текущая замена указана в
+reconciliation note выше.
 
 Mastra не является primary runtime, source of truth или roadmap owner.
-Существующий `mastra_openai_api` сохраняется только как bounded staging adapter
-и не владеет queue semantics, business state, send gate, public contracts,
-migrations или manager controls.
+На момент принятия ADR `mastra_openai_api` сохранялся только как bounded staging
+adapter и не владел queue semantics, business state, send gate, public
+contracts, migrations или manager controls. Его последующее удаление
+зафиксировано reconciliation note выше.
 
 Старые task, evidence, design и ADR могут хранить внешние ссылки как provenance.
 Такие ссылки не являются действующими инструкциями. Для текущей работы не

@@ -3,8 +3,15 @@
 Status: accepted
 Date: 2026-07-20
 Repo scope: `granit-operations`
-Related task: `docs/tasks/RECONCILE_REMAINING_BRANCHES_RU.md`
+Retired reconciliation provenance: `docs/tasks/ARCHIVE_RU.md`
 Reconciled: 2026-08-04 by `ADR-012-REPO_LOCAL_AI_SOURCE_OF_TRUTH_RU.md`
+
+Current-state reconciliation (2026-08-06): CONV-3 removed the Mastra
+dependency/runtime and executable `legacy_s05`. The observability ownership and
+privacy rules of this ADR remain accepted; references below to an existing
+Mastra adapter describe the historical state at adoption and do not authorize a
+second runtime. Current sequencing comes from the active
+`AI-RUNTIME-CONVERGENCE` Goal/card.
 
 ## Context
 
@@ -34,8 +41,9 @@ Primary AI runtime source of truth remains app-owned:
 - `ai_runs`, `ai_quality_events`, eval tables and future app-owned trace/span tables are the operational source of truth.
 - Manager-visible AI quality data must be summarized and sanitized; raw provider traces, spans, prompts, secrets and raw errors are not manager payload.
 
-Mastra is not primary orchestration. The existing `mastra_openai_api` mode is a
-bounded staging adapter behind app-owned queue, state and gates. Mastra-like
+Mastra is not primary orchestration. At adoption, the then-existing
+`mastra_openai_api` mode was only a bounded staging adapter behind app-owned
+queue, state and gates; it was later removed as recorded above. Mastra-like
 observability remains optional:
 
 ```text
@@ -57,9 +65,10 @@ Mastra, OpenTelemetry or another tracing tool may not own:
 - DB migration numbering;
 - eval pass/fail source of truth.
 
-Any Mastra integration must remain one of:
+Any future Mastra integration would require a new accepted ADR and must remain
+one of:
 
-- the existing bounded staging/model adapter that obeys app-owned queue,
+- a bounded staging/model adapter that obeys app-owned queue,
   validation, commit and send-gate contracts; or
 - an optional observability sink/exporter under an explicit observability module.
 
@@ -115,6 +124,6 @@ During review, reject PRs that make Mastra or any tracing vendor the primary sou
 
 ## Links
 
-- Reconciliation source: `docs/tasks/RECONCILE_REMAINING_BRANCHES_RU.md`
+- Reconciliation source: retired task indexed in `docs/tasks/ARCHIVE_RU.md`
 - AI boundary ADR: `docs/adr/ADR-008-PUBLIC_WIDGET_AI_REPLY_GENERATOR_BOUNDARY_RU.md`
 - Existing observability contract entrypoint: `docs/OBSERVABILITY_CONTRACT.md`

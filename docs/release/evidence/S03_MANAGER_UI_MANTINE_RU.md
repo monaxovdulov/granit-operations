@@ -4,7 +4,7 @@ Status: accepted_staging_owner_checked
 Date: 2026-05-12
 Repo: `granit-operations`
 Slice: S02b / S03 candidate
-Task link: `docs/tasks/S03_MANAGER_UI_MANTINE_RU.md`
+Retired task provenance: `docs/tasks/ARCHIVE_RU.md`
 Contract/version: manager UI static app over S02 protected API
 
 Update 2026-05-13: this evidence should be read as S02b read-only manager UI

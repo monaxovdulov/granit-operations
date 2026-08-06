@@ -4,7 +4,7 @@ Status: accepted_staging_owner_checked
 Date: 2026-05-13
 Repo: `granit-operations`
 Slice: S03-min
-Task link: `docs/tasks/S03_MIN_LIFECYCLE_RU.md`
+Retired task provenance: `docs/tasks/ARCHIVE_RU.md`
 Contract/version: manager lifecycle API over S02 protected session
 
 Update 2026-05-13T14:00Z: migration `0003_s03_min_lifecycle.sql` was applied

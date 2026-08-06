@@ -4,7 +4,7 @@ Status: source_audit_passed; historical pre-approval evidence; superseded for ga
 Date: 2026-07-14
 Repo: `granit-operations`
 Slice: P1Q source audit before G1Q/P2
-Review table: `docs/tasks/AI_DIALOG_LIVE_V2_FACTS_P1Q_REVIEW_RU.md`
+Retired review-task provenance: `docs/tasks/ARCHIVE_RU.md`
 
 ## Результат
 
