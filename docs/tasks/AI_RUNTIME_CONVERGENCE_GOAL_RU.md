@@ -1,7 +1,7 @@
 # Goal: AI Runtime Convergence и очистка репозитория
 
-Статус: `implementing`; активный срез — CONV-5 по карточке
-`AI_REF_CONV_5_ANTI_CLUTTER_GUARDRAILS_RU.md`. Goal запущена 2026-08-04. Обязательный
+Статус: `teaching`; все технические срезы приняты и опубликованы, ожидается
+обязательный общий owner teach-back. Goal запущена 2026-08-04. Обязательный
 current-main repair PR2 получил свежий independent `accept` и опубликован
 в `origin/main` commit `ca1cdb798829674e40b4eab7e4e948476e71d61c`. CONV-1
 получил свежий independent `accept` и опубликован в `origin/main` commit
@@ -15,6 +15,8 @@ commit `8122a8ef44568d6b97dccee54dee074c4a1c4733`. Владелец выбрал
 `origin/main` commit `e4cfe371a96ff5a7a3262c19c02776a36d979936`.
 CONV-4 получил третий independent `accept` и опубликован в `origin/main` commit
 `d3f9cbd2213ec60bba3953c43f212aa307fd8175`.
+CONV-5 получил independent `accept` без замечаний и опубликован в `origin/main`
+commit `e86ce2d908d32adb538b060af698df7f8ae88268`.
 
 Goal ID: `AI-RUNTIME-CONVERGENCE`.
 

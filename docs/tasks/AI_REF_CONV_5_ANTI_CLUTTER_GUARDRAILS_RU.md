@@ -632,3 +632,12 @@ product failure и принял совпавший fingerprint с independently 
 
 CONV-5 принят. Разрешены порученные владельцем понятный русский commit и
 обычный push; после публикации Goal автоматически переходит к общему teach-back.
+
+## 23. Публикация
+
+CONV-5 опубликован обычным fast-forward в `origin/main` commit
+`e86ce2d908d32adb538b060af698df7f8ae88268` с русским сообщением
+«Зафиксировать guardrails единого AI runtime». После fetch
+`HEAD == origin/main`; force-push/deploy не использовались. Технические срезы
+Goal завершены, но Goal остаётся в `teaching` до owner teach-back и
+`understanding_verified`.
