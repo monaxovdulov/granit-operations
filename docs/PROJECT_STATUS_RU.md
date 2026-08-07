@@ -8,7 +8,9 @@
 
 - `granit-operations` — backend/API, Postgres operational state, manager panel, AI runtime, send gate, CORS and observability/evals.
 - `monaxovdulov/landing-granit-static` (`/home/devuser/ai-projects/landing-granit-static`) — текущий customer-facing лендинг и browser form/widget integration для staging smoke с заказчиками.
-- `monaxovdulov/business-ai-web-widget` — source repo для текущего browser widget runtime; staging baseline использует `@monaxovdulov/site-widget@1.1.4` из `c44f99637e097a47b3c53099c95d7e8e01701ad8`.
+- `monaxovdulov/business-ai-web-widget` — public source repo текущего browser
+  widget runtime; точная provenance текущей связки находится только в
+  `docs/ARCHITECTURE.md`.
 - `granit-site-cms` — не текущий источник customer-facing лендинга для AI/widget rollout; считать отдельным Astro/CMS baseline/future CMS path, пока новая ADR/task явно не изменит это.
 
 Актуальное правило зафиксировано в `docs/adr/ADR-011-CUSTOMER_FACING_LANDING_SOURCE_RU.md`.

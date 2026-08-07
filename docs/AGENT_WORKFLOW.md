@@ -14,11 +14,11 @@ Repo role: intake API, manager workflow, Postgres operational state, app-owned w
 
 ## Current External Repo Map
 
-- `granit-operations`: backend/API, Postgres operational state, manager panel, AI runtime, app-owned send gate, CORS, observability/evals.
-- `monaxovdulov/landing-granit-static`: current customer-facing static landing and browser form/widget integration. Local checkout: `/home/devuser/ai-projects/landing-granit-static`.
-- `granit-site-cms`: not the current customer-facing landing source for AI/widget staging. Do not use it as the paired-smoke target unless a later accepted ADR/task explicitly promotes it.
-
-When staging the website widget AI path, pair-smoke against the active `landing-granit-static` consumer and the `granit-operations` public API.
+Read the authoritative map in `docs/source-of-truth.md`. For public audit or
+website widget staging, also read `docs/ARCHITECTURE.md`, then record the exact
+widget source, landing and backend commits. The cross-repo step is complete only
+when manifest hashes match the vendored runtime and the paired smoke identifies
+the deployed backend commit.
 
 ## Where To Write
 

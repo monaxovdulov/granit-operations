@@ -1,88 +1,92 @@
 # Granit Operations
 
-`granit-operations` - серверная часть системы для обработки обращений клиентов проекта «Гранит».
+`granit-operations` — backend системы обработки обращений проекта «Гранит».
+Он принимает публичные заявки и сообщения виджета, хранит состояние в
+PostgreSQL, запускает серверную AI-обработку и предоставляет защищённую панель
+менеджера.
 
-Система принимает заявки с сайта и Telegram. Она хранит данные в PostgreSQL и показывает их в защищённой панели менеджера.
+Статус: активная разработка. Наличие кода не означает разрешение на production.
+AI и Telegram выключены по умолчанию. Текущий backend runtime ещё не подтверждён
+свежей staging-выкладкой и сквозным smoke на SHA этого репозитория.
 
-ИИ может отвечать в виджете сайта по сведениям из проверенного каталога.
+## Публичный контур
 
-Статус: активная разработка. Код ещё не одобрен для рабочего развёртывания. ИИ и Telegram выключены по умолчанию.
+```text
+business-ai-web-widget
+  исходный код браузерного Web Component
+  ↓ проверенная immutable-сборка
 
-## Что умеет система
+customer landing
+  pinned loader.js + site-widget.esm.js + manifest.json
+  ↓ строгий site_widget.v2
 
-- принимает заявки из формы сайта;
-- сохраняет сообщения виджета до ответа клиенту;
-- показывает менеджеру заявки, контакты, переписку и историю изменений;
-- позволяет менеджеру менять статус заявки и брать диалог под свой контроль;
-- может готовить ответы ИИ по отобранным сведениям из каталога;
-- принимает сообщения Telegram и ставит ответы менеджера в очередь на отправку;
-- скрывает внутренние идентификаторы, ошибки и служебные данные от публичного API.
+granit-operations
+  intake API → PostgreSQL → AI queue/runtime → send gate
+  manager UI → takeover и ручное управление
+```
 
-## Варианты использования
+Точные commit SHA, пути и SHA-256 текущей проверенной связки находятся в
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Эта карта содержит только
+компоненты текущего исполняемого пути.
 
-| Задача | Как это работает | Состояние |
+## Связанные компоненты
+
+- [`monaxovdulov/business-ai-web-widget`](https://github.com/monaxovdulov/business-ai-web-widget)
+  владеет исходным кодом Web Component, отображением и строгим разбором
+  публичного контракта. Пакет называется `@monaxovdulov/site-widget`; его
+  registry-канал может оставаться restricted при публичном source-репозитории.
+- `monaxovdulov/landing-granit-static` — текущий customer landing. Он не является
+  источником виджета: landing хранит проверенные runtime-файлы по точному source
+  commit и подключает pinned `loader.js`.
+- `granit-operations` владеет persistence, очередью, AI runtime, manager UI,
+  send gate и manager takeover.
+
+Полный внешний аудит browser-to-backend пути требует совместной проверки этого
+репозитория, публичного widget source и pinned runtime в landing.
+
+## Состояние
+
+| Состояние | Область | Граница утверждения |
 |---|---|---|
-| Получить заявку с сайта | Форма отправляет данные в `POST /public/intake/site-form`. Система проверяет и сохраняет заявку, затем возвращает подтверждение. | Есть в коде |
-| Подключить диалоговый виджет | Виджет отправляет сообщение в `POST /public/intake/site-widget/messages`. Клиент получает историю диалога отдельным запросом. | Есть в коде, формат `site_widget.v2` |
-| Организовать работу менеджера | Панель `/manager` показывает заявки и диалоги после входа через Яндекс ID. Менеджер управляет статусом заявки и ответами ИИ. | Есть в коде, нужна настройка входа |
-| Добавить ответы ИИ | Отдельный обработчик читает задания из PostgreSQL. Ответ проходит проверки и сохраняется вместе с результатом задания. | Есть в коде, выключено по умолчанию |
-| Работать через Telegram | Система принимает сообщения бота. Привязанный менеджер может подготовить ответ в Telegram после перехода диалога под его контроль. | Есть в коде, выключено по умолчанию |
+| Реализовано | `site_form.v1`, `site_widget.v2`, PostgreSQL persistence и durable AI queue | Подтверждено текущим кодом, контрактами, миграциями и тестами |
+| Реализовано | Manager auth/UI, send gate и manager takeover | Есть в коде; production approval не следует из реализации |
+| Реализовано | Прямой server-side AI runtime | Model output проходит app-owned validation и свежий send gate |
+| Выключено | AI visitor replies | Нужны `AI_WIDGET_ENABLED=true`, worker flag и серверный ключ; defaults — `false` |
+| Выключено | Telegram inbound и delivery | Нужны отдельные flags, credentials и release approval; default — `false` |
+| Ещё не доказано | Текущий backend в staging | Нет свежего evidence, связывающего deployed runtime с текущим backend SHA |
+| Ещё не доказано | Production readiness | Нет production approval и полного release evidence |
 
-Это прикладная система для проекта «Гранит», а не готовая универсальная CRM. Для другого бизнеса потребуются свои формы, каталог и правила обработки.
+Подробные ограничения AI находятся в [`docs/AI_POLICY.md`](docs/AI_POLICY.md).
 
-## Как проходит обращение
+## Безопасный локальный запуск
 
-1. Сайт или Telegram отправляет обращение в API.
-2. API проверяет формат и сохраняет данные в PostgreSQL.
-3. Панель менеджера читает сохранённую заявку после проверки доступа.
-4. При включённом ИИ обработчик получает задание из очереди.
-5. Перед записью ответа система повторно проверяет состояние диалога.
-6. Если менеджер взял диалог, система не отправляет новый ответ ИИ.
+Понадобятся Node.js с npm, PostgreSQL и `psql`. Команды ниже оставляют AI,
+Telegram и browser CORS выключенными.
 
-Повтор запроса с тем же `idempotency_key` не создаёт вторую заявку. Система возвращает ранее созданный публичный идентификатор.
+1. Создайте локальный файл окружения.
 
-## Что входит в репозиторий
+   ```bash
+   cp .env.example .env
+   ```
 
-| Каталог | Назначение |
-|---|---|
-| `apps/api` | API, правила обработки, вход менеджера и подключения внешних каналов |
-| `apps/manager` | Панель менеджера на React |
-| `packages/contracts` | Проверяемые форматы публичных запросов и ответов |
-| `packages/db` | Описание таблиц PostgreSQL и последовательные изменения базы |
-| `docs` | Внутренние решения, инструкции по эксплуатации и отчёты проверок |
+2. При необходимости измените только локальный `DATABASE_URL` в `.env`.
 
-Публичный сайт клиента находится в отдельном проекте. Этот репозиторий предоставляет API и панель менеджера.
+3. Загрузите значения в текущую shell-сессию.
 
-## Документация для разработки
+   ```bash
+   set -a
+   . ./.env
+   set +a
+   ```
 
-Начинайте с [`docs/source-of-truth.md`](docs/source-of-truth.md). Она ведёт к
-принятым ADR, двум owner architecture documents, правилам AI-рефакторинга и
-единственной активной карточке в [`docs/tasks/README.md`](docs/tasks/README.md).
-Исторические планы не задают текущий runtime или порядок работы.
-
-## Быстрый запуск
-
-Понадобятся Node.js с npm, PostgreSQL и команда `psql`.
-
-1. Установите зависимости.
+4. Установите зависимости и создайте пустую базу.
 
    ```bash
    npm ci
-   ```
-
-2. Создайте пустую базу PostgreSQL.
-
-   ```bash
    createdb granit_operations
    ```
 
-3. Передайте адрес базы через окружение процесса.
-
-   ```bash
-   export DATABASE_URL='postgres://postgres:postgres@localhost:5432/granit_operations'
-   ```
-
-4. Примените файлы изменения базы по порядку.
+5. Примените миграции по порядку.
 
    ```bash
    for migration in packages/db/migrations/*.sql; do
@@ -90,137 +94,63 @@
    done
    ```
 
-5. Соберите проект.
+6. Соберите проект и запустите API.
 
    ```bash
    npm run build
-   ```
-
-6. Запустите API.
-
-   ```bash
    npm run dev:api
    ```
 
-7. Проверьте ответ сервера.
+7. Проверьте health endpoint в другой shell-сессии.
 
    ```bash
-   curl http://localhost:3001/health
+   curl http://127.0.0.1:3001/health
    ```
 
-   Ожидаемый ответ:
+Этап завершён, когда API отвечает
+`{"ok":true,"service":"granit-operations-api"}`. Приложение читает окружение
+процесса и само не загружает `.env`.
 
-   ```json
-   {"ok":true,"service":"granit-operations-api"}
+## Маршрут внешнего аудитора
+
+1. Зафиксируйте SHA и границы системы по
+   [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) и
+   [`docs/BOUNDARIES.md`](docs/BOUNDARIES.md).
+2. Проверьте публичные форматы по
+   [`docs/PUBLIC_INTAKE_CONTRACT.md`](docs/PUBLIC_INTAKE_CONTRACT.md),
+   [`packages/contracts`](packages/contracts) и JSON Schema в
+   [`packages/contracts/schemas`](packages/contracts/schemas).
+3. Проверьте AI policy, persistence и send gate по
+   [`docs/AI_POLICY.md`](docs/AI_POLICY.md), текущим миграциям и тестам.
+4. Запустите применимые локальные проверки.
+
+   ```bash
+   npm run check:architecture
+   npm run typecheck
+   npm run smoke:api
+   npm run eval:widget-ai:offline
    ```
 
-Приложение читает настройки из окружения процесса. Оно само не загружает файл `.env`.
+5. Сообщайте о чувствительных находках по [`SECURITY.md`](SECURITY.md), не через
+   публичный Issue.
 
-## Пример заявки с сайта
+Проверка этапа завершена, когда каждое утверждение привязано к текущему SHA или
+явно отмечено как недоказанное. Исторические task/evidence документы не заменяют
+свежую runtime-проверку.
 
-После локального запуска отправьте запрос:
+## Структура репозитория
 
-```bash
-curl -X POST http://localhost:3001/public/intake/site-form \
-  -H 'content-type: application/json' \
-  -d '{
-    "schema_version": "site_form.v1",
-    "event_type": "site_form.submitted",
-    "idempotency_key": "example-form-0001",
-    "submitted_at": "2026-08-05T12:00:00Z",
-    "source": {
-      "channel": "site_form",
-      "page_url": "https://example.ru/catalog",
-      "form_kind": "catalog_request"
-    },
-    "contact": {
-      "name": "Иван Иванов",
-      "email": "ivan@example.ru"
-    },
-    "request": {
-      "message": "Нужна консультация по каталогу"
-    },
-    "consent": {
-      "privacy_policy": true
-    }
-  }'
-```
+| Каталог | Назначение |
+|---|---|
+| `apps/api` | Fastify API, manager auth и server-side runtime |
+| `apps/manager` | React/Vite/Mantine manager UI |
+| `packages/contracts` | Версионированные публичные контракты |
+| `packages/db` | PostgreSQL schema и последовательные миграции |
+| `docs` | Архитектура, policy, ADR и evidence |
 
-Успешный запрос получает код `202`. Ответ содержит `public_submission_id`, но не содержит внутренний номер заявки.
+## Лицензия
 
-Полные схемы находятся в [`packages/contracts/schemas`](packages/contracts/schemas).
-
-## Дополнительные возможности
-
-### Панель менеджера
-
-Для входа через Яндекс ID задайте эти переменные:
-
-- `SESSION_SECRET`;
-- `YANDEX_OAUTH_CLIENT_ID`;
-- `YANDEX_OAUTH_CLIENT_SECRET`;
-- `YANDEX_OAUTH_REDIRECT_URI`.
-
-Добавьте разрешённого пользователя:
-
-```bash
-npm run seed:manager-user -- \
-  --email manager@yandex.ru \
-  --role owner \
-  --status active
-```
-
-Если настройка входа неполная, публичный приём заявок продолжает работать. Доступ к данным менеджера остаётся закрытым.
-
-### Ответы ИИ в виджете
-
-Для обработки сообщений виджета задайте:
-
-- `AI_WIDGET_ENABLED=true`;
-- `AI_WIDGET_JOB_WORKER_ENABLED=true`;
-- `OPENAI_API_KEY`.
-
-Ключ OpenAI должен оставаться на сервере. Не добавляйте его в сайт, код, документацию или журналы.
-
-Код использует одну прямую связь с OpenAI. Модель закреплена в настройках приложения, а ответы проходят проверку перед сохранением.
-
-### Telegram
-
-Для Telegram нужны отдельный бот и защищённый адрес приёма сообщений. Отправитель ответов настраивается отдельно.
-
-Основные переменные:
-
-- `TELEGRAM_BOT_ENABLED=true`;
-- `TELEGRAM_BOT_TOKEN`;
-- `TELEGRAM_BOT_PROVIDER_ACCOUNT_ID`;
-- `TELEGRAM_WEBHOOK_SECRET`;
-- `PUBLIC_MANAGER_BASE_URL`.
-
-Включение приёма сообщений не запускает отправителя. Для контролируемой отправки ответов менеджера служит команда `npm run deliver:telegram:once`.
-
-### Доступ из браузера
-
-Задайте `PUBLIC_INTAKE_ALLOWED_ORIGINS`, если сайт и API работают на разных адресах. Укажите точные адреса через запятую.
-
-Пустое значение не разрешает межсайтовые запросы браузера. Служебные запросы без заголовка `Origin` продолжают работать.
-
-## Проверки для разработчика
-
-```bash
-npm run typecheck
-npm run build
-npm run smoke:api
-npm run eval:widget-ai:offline
-```
-
-Платная проверка с настоящей моделью запускается отдельной командой. Не запускайте её без ключа и явного разрешения на внешний вызов.
-
-## Ограничения
-
-- Репозиторий не содержит публичный сайт клиента.
-- Рабочее развёртывание, секреты и адреса внешних служб не входят в исходный код.
-- Для работы ИИ нужны два разрешающих переключателя и серверный ключ OpenAI.
-- Telegram не работает без явного включения и настройки бота.
-- В репозитории пока нет файла `LICENSE`.
-
-Условия использования, изменения и распространения кода пока не определены. Перед открытым выпуском владелец должен выбрать лицензию.
+Код распространяется по
+[PolyForm Noncommercial License 1.0.0](LICENSE): некоммерческое использование,
+изменение и распространение разрешены на условиях лицензии. Для коммерческого
+использования требуется отдельное разрешение владельца.

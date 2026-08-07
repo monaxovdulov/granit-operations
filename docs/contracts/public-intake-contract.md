@@ -2,10 +2,12 @@
 
 Status: S01 published scaffold
 Provider: `granit-operations`
-Consumer: `granit-site-cms`
+Current consumer: `landing-granit-static`
 Initial version: `site_form.v1`
 
-Operations publishes the versioned public intake contract. `granit-site-cms` pins the exact supported version and must not import operations implementation code.
+Operations publishes the versioned public intake contract. The current landing
+and browser widget pin the exact supported version and must not import operations
+implementation code.
 
 ## S01 Flow
 
@@ -100,10 +102,11 @@ Backend failure must never produce public success.
 
 ## Provider Checks
 
-Operations-side changes to this contract require provider checks. Before staging traffic reaches the affected path, run paired smoke with `granit-site-cms`:
+Operations-side changes to this contract require provider checks. Before staging
+traffic reaches the affected path, run paired smoke with `landing-granit-static`:
 
 ```text
-site-cms submits representative form
+landing submits representative form
 operations accepts and persists lead
 manager panel shows lead
 site shows success only after acceptance

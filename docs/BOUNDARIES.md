@@ -15,7 +15,7 @@ Canonical sources: `docs/source-of-truth.md`, repo-local ADRs and current code.
 - manager backend and manager panel;
 - Telegram inbound and manager-authored delivery adapters;
 - app-owned website widget AI queue, runtime assembly and send gate;
-- direct model boundary and bounded staging adapters;
+- one direct server-side model boundary;
 - observability/evals and review loop.
 
 This repo must not own:

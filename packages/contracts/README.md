@@ -2,7 +2,9 @@
 
 Versioned public contract artifacts.
 
-Operations publishes the public intake contract from this repo. `granit-site-cms` consumes a pinned version and must not import operations implementation code.
+Operations publishes the public intake contract from this repo. The current
+`landing-granit-static` and browser widget consume pinned versions and must not
+import operations implementation code.
 
 Initial S01 contract:
 
