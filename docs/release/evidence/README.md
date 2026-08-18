@@ -32,6 +32,10 @@ Prefer the Russian template in this directory for new owner-facing evidence.
 
 Current evidence records:
 
+- `AUDIT_STAGING_DEPLOY_20260818_RU.md` - exact audit backend deployment paired
+  with the live rebuilt catalog and widget, including schema reconciliation,
+  rollback artifacts, skipped owner-manual smoke and the remaining new-catalog
+  RAG implementation gap.
 - `STAGING_FEATURE_BASELINE_20260803_RU.md` - текущая staging feature baseline по продуктовым
   фичам: `landing@628e4a07` + widget `v1.1.4@c44f9963` + backend runtime
   `https://manager.botops.ru`; smoke/regression evidence intentionally pending.

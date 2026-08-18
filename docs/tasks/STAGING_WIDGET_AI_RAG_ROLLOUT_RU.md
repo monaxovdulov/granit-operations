@@ -197,3 +197,36 @@ git diff --check
 ```
 
 Runtime checks are required only for the later implementation/deploy/RAG task.
+
+## Staging deployment update — 2026-08-18
+
+Владелец явно поручил без отдельного regression-smoke развернуть на staging
+актуальный audit snapshot и оставить ручную проверку ему.
+
+- `granit-operations@d3ce2908faeb2905c54e635cf5b00925296eed3a`
+  развернут вместо `b72d526a1ac166afd800b79f3315ac4d3e14657f`;
+- применены принятые миграции `0017`—`0022` и восстановлен отсутствовавший в
+  `public` экземпляр принятого gate из `0014`;
+- старый Mastra selector удалён из staging compose, активен единый direct
+  runtime с закреплённой моделью `gpt-5.6-luna`;
+- live preview уже использовал новый каталог
+  `landing-granit-static@b990f16bb9443979d83ac32df96b56a871e341b9`
+  и widget `1.1.4@c44f99637e097a47b3c53099c95d7e8e01701ad8`;
+- health, exact-origin CORS и отсутствие worker errors после исправления
+  staging schema drift подтверждены; платный/model и mutation smoke по прямому
+  указанию владельца не выполнялся.
+
+Первый реальный owner POST после rollout вернул `503`: canonical `public`
+содержал новые `widget_ai_jobs`/`ai_runs`, но исторические вспомогательные
+`conversation_slots` и `conversation_requirements` остались только в
+`grounded`. Исправление не меняло код или данные: search path установлен в
+`public,grounded`, поэтому новые canonical таблицы имеют приоритет, а
+сохранившиеся support tables доступны как fallback. После recreate resolution
+обоих наборов таблиц и startup logs проверены; исходный отклонённый POST нужно
+повторить из widget.
+
+Существенная непроверенная граница: текущий audit runtime использует
+owner-approved статический 15-фактный snapshot из исторического
+`granit-site-cms@23f2ee8...`, а не RAG/snapshot нового каталога от 2026-08-16.
+Это implementation gap, не deployment gap. Точная операционная запись и rollback
+находятся в `docs/release/evidence/AUDIT_STAGING_DEPLOY_20260818_RU.md`.
