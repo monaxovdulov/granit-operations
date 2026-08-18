@@ -285,3 +285,7 @@ Rollback: предыдущий staging backend image/SHA; DB rollback не ну�
 
 Executor evidence:
 `docs/release/evidence/STAGING_WIDGET_AI_INVALID_CANDIDATE_FIX_20260818_RU.md`.
+
+Technical runtime commit:
+`1eb99c36b35bd7f40171964e73fd5ec9e91f073e` на base
+`2122ce143129492797514bb73bdf4a1069e273a2`.

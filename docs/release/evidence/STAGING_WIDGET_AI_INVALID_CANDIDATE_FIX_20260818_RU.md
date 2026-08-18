@@ -7,6 +7,12 @@ Slice: staging website widget AI validation hotfix
 Task link: `docs/tasks/STAGING_WIDGET_AI_RAG_ROLLOUT_RU.md`
 Contract/version: `granit_model_turn.v1`
 
+Base/runtime commit:
+`2122ce143129492797514bb73bdf4a1069e273a2` /
+`1eb99c36b35bd7f40171964e73fd5ec9e91f073e`.
+
+Technical commit stat: 8 files changed, 308 insertions, 20 deletions.
+
 ## Что проверяли
 
 После успешного provider call безопасный model output не должен блокироваться

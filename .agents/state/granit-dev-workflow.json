@@ -2,7 +2,7 @@
   "schema_version": 1,
   "repo": "granit-operations",
   "updated_at": "2026-08-18T22:36:00Z",
-  "git_head": "2122ce143129492797514bb73bdf4a1069e273a2",
+  "git_head": "1eb99c36b35bd7f40171964e73fd5ec9e91f073e",
   "mode": "staging_ai_hotfix",
   "state": "technical_done_independent_review_required",
   "dirty_worktree": {
