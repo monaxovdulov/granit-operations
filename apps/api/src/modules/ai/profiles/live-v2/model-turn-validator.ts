@@ -276,11 +276,13 @@ function composeCanonicalText(output: ModelTurnOutput): {
     : null;
 
   if (question) {
-    if (answerText.endsWith(question.text)) {
-      answerText = answerText.slice(0, -question.text.length).trim();
-    }
+    answerText = stripDuplicatedQuestionSuffix(answerText, question.text);
 
-    if (!answerText || answerText.endsWith("?") || countQuestions(question.text) !== 1) {
+    if (
+      !answerText ||
+      countQuestions(answerText) !== 0 ||
+      countQuestions(question.text) !== 1
+    ) {
       return null;
     }
   } else if (countQuestions(answerText) > 1) {
@@ -289,6 +291,45 @@ function composeCanonicalText(output: ModelTurnOutput): {
 
   const finalText = question ? `${answerText}\n\n${question.text}` : answerText;
   return finalText.length <= 900 ? { finalText, question } : null;
+}
+
+function stripDuplicatedQuestionSuffix(answerText: string, questionText: string): string {
+  const normalizedQuestion = normalizeLiveV2TextForComparison(questionText);
+  if (!normalizedQuestion) return "";
+
+  for (let index = 0; index < answerText.length; index += 1) {
+    const suffix = answerText.slice(index).trim();
+
+    if (
+      normalizeLiveV2TextForComparison(suffix) !== normalizedQuestion ||
+      !isTextBoundary(answerText, index)
+    ) {
+      continue;
+    }
+
+    const prefix = answerText
+      .slice(0, index)
+      .trim()
+      .replace(/[,:;\-–—]+$/u, "")
+      .trim();
+
+    if (!prefix) return "";
+    return /[.!?]$/u.test(prefix) ? prefix : `${prefix}.`;
+  }
+
+  return answerText;
+}
+
+function isTextBoundary(value: string, index: number): boolean {
+  if (index === 0) return true;
+  const previous = value[index - 1];
+  const current = value[index];
+  return (
+    !previous ||
+    !current ||
+    !/[\p{L}\p{N}]/u.test(previous) ||
+    !/[\p{L}\p{N}]/u.test(current)
+  );
 }
 
 function validateStatePatches(

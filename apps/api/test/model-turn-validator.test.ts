@@ -1,6 +1,7 @@
 import { sha256Hex } from "@granit/shared";
 import { describe, expect, it } from "vitest";
 
+import type { AiSlotName } from "../src/modules/ai/ai-dialog-contract.js";
 import { validateModelTurnOutput } from "../src/modules/ai/profiles/live-v2/model-turn-validator.js";
 import { buildLiveV2TestTurn, contextMessage } from "./fixtures/live-v2-synthetic.v1.js";
 
@@ -40,6 +41,50 @@ describe("CONV-2 granit_model_turn.v1 validation", () => {
         finalText: "Подберём вариант.\n\nКакой материал рассматриваете?"
       }
     });
+  });
+
+  it("repairs a duplicated question suffix despite sentence-case differences", () => {
+    const result = validateModelTurnOutput({
+      value: output({
+        answerText:
+          "В каталоге представлены вертикальные памятники. Запрос на форму арфы зафиксировал; какой материал рассматривать?",
+        question: { text: "Какой материал рассматривать?", target: "material" }
+      }),
+      turnInput: buildLiveV2TestTurn({ inbound: "покажи памятник арфа" })
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      plan: {
+        action: "ask_clarifying_question",
+        finalText:
+          "В каталоге представлены вертикальные памятники. Запрос на форму арфы зафиксировал.\n\nКакой материал рассматривать?"
+      }
+    });
+  });
+
+  it("does not hide a second question inside answerText", () => {
+    expect(
+      validateModelTurnOutput({
+        value: output({
+          answerText: "Вы спрашиваете о заказе? Помогу разобраться.",
+          question: { text: "Что именно нужно уточнить?", target: "questionSummary" }
+        }),
+        turnInput: buildLiveV2TestTurn({
+          inbound: "Здравствуйте, у меня есть вопрос по заказу"
+        })
+      })
+    ).toEqual({ ok: false, code: "duplicate_question" });
+
+    expect(
+      validateModelTurnOutput({
+        value: output({
+          answerText: "Нужно уточнить предматериал?",
+          question: { text: "Материал?", target: "material" }
+        }),
+        turnInput: buildLiveV2TestTurn()
+      })
+    ).toEqual({ ok: false, code: "duplicate_question" });
   });
 
   it("rejects a question for a known slot and unsafe commercial text", () => {
@@ -238,7 +283,7 @@ describe("CONV-2 granit_model_turn.v1 validation", () => {
 
 function output(input: {
   answerText?: string;
-  question?: { text: string; target: "material" | "city" } | null;
+  question?: { text: string; target: AiSlotName } | null;
   statePatches?: unknown[];
   recommendationIds?: string[];
   handoffReason?:

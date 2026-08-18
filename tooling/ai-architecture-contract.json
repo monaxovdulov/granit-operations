@@ -11,7 +11,7 @@
     "provider_boundary": "apps/api/src/modules/ai/adapters/openai-live-v2-decision-generator.ts",
     "source_count": 140,
     "source_paths_sha256": "95f2c18c9ddc7aaba769ec2f422bbfffaa35d8b7881f5c5548ba726d08827781",
-    "source_contents_sha256": "efc78259159baf5ee4980a503f17a16eae0a1b5d89fe520d3c9d2b4fe356cfdf"
+    "source_contents_sha256": "dec483da6c278fd5ec3dd94d779b144d98dd2b2bb4a25e7f1a2981cb779fe57f"
   },
   "documents": {
     "active_goal": "docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md",

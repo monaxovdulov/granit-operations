@@ -230,3 +230,62 @@ owner-approved статический 15-фактный snapshot из истор
 `granit-site-cms@23f2ee8...`, а не RAG/snapshot нового каталога от 2026-08-16.
 Это implementation gap, не deployment gap. Точная операционная запись и rollback
 находятся в `docs/release/evidence/AUDIT_STAGING_DEPLOY_20260818_RU.md`.
+
+## Текущий срез — invalid candidate repair, 2026-08-18
+
+Статус: `technical_done`, ожидает fresh independent review; active
+AI-RUNTIME-CONVERGENCE Goal и её accepted CONV-5 card не переоткрываются.
+
+Один результат: фраза посетителя «Здравствуйте, у меня есть вопрос по заказу»
+и эквивалентный безопасный ход получают один уточняющий AI-ответ, а не manager
+fallback из-за дублированного вопроса в structured model output.
+
+Baseline:
+
+- `HEAD == origin/main == 2122ce143129492797514bb73bdf4a1069e273a2`;
+- пользовательский untracked `output/` не читается и не изменяется;
+- два live staging run завершились `candidate_invalid` после успешного вызова
+  `gpt-5.6-luna`; send gate не запускался;
+- provider response хранится с `store:false`, поэтому raw candidate исходного
+  run отсутствует по принятой privacy policy;
+- ограниченный диагностический вызов воспроизвёл корень: Luna повторила один
+  вопрос в `answerText` со строчной буквы и в отдельном `question.text` с
+  прописной; byte-exact suffix repair не удалил дубликат и вернул
+  `duplicate_question`.
+
+Точный allowlist среза:
+
+- `apps/api/src/modules/ai/profiles/live-v2/model-turn-validator.ts`;
+- `apps/api/src/modules/ai/services/recorded-live-v2-turn-service.ts`;
+- целевые tests этих путей;
+- `tooling/ai-architecture-contract.json` только для reviewed runtime closure
+  hash после production diff;
+- эта task card, sanitized release evidence и machine state.
+
+Вне области: public contract, DB schema/migrations, model/reasoning, catalog/RAG,
+manager takeover/send gate, production, Telegram и `output/`.
+
+Критерии:
+
+- case/punctuation-equivalent duplicate question canonicalizes to one question;
+- второй самостоятельный вопрос всё ещё отклоняется;
+- known-slot, unsafe claim, tone и repeated-reply guards не ослаблены;
+- failed validation span сохраняет конкретный allowlisted diagnostic code без
+  raw output, prompt или PII;
+- focused tests, typecheck/build, architecture guard и diff check проходят;
+- после fresh independent review commit публикуется и разворачивается только на
+  staging, где live smoke получает persisted AI reply.
+
+Разрешения: владелец явно поручил системно исправить AI validation defect; ранее
+он поручил commit/push/merge и staging deploy текущего audit-кандидата. Один
+минимальный live staging smoke/model call входит в проверку. Новые migration,
+public contract и production не разрешены и не требуются.
+
+Rollback: предыдущий staging backend image/SHA; DB rollback не нужен.
+
+Executor evidence:
+`docs/release/evidence/STAGING_WIDGET_AI_INVALID_CANDIDATE_FIX_20260818_RU.md`.
+
+Technical runtime commit:
+`1eb99c36b35bd7f40171964e73fd5ec9e91f073e` на base
+`2122ce143129492797514bb73bdf4a1069e273a2`.
