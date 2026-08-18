@@ -16,13 +16,19 @@ import {
   executeLiveV2Turn,
   type LiveV2TurnOutcome
 } from "../profiles/live-v2/live-v2-orchestrator.js";
-import type { LiveV2Candidate } from "../profiles/live-v2/live-v2-contract.js";
+import type {
+  LiveV2Candidate,
+  LiveV2ValidationFailureCode
+} from "../profiles/live-v2/live-v2-contract.js";
 import {
   executeModelTurn,
   type ModelTurnApplyPlan,
   type ModelTurnOutcome
 } from "../profiles/live-v2/model-turn-orchestrator.js";
-import type { ValidatedTurnPlan } from "../profiles/live-v2/model-turn-contract.js";
+import type {
+  ModelTurnValidationIssue,
+  ValidatedTurnPlan
+} from "../profiles/live-v2/model-turn-contract.js";
 import type { AiRequirementUpdate, AiSlotUpdate } from "../ai-dialog-contract.js";
 import type {
   RecordedAiPersistReplyInput,
@@ -422,7 +428,10 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
           "candidate_validation",
           input.liveOutcome.validation.ok ? "succeeded" : "failed",
           elapsedMs(input.generatorCompletedAt ?? input.startedAt, input.gateStartedAt ?? now),
-          input.liveOutcome.validation.ok ? undefined : "validation_failed"
+          input.liveOutcome.validation.ok ? undefined : "validation_failed",
+          input.liveOutcome.validation.ok
+            ? undefined
+            : candidateValidationDiagnosticVersion(input.liveOutcome.validation.code)
         )
       );
     } else if (
@@ -547,7 +556,8 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
     name: AiRunSpanWrite["name"],
     status: AiRunSpanWrite["status"],
     latencyMs: number,
-    errorCode?: AiRunSpanErrorCode
+    errorCode?: AiRunSpanErrorCode,
+    toolVersion?: string
   ): AiRunSpanWrite {
     return {
       spanId: this.idGenerator(),
@@ -555,9 +565,16 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
       name,
       status,
       latencyMs,
-      ...(errorCode ? { errorCode } : {})
+      ...(errorCode ? { errorCode } : {}),
+      ...(toolVersion ? { toolVersion } : {})
     };
   }
+}
+
+function candidateValidationDiagnosticVersion(
+  code: LiveV2ValidationFailureCode | ModelTurnValidationIssue
+): string {
+  return `candidate_validator.${code}.v1`;
 }
 
 function throwIfRecordedTurnAborted(signal: AbortSignal | undefined): void {

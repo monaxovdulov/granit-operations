@@ -125,6 +125,60 @@ describe("M2 app-owned direct live_v2 runtime", () => {
       outboundMessageId: expect.any(String)
     });
   });
+
+  it("records the exact safe candidate validation failure without raw model output", async () => {
+    const repository = new MemoryIntakeRepository();
+    const generateDecision = vi.fn<ObservedLiveV2DecisionGenerator["generateDecision"]>(
+      async () => ({
+        candidate: {
+          version: "granit_model_turn.v1",
+          message: { answerText: "Сделаем за три дня.", question: null },
+          statePatches: [],
+          recommendationIds: [],
+          handoffIntent: null
+        },
+        observation: {
+          observedModelProvider: "openai",
+          observedModelName: "gpt-5.6-luna",
+          runtimeRunId: "resp_direct_model_turn_invalid_001"
+        }
+      })
+    );
+    const app = track(
+      buildApi({
+        repository,
+        widgetAi: {
+          enabled: true,
+          directLiveV2: {
+            generator: { generateDecision },
+            modelName: "gpt-5.6-luna",
+            approvedFacts: TEST_LIVE_V2_FACTS
+          },
+          jobWorker: testJobWorkerOptions()
+        }
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/public/intake/site-widget/messages",
+      payload: widgetRequest("conv3-direct-model-turn-invalid-0001", "Когда будет готово?")
+    });
+    await waitForTerminalHistory(app, response.json().public_session_id);
+
+    expect(repository.listAiRuns()[0]).toMatchObject({
+      status: "blocked",
+      outcomeReason: "candidate_invalid",
+      spans: expect.arrayContaining([
+        expect.objectContaining({
+          name: "candidate_validation",
+          status: "failed",
+          errorCode: "validation_failed",
+          toolVersion: "candidate_validator.unsafe_claim.v1"
+        })
+      ])
+    });
+  });
 });
 
 function testJobWorkerOptions() {

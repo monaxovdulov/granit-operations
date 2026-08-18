@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
   "repo": "granit-operations",
-  "updated_at": "2026-08-18T20:33:00Z",
-  "git_head": "d3ce2908faeb2905c54e635cf5b00925296eed3a",
-  "mode": "staging_manual_verification",
-  "state": "audit_snapshot_deployed_manual_smoke_pending",
+  "updated_at": "2026-08-18T22:36:00Z",
+  "git_head": "2122ce143129492797514bb73bdf4a1069e273a2",
+  "mode": "staging_ai_hotfix",
+  "state": "technical_done_independent_review_required",
   "dirty_worktree": {
-    "status": "deployment_evidence_uncommitted",
-    "summary": "Audit snapshot d3ce2908 is live on staging with migrations 0017-0022 and canonical public AI gate; owner requested no paid or mutation smoke and will verify manually; new 2026-08-16 catalog RAG alignment remains an implementation gap; output/ remains untouched"
+    "status": "hotfix_evidence_uncommitted",
+    "summary": "Duplicate-question candidate validation hotfix is technical_done with focused tests, typecheck, architecture guard and build green; fresh independent review, publication, staging deploy and live smoke remain; output/ remains untouched"
   },
   "context": {
     "last_scan_at": "2026-08-04T23:37:25Z",
@@ -19,9 +19,9 @@
     "last_refresh_at": "2026-08-04T23:37:25Z"
   },
   "task": {
-    "type": "audit-staging-deploy",
-    "summary": "Deploy the exact current audit backend against the already-live rebuilt landing catalog and widget for owner manual verification.",
-    "source": "docs/tasks/STAGING_WIDGET_AI_RAG_ROLLOUT_RU.md; docs/release/evidence/AUDIT_STAGING_DEPLOY_20260818_RU.md",
+    "type": "staging-widget-ai-invalid-candidate-fix",
+    "summary": "Repair case-insensitive duplicated structured-output questions without weakening safety guards, preserve exact sanitized validation diagnostics, then review and deploy to staging.",
+    "source": "docs/tasks/STAGING_WIDGET_AI_RAG_ROLLOUT_RU.md; docs/release/evidence/STAGING_WIDGET_AI_INVALID_CANDIDATE_FIX_20260818_RU.md",
     "owner_decisions": {
       "conv2_runtime_model": {
         "decided_at": "2026-08-05",
