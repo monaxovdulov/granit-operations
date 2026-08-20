@@ -35,11 +35,11 @@
     "allowed_provenance_paths": [
       "docs/tasks/ARCHIVE_RU.md"
     ],
-    "task_count": 21,
-    "task_paths_sha256": "851eb09545d0113d4f12d3beebee93af3a7ed71592196bb97949b2061cf11b6f",
+    "task_count": 22,
+    "task_paths_sha256": "31c65ad154eb5feb9152e5e205feec0f9c589db6f5de5efed95bb29ffb5e82c6",
     "routing_surface_hashes": {
       "docs/source-of-truth.md": "55d6f093ca4f15b8f4c1c57552648e861afd79eb96c9a49cfd482de030126f15",
-      "docs/tasks/README.md": "8d3893bbe47b7e87e0a433ee49ac00782cf1557e0c834327730de77ae7893068"
+      "docs/tasks/README.md": "26d220459fa9d9b0ae8b43833d380308736b3e9a0113302e3200f9250e3cf418"
     }
   },
   "compatibility": {

@@ -43,6 +43,16 @@
     }
   },
   "checks": {
+    "ai_layer_refactor_skill_validation": {
+      "command": "python3 scripts/validate.py; python3 -m unittest discover -s tests -v",
+      "status": "passed",
+      "reason": "queued non-active AILR candidate uses developing-ai-agents plugin 0.6.0 at upstream bf1330f; source-anchor validation and 64/64 upstream unit tests passed"
+    },
+    "ai_layer_refactor_draft_validation": {
+      "command": "npm run check:architecture; JSON parse; diff/whitespace checks; exact task and routing hashes",
+      "status": "passed",
+      "reason": "queued non-active AILR draft leaves the current Goal/card route unchanged; architecture guard and negative self-tests 19/19 passed with one active card, 140 production sources and 20 compatibility exports; 22-task set and README routing hashes match the reviewed contract"
+    },
     "pr2_aggregate": {
       "command": "nine-suite sequential vitest aggregate",
       "status": "passed",
@@ -384,5 +394,5 @@
       "reason": "ordinary fast-forward push from the reviewed b678a37 base; force-push, deploy and external runtime activation were not used"
     }
   },
-  "next_action": "Wait for the owner's final teach-back explanation; verify all six required dimensions, then record understanding_verified and close the Goal only if the explanation is sufficient."
+  "next_action": "Wait for the owner's final teach-back explanation; verify all six required dimensions, then record understanding_verified and close the Goal only if the explanation is sufficient. AILR-00 remains a queued non-active candidate until that route is completed and separately activated."
 }

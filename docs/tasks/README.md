@@ -25,3 +25,11 @@ Accepted ADR остаются в `../adr/`, а воспроизводимые о
 
 Operations/staging/Telegram task records, оставшиеся в этом каталоге, не входят
 в active AI route и выполняются только по отдельному текущему поручению.
+
+## Future draft
+
+`AI_LAYER_REFACTOR_DRAFT_RU.md` — неактивный, ещё не сверенный с current code
+пакет будущих малых срезов по упрощению AI-слоя. Он не заменяет текущую Goal и
+сам не разрешает implementation. Отдельным последующим поручением разрешены
+commit и обычный push текущей ветки; PR, merge и deploy не разрешены. Перед
+активацией каждого среза обязателен code-derived preflight на свежем SHA.
