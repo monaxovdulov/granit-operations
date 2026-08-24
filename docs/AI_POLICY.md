@@ -1,58 +1,103 @@
 # AI Policy
 
-Status: direct model-turn website runtime implemented; customer traffic remains controlled by runtime flags
+Status: single direct model-turn runtime implemented; customer traffic and
+deployment remain separately gated.
 
-Website AI remains disabled unless `AI_WIDGET_ENABLED=true`. When enabled, the
-application has one `direct_openai` model-turn pipeline; Mastra, legacy and
-shadow runtime selectors no longer exist. Production enablement still requires
-separate owner approval.
+Website AI stays disabled unless `AI_WIDGET_ENABLED=true`. When enabled, the
+application has one app-owned `direct_openai` model-turn pipeline. There is no
+second production runtime, hidden fallback contour or live semantic verifier.
+Production enablement still requires separate manual owner approval.
 
-## Grounded send path
+## Current send path
 
 1. The visitor message is durably persisted before model generation.
-2. A generator writes a natural Russian reply plus typed slots and flexible requirements with exact message evidence.
-3. App-owned structural checks validate values, quotes, offsets, requested slots and handoff shape.
-4. An independent semantic verifier extracts every factual span from the finished reply, grounds it, and returns exact one-to-one verdicts for every proposed slot and requirement.
-5. App-owned contract validation checks claim spans, coverage and references. A catalog URL must exactly equal the selected published record's canonical top-level `frontend.url`; a valid record reference cannot support altered URL text.
-6. `handoff` is applied immediately with an app-owned response. Exactly one bounded repair is allowed only for `repair` while the shared 18-second turn deadline has enough budget; a handoff returned after repair is also terminal.
-7. After a verified plan, the application may retain the model text or render deterministic customer-facing text for a safe commercial flow. Only the resulting app-approved reply reaches the atomic send-time `agent_allowed_to_reply=true` gate.
+2. A PostgreSQL job is claimed only while the conversation gate, generation
+   epoch, latest visitor sequence and lease are current.
+3. Authoritative conversation state is read after claim. The model receives a
+   bounded view with the current inbound, recent safe messages, known slots and
+   approved static facts.
+4. One structured model call returns `granit_model_turn.v1`: answer text, an
+   optional separate question, evidence-backed state patches, recommendation
+   IDs and an optional bounded handoff intent.
+5. App-owned validation checks strict shape, patch evidence and action
+   consistency. It may remove an exact duplicated or already answered question
+   without another model call. A current turn is rejected only when the output
+   shape is invalid, no text remains after allowed repair, or handoff and a
+   question conflict.
+6. After canonical text and SHA-256 are fixed, the repository rechecks the
+   send gate, epoch, latest sequence and lease, then atomically commits the
+   reply, state updates, handoff, winning attempt, run and job.
+7. Only a committed outbound message can appear in `site_widget.history.v2`.
 
-Semantic decisions are not made by keyword regex in the grounded path. Requests for a manager, legal advice and binding commercial promises are judged from the full dialog context. Words such as `документ` or `связаны` do not trigger handoff by themselves.
+The live validator does not use keyword or semantic regex to decide whether
+free Russian prose is a price promise, deadline, legal statement, bad tone or
+repetition. Those expressions produced false terminal turns and are not a
+reliable semantic verifier. The prompt still forbids unsupported commercial
+claims, but a prompt is not independent factual evidence.
 
-## Knowledge
+Therefore the current unpublished AILR-02 state is not production approval:
+structured published catalog/evidence validation in AILR-03/04 and final
+cross-slice acceptance are required before any deployment of this Goal.
 
-- Business/catalog truth comes only through `CatalogKnowledgePort` snapshots and published records.
-- Server assembly uses the deterministic `granit-cha.catalog.2026-07-20.v1` file snapshot (465 published records; 16 review-required records stay draft and are never retrieved).
-- `empty.v1` is not used in the normal assembled runtime; it remains an explicit fallback/test implementation.
-- Missing knowledge is answered honestly and does not by itself force a handoff.
-- A fact about the visitor must be backed by an exact quote and UTF-16 offsets from a visitor message.
-- A slot or flexible requirement value must also be semantically supported by that quote; matching offsets alone are insufficient.
-- Manager-authored slot values cannot be silently overwritten; conflicting AI candidates are retained as append-only events.
+## Knowledge and recommendations
 
-## Conversation memory
+- The current production model receives the small approved static facts asset.
+- Production catalog retrieval is not connected yet.
+- Any non-empty `recommendationIds` list is currently dropped; no model-supplied
+  identifier becomes a public catalog action.
+- The next catalog slices add server-side published retrieval before the same
+  single model call. The server will validate candidate membership, stable IDs,
+  revisions and published status, then build URLs/actions itself.
+- Missing or invalid retrieval must leave a safe text-only turn; it must not
+  create a fabricated link or automatic manager handoff.
 
-- The latest 12 messages remain verbatim in model context.
-- Older dialog is folded into an app-owned rolling summary so discussed options and objections are not silently lost.
-- The rolling summary helps continuity but is never accepted as evidence for a new visitor fact.
-- Thirteen typed slots cover core intake. Evidence-backed flexible preferences, requirements and avoidances cover style, color, shape, accessories, decoration and site constraints.
+## Conversation state
+
+- Fresh context is assembled from app-owned conversation messages, slots,
+  requirements and memory after a job is claimed.
+- The model-safe view is bounded and excludes internal IDs, timestamps, URLs,
+  contact values and unrestricted metadata.
+- Slot and requirement patches apply only when their value is supported by a
+  unique exact quote from the current visitor message.
+- Manager-authored values cannot be silently overwritten.
+- A summary or previous assistant statement is context, not evidence for a new
+  visitor fact.
 
 ## Handoff and degradation
 
-- Explicit manager requests, legal advice and binding/final commercial terms may require handoff.
-- A successful handoff stops AI, persists a snapshot, adds timeline/outbox events and notifies managers with the structured intake.
-- Model/verifier/grounding failure degrades only the current turn. The inbound message remains saved, the manager sees the event, and AI stays available for the next turn.
-- A manager takeover still disables AI and the send-time gate blocks stale drafts.
+- A model handoff intent is limited to an explicit manager request, final quote
+  pressure or readiness to order and may not coexist with a question.
+- A successful handoff reply and ownership transition are committed atomically;
+  subsequent AI replies are disabled.
+- A validator, provider, context or persistence failure degrades only the
+  current turn. It does not itself transfer the conversation to a manager.
+- A new visitor message makes an older generation stale. Its result is not
+  committed, and the new message receives a fresh job and context.
+- A manager takeover disables AI. The atomic send gate blocks any in-flight
+  stale draft, so AI sends nothing after takeover.
+
+## Observability and privacy
+
+- App-owned logical runs, physical attempts, spans and quality events are the
+  operational source of truth.
+- Terminal validator evidence may retain only an allowlisted historical code;
+  raw prompts, model output, customer traces, provider errors and PII are not
+  added to manager/public observability.
+- Historical `unsafe_claim`, `tone_violation` and `repeated_reply` codes remain
+  readable for old durable evidence. Their presence in the enum does not make
+  them current live terminal gates.
+- Tone, helpfulness and repetition are evaluated with offline fixtures/rubrics
+  and manual review, separately from structural constraints.
 
 ## Rollout and evaluation
 
-- Операционный выключатель один: `AI_WIDGET_ENABLED=false`; кодовый rollback —
-  revert предыдущего принятого commit, а не выбор второго runtime.
-- Ответ проходит app-owned schema validation, fresh send gate и атомарную запись;
-  непроверенный model output не отправляется клиенту.
-- Offline regression для grounded/catalog экспериментов остаётся отдельным eval
-  harness и не является production runtime. Paid live evaluation дополнительно
-  требует `AI_WIDGET_EVAL_LIVE=true` и owner-provided OpenAI credentials.
+- The operational switch remains `AI_WIDGET_ENABLED=false` by default.
+- Offline regression is evidence, not a production runtime and not deployment
+  approval. Paid live evaluation still requires explicit owner permission,
+  credentials and its separate runtime gate.
+- Green tests do not replace the owner's manual acceptance. Commit, push,
+  deploy, production configuration and real traffic require separate commands.
+- Code rollback is the whole accepted slice revert; there is no runtime selector
+  for returning to a second AI contour.
 
-Future owner updates, especially commercial terms, are documented in `docs/AI_ASSISTANT_OWNER_INPUT_GUIDE_RU.md`. A plain-Russian explanation of layers, message flow, controls and limitations is in `docs/AI_ASSISTANT_OWNER_ARCHITECTURE_GUIDE_RU.md`.
-
-Telegram AI remains out of scope. Do not enable production AI or deploy these changes without separate production approval.
+Telegram AI remains out of scope.

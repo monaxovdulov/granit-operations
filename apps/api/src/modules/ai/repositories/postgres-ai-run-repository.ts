@@ -40,6 +40,10 @@ import {
   sanitizeAiRunCompletion,
   sanitizeAiRunStart
 } from "../observability/ai-observability-sanitizer.js";
+import {
+  isAiValidatorFailureCode,
+  type AiValidatorFailureCode
+} from "../observability/ai-validator-failure-code.js";
 
 const AI_MODEL_PROVIDERS = ["openai", "fake", "policy", "none"] as const;
 const AI_CONFIGURED_MODEL_PROVIDERS = ["openai", "fake", "none"] as const;
@@ -279,13 +283,31 @@ export class PostgresAiRunRepository implements AiRunRepository {
     const runtimeRunId = row.runtimeRunId
       ? checkedSafeIdentifier(row.runtimeRunId, 200)
       : undefined;
+    const normalizedAction = enumValue(AI_RUN_NORMALIZED_ACTIONS, row.decisionAction);
+    const outcomeReason = enumValue(AI_RUN_OUTCOME_REASONS, row.outcomeReason);
+    const failureCode = row.failureCode
+      ? enumValue(AI_RUN_FAILURE_CODES, row.failureCode)
+      : undefined;
+    const validatorResult = enumValue(AI_RUN_VALIDATOR_RESULTS, row.profileValidatorResult);
+    const validatorFailureCode = validatorFailureCodeFromMetadata(row.metadata);
+    if (
+      validatorFailureCode &&
+      (status !== "blocked" ||
+        normalizedAction !== "no_reply" ||
+        outcomeReason !== "candidate_invalid" ||
+        failureCode !== "invalid_candidate" ||
+        validatorResult !== "rejected")
+    ) {
+      throw new AiRunCompletionConflictError();
+    }
     return {
       ...runningRecordBase(row, attemptRow),
       status,
-      normalizedAction: enumValue(AI_RUN_NORMALIZED_ACTIONS, row.decisionAction),
-      outcomeReason: enumValue(AI_RUN_OUTCOME_REASONS, row.outcomeReason),
-      ...(row.failureCode ? { failureCode: enumValue(AI_RUN_FAILURE_CODES, row.failureCode) } : {}),
-      validatorResult: enumValue(AI_RUN_VALIDATOR_RESULTS, row.profileValidatorResult),
+      normalizedAction,
+      outcomeReason,
+      ...(failureCode ? { failureCode } : {}),
+      validatorResult,
+      ...(validatorFailureCode ? { validatorFailureCode } : {}),
       ...(runtimeRunId ? { runtimeRunId } : {}),
       observedModelProvider: enumValue(
         AI_MODEL_PROVIDERS,
@@ -650,10 +672,26 @@ function logicalCompletionSet(completion: AiRunTerminalCompletion) {
     outcomeReason: completion.outcomeReason,
     failureCode: completion.failureCode ?? null,
     profileValidatorResult: completion.validatorResult,
+    ...(completion.validatorFailureCode
+      ? {
+          metadata: sql<Record<string, unknown>>`${aiRuns.metadata} || ${JSON.stringify({
+            validator_failure_code: completion.validatorFailureCode
+          })}::jsonb`
+        }
+      : {}),
     completedAt: completion.completedAt,
     latencyMs: completion.latencyMs,
     updatedAt: completion.completedAt
   };
+}
+
+function validatorFailureCodeFromMetadata(
+  metadata: Record<string, unknown>
+): AiValidatorFailureCode | undefined {
+  const value = metadata.validator_failure_code;
+  if (value === undefined) return undefined;
+  if (!isAiValidatorFailureCode(value)) throw new AiRunCompletionConflictError();
+  return value;
 }
 
 function runningAttemptFence(run: RunningAiRunRecord) {

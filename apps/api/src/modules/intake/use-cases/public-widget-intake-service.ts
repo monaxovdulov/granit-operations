@@ -53,6 +53,14 @@ import type {
   PublicWidgetManagerReviewReason,
   PublicWidgetManagerReviewRepository
 } from "../ports/public-widget-manager-review-repository.js";
+import {
+  isPublicWidgetAiUnavailableReason,
+  projectPublicWidgetAi,
+  projectPublicWidgetHistoryAutomation,
+  shouldPollPublicWidgetHistory,
+  toPublicWidgetConversationState,
+  type PublicWidgetHistoryAutomationReason
+} from "./public-widget-ai-projection.js";
 
 export type PublicWidgetIntakeServiceResult = {
   statusCode: number;
@@ -149,7 +157,7 @@ export type PublicWidgetHistoryServiceResult = {
           }>;
           automation?: {
             status: SiteWidgetAiJobStatus;
-            reason?: string;
+            reason?: PublicWidgetHistoryAutomationReason;
           };
         }>;
       }
@@ -199,11 +207,24 @@ export class PublicWidgetIntakeService {
     }
 
     if (schemaVersion === "site_widget.history.v2") {
-      const hasActiveJob = history.messages.some(
-        (message) =>
-          message.automation?.status === "pending" ||
-          message.automation?.status === "processing" ||
-          message.automation?.status === "retrying"
+      const projectionInput = {
+        conversationState: history.state,
+        agentAllowedToReply: history.agentAllowedToReply,
+        runtimeAvailable: history.runtimeEnabled,
+        currentWindow: history.currentWidgetAiWindow
+      };
+      const jobs = history.messages.flatMap((message) =>
+        message.automation
+          ? [
+              {
+                inboundPublicMessageId: message.publicMessageId,
+                expectedGenerationEpoch: message.automation.expectedGenerationEpoch,
+                respondsThroughSequence: message.automation.respondsThroughSequence,
+                status: message.automation.status,
+                terminalReason: message.automation.reason
+              }
+            ]
+          : []
       );
 
       return {
@@ -214,7 +235,9 @@ export class PublicWidgetIntakeService {
           public_session_id: history.publicSessionId,
           public_conversation_id: history.publicConversationId,
           conversation_state: history.state,
-          poll_after_ms: hasActiveJob ? 700 : undefined,
+          poll_after_ms: shouldPollPublicWidgetHistory({ ...projectionInput, jobs })
+            ? 700
+            : undefined,
           messages: history.messages.map((message) => ({
             public_message_id: message.publicMessageId,
             sender_role: message.senderRole,
@@ -229,6 +252,11 @@ export class PublicWidgetIntakeService {
               entity_id: reference.entityId
             })),
             automation: message.automation
+              ? projectPublicWidgetHistoryAutomation({
+                  status: message.automation.status,
+                  terminalReason: message.automation.reason
+                })
+              : undefined
           }))
         }
       };
@@ -667,58 +695,16 @@ function v2AcceptedSuccess(
   saved: SaveAcceptedSiteWidgetMessageResult,
   aiCanRun: boolean
 ): PublicWidgetIntakeServiceResult {
-  const managerPending =
-    saved.aiState === "needs_manager" || saved.aiState === "manager_active";
-  const job = saved.widgetAiJob;
-  const automation = saved.aiReply
-    ? {
-        status: "replied" as const,
-        next_step: "history_available" as const,
-        conversation_state: managerPending ? ("manager_pending" as const) : ("ai_active" as const)
-      }
-    : job?.status === "replied"
-        ? {
-            status: "replied" as const,
-            next_step: "history_available" as const,
-            conversation_state: managerPending
-              ? ("manager_pending" as const)
-              : ("ai_active" as const)
-          }
-        : job?.status === "blocked"
-          ? {
-              status: "manager_pending" as const,
-              next_step: "manager_review" as const,
-              conversation_state: "manager_pending" as const,
-              reason: toV2ManagerReason(job.terminalReason)
-            }
-          : job?.status === "degraded" || job?.status === "failed"
-            ? {
-                status: "degraded" as const,
-                next_step: "retry_or_manager" as const,
-                conversation_state: "ai_active" as const,
-                reason: toV2DegradedReason(job.terminalReason)
-              }
-            : job?.status === "pending" ||
-                job?.status === "processing" ||
-                job?.status === "retrying"
-              ? {
-                  status: "processing" as const,
-                  next_step: "poll_history" as const,
-                  conversation_state: "ai_active" as const,
-                  poll_after_ms: 700
-                }
-              : !aiCanRun || !saved.agentAllowedToReply || job?.status === "superseded"
-                ? {
-                    status: "disabled" as const,
-                    next_step: "manager_review" as const,
-                    conversation_state: "manager_pending" as const
-                  }
-                : {
-                  status: "degraded" as const,
-                  next_step: "retry_or_manager" as const,
-                  conversation_state: "ai_active" as const,
-                  reason: "ai_persistence_unconfirmed" as const
-                };
+  const projection = projectPublicWidgetAi({
+    conversationState: toPublicWidgetConversationState(saved.aiState),
+    agentAllowedToReply: saved.agentAllowedToReply,
+    runtimeAvailable: aiCanRun && (saved.aiRuntimeEnabled ?? true),
+    replayedInboundPublicMessageId: saved.publicMessageId,
+    currentWindow: saved.currentWidgetAiWindow,
+    hasReply: Boolean(saved.aiReply),
+    inboundJob: saved.widgetAiJob,
+    latestJob: saved.latestWidgetAiJob
+  });
 
   return {
     statusCode: 202,
@@ -731,32 +717,10 @@ function v2AcceptedSuccess(
       public_message_id: saved.publicMessageId,
       submitted_at: saved.submittedAt,
       action: "show_widget_saved",
-      automation,
-      message_to_user:
-        automation.status === "processing"
-          ? "Сообщение принято. AI-помощник готовит ответ."
-          : automation.status === "replied"
-            ? "Сообщение принято, ответ доступен в истории диалога."
-            : automation.status === "disabled" || automation.status === "manager_pending"
-              ? "Сообщение принято. Менеджер увидит его в панели."
-              : "Сообщение сохранено. Если AI не ответит, диалог увидит менеджер."
+      automation: projection.automation,
+      message_to_user: projection.messageToUser
     }
   };
-}
-
-function toV2ManagerReason(reason: string | undefined): "agent_reply_blocked" | "handoff" {
-  return reason === "handoff" ? "handoff" : "agent_reply_blocked";
-}
-
-function toV2DegradedReason(
-  reason: string | undefined
-):
-  | PublicWidgetAiUnavailableReason
-  | "ai_persistence_unconfirmed"
-  | "worker_failed" {
-  return isPublicWidgetAiUnavailableReason(reason) || reason === "ai_persistence_unconfirmed"
-    ? reason
-    : "worker_failed";
 }
 
 function persistenceFailure(
@@ -1544,20 +1508,6 @@ function unavailable(reason: PublicWidgetAiUnavailableReason): ValidatedAiReplyC
     status: "unavailable",
     reason
   };
-}
-
-function isPublicWidgetAiUnavailableReason(
-  value: unknown
-): value is PublicWidgetAiUnavailableReason {
-  return (
-    value === "missing_openai_config" ||
-    value === "model_error" ||
-    value === "empty_model_response" ||
-    value === "unsafe_model_response" ||
-    value === "semantic_verifier_error" ||
-    value === "grounding_validation_failed" ||
-    value === "turn_timeout"
-  );
 }
 
 function normalizeCandidateText(value: string): string {

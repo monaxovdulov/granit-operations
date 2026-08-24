@@ -20,6 +20,7 @@ const ACTIVE_DOCUMENTS = [
   "docs/source-of-truth.md",
   "docs/AGENT_WORKFLOW.md",
   "docs/AI_AGENT_REFACTOR_PLAYBOOK_RU.md",
+  "docs/AI_POLICY.md",
   "docs/adr/ADR-010-AI_OBSERVABILITY_RUNTIME_BOUNDARY_RU.md",
   "docs/adr/ADR-011-CUSTOMER_FACING_LANDING_SOURCE_RU.md",
   "docs/adr/ADR-012-REPO_LOCAL_AI_SOURCE_OF_TRUTH_RU.md",
@@ -81,6 +82,53 @@ test("allows the long-lived implementing Goal while its card is in independent r
   snapshot.taskDocumentPaths.push("docs/tasks/OPERATIONS_TASK.md");
   refreshArchitectureContract(snapshot);
   assert.deepEqual(evaluateArchitectureGuardrails(snapshot), []);
+});
+
+test("routes a replacement Goal, ignores historical mentions and rejects Goal reactivation", () => {
+  const snapshot = passingSnapshot();
+  const previousGoal = "docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md";
+  const activeGoal = "docs/tasks/AI_LAYER_SIMPLIFICATION_GOAL_RU.md";
+  const activeCard = snapshot.aiCardPaths[0];
+  const activeAuthorityPaths = snapshot.architectureContract.documents.active_authority_paths
+    .map((documentPath) => documentPath === previousGoal ? activeGoal : documentPath)
+    .sort();
+
+  snapshot.files.set(previousGoal, "Статус: `understanding_verified`.\n");
+  snapshot.files.set(activeGoal, "Статус: `implementing`.\n");
+  snapshot.taskDocumentPaths.push(activeGoal);
+  snapshot.architectureContract.documents.active_goal = activeGoal;
+  snapshot.architectureContract.documents.active_authority_paths = activeAuthorityPaths;
+  snapshot.files.set(
+    "docs/source-of-truth.md",
+    "<!-- architecture-guard: active-ai-documents\n" +
+      activeAuthorityPaths.join("\n") +
+      "\n-->\n"
+  );
+  snapshot.files.set(
+    "docs/tasks/README.md",
+    activeRouteIndex(path.basename(activeCard), "", path.basename(activeGoal)) +
+      "Completed `AI_REF_CONV_5_HISTORICAL.md` is provenance only.\n"
+  );
+  refreshArchitectureContract(snapshot);
+
+  assert.deepEqual(evaluateArchitectureGuardrails(snapshot), []);
+
+  snapshot.files.set(previousGoal, "Статус: `implementing`.\n");
+  assertFailure(snapshot, "AI_CARD_LIMIT");
+});
+
+test("rejects an indexed card that differs from the architecture contract", () => {
+  const snapshot = passingSnapshot();
+  const otherCard = "docs/tasks/AI_REF_OTHER.md";
+  snapshot.files.set(otherCard, "Статус: `technical_done`.\n");
+  snapshot.taskDocumentPaths.push(otherCard);
+  snapshot.aiCardPaths.push(otherCard);
+  snapshot.architectureContract.documents.active_card = otherCard;
+  snapshot.architectureContract.documents.active_authority_paths.push(otherCard);
+  snapshot.architectureContract.documents.active_authority_paths.sort();
+  refreshArchitectureContract(snapshot);
+
+  assertFailure(snapshot, "ACTIVE_CARD_ROUTE");
 });
 
 test("rejects a second active task document even when it is not named AI_REF", () => {
@@ -816,11 +864,15 @@ function writeFixtureFile(root, relativePath, source) {
   writeFileSync(absolutePath, source, "utf8");
 }
 
-function activeRouteIndex(cardName, extra = "") {
+function activeRouteIndex(
+  cardName,
+  extra = "",
+  goalName = "AI_RUNTIME_CONVERGENCE_GOAL_RU.md"
+) {
   return (
     "# Task Docs\n\n## Active AI route\n\n" +
     "1. `../source-of-truth.md`\n" +
-    "2. `AI_RUNTIME_CONVERGENCE_GOAL_RU.md`\n" +
+    `2. \`${goalName}\`\n` +
     `3. \`${cardName}\`\n` +
     "Шаблон: `AI_REFACTOR_SLICE_TEMPLATE_RU.md`.\n" +
     extra +

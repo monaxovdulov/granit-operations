@@ -24,6 +24,7 @@ import {
 } from "../profiles/live-v2/model-turn-orchestrator.js";
 import type { ValidatedTurnPlan } from "../profiles/live-v2/model-turn-contract.js";
 import type { AiRequirementUpdate, AiSlotUpdate } from "../ai-dialog-contract.js";
+import { isAiValidatorFailureCode } from "../observability/ai-validator-failure-code.js";
 import type {
   RecordedAiPersistReplyInput,
   RecordedAiPersistReplyResult,
@@ -75,6 +76,7 @@ type TerminalState = Pick<
   | "outcomeReason"
   | "failureCode"
   | "validatorResult"
+  | "validatorFailureCode"
   | "sendGateResult"
   | "qualityEvents"
 >;
@@ -324,7 +326,7 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
         };
       }
 
-      const state = terminalStateFor(liveOutcome);
+      const state = terminalStateFor(liveOutcome, this.options.turnContract);
       throwIfRecordedTurnAborted(input.signal);
       const completed = await this.completeWithoutReply(
         run,
@@ -641,7 +643,10 @@ function persistenceUnconfirmedState(
   };
 }
 
-function terminalStateFor(outcome: RecordedPipelineOutcome): TerminalState {
+function terminalStateFor(
+  outcome: RecordedPipelineOutcome,
+  turnContract: RecordedLiveV2TurnServiceOptions["turnContract"]
+): TerminalState {
   const decision = validatedDecision(outcome);
   const normalizedAction = decision?.action ?? "no_reply";
 
@@ -690,12 +695,20 @@ function terminalStateFor(outcome: RecordedPipelineOutcome): TerminalState {
     };
   }
 
+  const validatorFailureCode =
+    turnContract === "model_turn_v1" &&
+    outcome.validation?.ok === false &&
+    isAiValidatorFailureCode(outcome.validation.code)
+      ? outcome.validation.code
+      : undefined;
+
   return {
     status: "blocked",
     normalizedAction: "no_reply",
     outcomeReason: "candidate_invalid",
     failureCode: "invalid_candidate",
     validatorResult: outcome.validation?.ok === false ? "rejected" : "failed",
+    ...(validatorFailureCode ? { validatorFailureCode } : {}),
     sendGateResult: "not_checked",
     qualityEvents: [event("policy_violation", "candidate_invalid", "warning")]
   };

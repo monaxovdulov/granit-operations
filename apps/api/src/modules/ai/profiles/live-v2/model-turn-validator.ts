@@ -27,11 +27,7 @@ import {
   type RejectedStatePatch,
   type ValidatedTurnPlan
 } from "./model-turn-contract.js";
-import {
-  liveV2TextHasToneViolation,
-  liveV2UnsafeClaimReason,
-  normalizeLiveV2TextForComparison
-} from "./live-v2-validator.js";
+import { normalizeLiveV2TextForComparison } from "./live-v2-validator.js";
 
 const quoteEvidenceSchema = z.object({ quote: z.string().min(1).max(900) }).strict();
 const slotPatchSchema = z
@@ -192,43 +188,30 @@ export function validateModelTurnOutput(input: {
   }
 
   const output = parsed.data as ModelTurnOutput;
-  const composed = composeCanonicalText(output);
 
-  if (!composed) {
-    return { ok: false, code: output.message.question ? "duplicate_question" : "invalid_answer" };
-  }
-
-  if (output.handoffIntent && composed.question) {
+  if (output.handoffIntent && output.message.question) {
     return { ok: false, code: "invalid_question" };
   }
 
-  if (liveV2UnsafeClaimReason(composed.finalText)) {
-    return { ok: false, code: "unsafe_claim" };
-  }
-
-  if (liveV2TextHasToneViolation(composed.finalText)) {
-    return { ok: false, code: "tone_violation" };
-  }
-
-  if (repeatsExistingReply(composed.finalText, input.turnInput)) {
-    return { ok: false, code: "repeated_reply" };
-  }
-
   const patchResult = validateStatePatches(output.statePatches, input.turnInput);
-
-  if (
-    composed.question &&
-    (isKnownSlot(composed.question.target, input.turnInput) ||
+  const questionTarget = output.message.question?.target;
+  const questionTargetsKnownSlot = Boolean(
+    questionTarget &&
+    (isKnownSlot(questionTarget, input.turnInput) ||
       patchResult.applied.some(
-        (patch) => "name" in patch && patch.name === composed.question?.target
+        (patch) => "name" in patch && patch.name === questionTarget
       ))
-  ) {
-    return { ok: false, code: "known_slot_requested" };
+  );
+  const composed = composeCanonicalText(output, questionTargetsKnownSlot);
+
+  if (!composed) {
+    return { ok: false, code: "invalid_answer" };
   }
 
-  const validationResults: ModelTurnValidationIssue[] = patchResult.dropped.map(
-    (item) => item.reason
-  );
+  const validationResults: ModelTurnValidationIssue[] = [
+    ...composed.validationResults,
+    ...patchResult.dropped.map((item) => item.reason)
+  ];
 
   if (output.recommendationIds.length > 0) {
     validationResults.push("unsupported_recommendation");
@@ -263,32 +246,50 @@ export function validateModelTurnOutput(input: {
   return { ok: true, output, plan: Object.freeze(plan) };
 }
 
-function composeCanonicalText(output: ModelTurnOutput): {
+function composeCanonicalText(
+  output: ModelTurnOutput,
+  dropKnownSlotQuestion: boolean
+): {
   finalText: string;
   question: ModelTurnOutput["message"]["question"];
+  validationResults: ModelTurnValidationIssue[];
 } | null {
   let answerText = output.message.answerText.trim();
-  const question = output.message.question
+  let question = output.message.question
     ? {
         text: output.message.question.text.trim(),
         target: output.message.question.target
       }
     : null;
+  const validationResults: ModelTurnValidationIssue[] = [];
 
   if (question) {
     if (answerText.endsWith(question.text)) {
       answerText = answerText.slice(0, -question.text.length).trim();
+      validationResults.push("duplicate_question");
     }
 
-    if (!answerText || answerText.endsWith("?") || countQuestions(question.text) !== 1) {
-      return null;
+    if (dropKnownSlotQuestion) {
+      question = null;
+      validationResults.push("known_slot_requested");
     }
-  } else if (countQuestions(answerText) > 1) {
-    return null;
   }
 
-  const finalText = question ? `${answerText}\n\n${question.text}` : answerText;
-  return finalText.length <= 900 ? { finalText, question } : null;
+  let finalText = question
+    ? answerText
+      ? `${answerText}\n\n${question.text}`
+      : question.text
+    : answerText;
+
+  if (question && finalText.length > 900) {
+    question = null;
+    finalText = answerText;
+    validationResults.push("question_dropped_for_length");
+  }
+
+  if (!finalText) return null;
+
+  return { finalText, question, validationResults };
 }
 
 function validateStatePatches(
@@ -369,19 +370,6 @@ function isKnownSlot(slot: AiSlotName, input: AiTurnInput): boolean {
   if (slot === "preferredContact") return Boolean(input.knownSlots.preferredContact);
   if (slot === "city") return Boolean(input.knownSlots.city);
   return false;
-}
-
-function repeatsExistingReply(finalText: string, input: AiTurnInput): boolean {
-  const normalized = normalizeLiveV2TextForComparison(finalText);
-  return input.compactContext.messages.some(
-    (message) =>
-      message.senderRole === "ai_assistant" &&
-      normalizeLiveV2TextForComparison(message.text) === normalized
-  );
-}
-
-function countQuestions(value: string): number {
-  return [...value].filter((character) => character === "?").length;
 }
 
 function toValidatedHandoff(reason: ModelTurnHandoffReason): {

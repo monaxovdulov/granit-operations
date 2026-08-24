@@ -14,6 +14,16 @@ import type {
 } from "../src/modules/ai/repositories/ai-run-repository.js";
 
 const RAW_CANARY = "raw-customer@example.test sk-proj-1234567890";
+const EXPECTED_VALIDATOR_FAILURE_CODES = [
+  "invalid_shape",
+  "invalid_answer",
+  "duplicate_question",
+  "invalid_question",
+  "unsafe_claim",
+  "tone_violation",
+  "repeated_reply",
+  "known_slot_requested"
+] as const;
 
 describe("P3 centralized AI observability sanitizer", () => {
   it("drops unknown raw fields and preserves configured and observed provider truth", () => {
@@ -71,6 +81,35 @@ describe("P3 centralized AI observability sanitizer", () => {
       sanitizeAiRunCompletion({
         ...terminalCompletion(),
         observedModelName: "sk-proj-1234567890"
+      })
+    ).toThrow(AiObservabilitySanitizationError);
+  });
+
+  it("keeps only finite terminal validator failure codes", () => {
+    const rejected = {
+      ...terminalCompletion(),
+      status: "blocked",
+      outcomeReason: "candidate_invalid",
+      failureCode: "invalid_candidate",
+      validatorResult: "rejected"
+    };
+
+    for (const validatorFailureCode of EXPECTED_VALIDATOR_FAILURE_CODES) {
+      expect(
+        sanitizeAiRunCompletion({ ...rejected, validatorFailureCode })
+      ).toMatchObject({ validatorFailureCode });
+    }
+
+    for (const validatorFailureCode of ["unknown_validator_code", RAW_CANARY]) {
+      expect(() =>
+        sanitizeAiRunCompletion({ ...rejected, validatorFailureCode })
+      ).toThrow(AiObservabilitySanitizationError);
+    }
+
+    expect(() =>
+      sanitizeAiRunCompletion({
+        ...terminalCompletion(),
+        validatorFailureCode: "invalid_shape"
       })
     ).toThrow(AiObservabilitySanitizationError);
   });

@@ -269,18 +269,6 @@ export function validateLiveV2Candidate(input: {
     return invalid("known_slot_requested");
   }
 
-  if (liveV2UnsafeClaimReason(decision.replyDraft)) {
-    return invalid("unsafe_claim");
-  }
-
-  if (hasToneViolation(decision)) {
-    return invalid("tone_violation");
-  }
-
-  if (repeatsExistingMessage(decision.replyDraft, input.turnView)) {
-    return invalid("repeated_reply");
-  }
-
   return { ok: true, decision };
 }
 
@@ -486,108 +474,6 @@ function hasAnyKnownSlot(turnView: LiveV2TurnView): boolean {
       turnView.knownSlots.emailProvided ||
       turnView.knownSlots.preferredContact ||
       turnView.knownSlots.city
-  );
-}
-
-export function liveV2UnsafeClaimReason(replyDraft: string): string | null {
-  const normalized = replyDraft.toLocaleLowerCase("ru-RU");
-
-  if (/\d[\d\s]*(?:₽|руб|р\.)/iu.test(normalized)) {
-    return "price_amount";
-  }
-
-  if (
-    /(?:цен|стоим|прайс|бюджет|сумм|стоит|обойд[её]тся).{0,32}(?:(?:^|[^\p{L}\p{N}])от\s+\d|\d[\d\s]{2,}(?:тыс|тысяч)?|\d[\d\s]*[-–—]\s*\d)/iu.test(
-      normalized
-    ) ||
-    /(?:цен|стоим|стоит|обойд[её]тся).{0,48}(?:один|одна|два|две|три|четыре|пять|шесть|семь|восемь|девять|десять|двадцать|тридцать|сорок|пятьдесят|сто|ста|двести|триста|четыреста|пятьсот)(?:\s+\p{L}+){0,5}\s+(?:руб|тысяч)/iu.test(
-      normalized
-    )
-  ) {
-    return "price_orientation";
-  }
-
-  if (
-    /(?:за|через)\s+(?:\d+|один|одну|два|две|три|четыре|пять|шесть|семь|восемь|девять|десять)\s*(?:дн|час|нед|месяц)|(?:срок.{0,20})?(?:\d+|один|одну|два|две|три|четыре|пять|шесть|семь|восемь|девять|десять)\s*(?:дн|час|нед|месяц)|будет\s+готов|точн(?:ый|ые|о)\s+срок|к\s+\d{1,2}[./]\d{1,2}|(?:сделаем|изготовим|установим|доставим|выполним).{0,24}(?:завтра|послезавтра|к\s+[а-яё]+|до\s+\d{1,2}[./]\d{1,2})/iu.test(
-      normalized
-    )
-  ) {
-    return "deadline_promise";
-  }
-
-  if (
-    /(?:^|[^\p{L}\p{N}])в\s+наличии(?:$|[^\p{L}\p{N}])|есть\s+на\s+складе|доступн\p{L}*\s+(?:к|для)\s+заказ|(?:модел|товар|вариант).{0,20}доступн\p{L}*.{0,12}(?:сейчас|сегодня)|(?:дадим|сделаем|предоставим|оформим)\s+(?:вам\s+)?скидк|скидк[ауи]\s*\d|(?:бер[её]м|нужна|требуется|вносится)\s+предоплат|предоплат\p{L}*.{0,16}\d|оплатить\s+можно|принимаем\s+оплату|оплата\s+(?:доступна|производится|картой|наличными|по\s+сч[её]ту)|рассрочк[ауи]|возврат\s+(?:оформим|гарантируем|возможен)|верн[её]м\s+деньги|гарантируем|(?:дадим|предоставим|оформим)\s+гаранти|гаранти\p{L}*.{0,20}(?:действует|на\s+(?:\d+|один|два|три|четыре|пять)|составляет|(?:\d+|один|два|три|четыре|пять)\s+(?:год|лет))|(?:работаем\s+по|заключим|подпишем|оформим)\s+(?:официальн\p{L}*\s+)?договор|(?:за\s+.{0,30}отвечаем|отвечаем.{0,30}\sза|нес[её]м\s+ответственность)/iu.test(
-      normalized
-    )
-  ) {
-    return "binding_terms";
-  }
-
-  if (
-    /по\s+закону|юридическ(?:ая\s+консультация|ие\s+советы)|наследств|оформить\s+захоронение|похоронные\s+документы|(?:кладбищ|захоронен|монтаж|установк).{0,60}(?:разрешен\p{L}*|запрещен\p{L}*|не\s+(?:требуется|нужно|ограничен\p{L}*))|документ\p{L}*.{0,24}(?:можно\s+не|не\s+(?:нужно|требуется))/iu.test(
-      normalized
-    )
-  ) {
-    return "legal_advice";
-  }
-
-  if (
-    /(?:служит|прослужит).{0,24}(?:\d+|один|два|три|четыре|пять|десять|сто|ста)\s+лет|не\s+(?:выцвет|треск|впитыва)|(?:морозо|водо|износо)стойк|(?:самый|очень|особенно)\s+(?:прочн|долговечн)|добыва\p{L}*\s+в\s+[а-яё]+|\d+(?:[.,]\d+)?\s*(?:х|×|на)\s*\d+(?:[.,]\d+)?\s*(?:мм|см|сантиметр|метр)/iu.test(
-      normalized
-    )
-  ) {
-    return "unsupported_product_claim";
-  }
-
-  if (
-    /собственн\p{L}*\s+производств|(?:доставляем|работаем)\s+по\s+всей\s+росси|сам\p{L}*\s+популярн\p{L}*\s+модел|пользу\p{L}*\s+спросом|(?:сейчас|это)\s+в\s+тренде/iu.test(
-      normalized
-    )
-  ) {
-    return "unsupported_business_claim";
-  }
-
-  return null;
-}
-
-export function liveV2TextHasToneViolation(replyDraft: string): boolean {
-  return hasToneViolation({
-    action: "answer",
-    replyDraft
-  } as Exclude<LiveV2Candidate, { action: "no_reply" }>);
-}
-
-function hasToneViolation(decision: Exclude<LiveV2Candidate, { action: "no_reply" }>): boolean {
-  const normalized = decision.replyDraft.toLocaleLowerCase("ru-RU");
-
-  if (/понимаю\s+ваши\s+чувства|искренне\s+сочувствую|как\s+мне\s+жаль/iu.test(normalized)) {
-    return true;
-  }
-
-  const pressuresForPhone =
-    /(?:оставьте|напишите|пришлите)\s+(?:ваш\s+)?(?:номер|телефон)/iu.test(normalized);
-
-  return (
-    pressuresForPhone &&
-    !(
-      decision.action === "handoff_to_manager" &&
-      decision.reason === "explicit_manager_request"
-    )
-  );
-}
-
-function repeatsExistingMessage(replyDraft: string, turnView: LiveV2TurnView): boolean {
-  const normalizedReply = normalizeLiveV2TextForComparison(replyDraft);
-  const normalizedLastQuestion = turnView.lastAiQuestion
-    ? normalizeLiveV2TextForComparison(turnView.lastAiQuestion)
-    : null;
-
-  if (normalizedLastQuestion && normalizedReply.includes(normalizedLastQuestion)) {
-    return true;
-  }
-
-  return turnView.messages.some(
-    (message) => normalizeLiveV2TextForComparison(message.text) === normalizedReply
   );
 }
 

@@ -98,10 +98,13 @@ describe("manager AI controls", () => {
     expect(response.statusCode).toBe(202);
     expect(response.json()).toMatchObject({
       automation: {
-        status: "disabled",
-        next_step: "manager_review"
+        status: "degraded",
+        next_step: "retry_or_manager",
+        conversation_state: "ai_active",
+        reason: "worker_failed"
       }
     });
+    expect(response.json().message_to_user.toLowerCase()).not.toContain("менеджер");
     expect(generateDecision).not.toHaveBeenCalled();
     expect(repository.onlyLead().conversations[0]?.agentAllowedToReply).toBe(true);
     expect(repository.onlyLead().conversations[0]?.messages).toHaveLength(1);

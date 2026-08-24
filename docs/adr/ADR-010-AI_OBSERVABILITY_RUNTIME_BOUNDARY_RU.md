@@ -10,8 +10,9 @@ Current-state reconciliation (2026-08-06): CONV-3 removed the Mastra
 dependency/runtime and executable `legacy_s05`. The observability ownership and
 privacy rules of this ADR remain accepted; references below to an existing
 Mastra adapter describe the historical state at adoption and do not authorize a
-second runtime. Current sequencing comes from the active
-`AI-RUNTIME-CONVERGENCE` Goal/card.
+second runtime. `AI-RUNTIME-CONVERGENCE` subsequently completed with
+`understanding_verified`; current sequencing comes from the active
+`AI-LAYER-SIMPLIFICATION` Goal/card.
 
 ## Context
 

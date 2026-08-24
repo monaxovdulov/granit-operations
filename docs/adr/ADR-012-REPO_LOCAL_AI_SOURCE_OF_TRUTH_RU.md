@@ -3,13 +3,15 @@
 Status: accepted by owner
 Date: 2026-08-04
 Repo scope: `granit-operations`
-Related active Goal: `docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md`;
+Related completed Goal: `docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md`;
+current active Goal: `docs/tasks/AI_LAYER_SIMPLIFICATION_GOAL_RU.md`;
 retired task provenance: `docs/tasks/ARCHIVE_RU.md`
 
 Current-state reconciliation (2026-08-06): this ADR's ownership decision remains
 accepted, while its original PR0a—PR9 sequencing and bounded-Mastra wording are
 historical. The current implementation order is the active
-`AI-RUNTIME-CONVERGENCE` Goal/card. CONV-3 removed the Mastra dependency/runtime
+`AI-LAYER-SIMPLIFICATION` Goal/card. `AI-RUNTIME-CONVERGENCE` completed with
+`understanding_verified`; CONV-3 removed the Mastra dependency/runtime
 and executable `legacy_s05`; returning a second runtime requires a new accepted
 ADR and owner stop-gate. Historical wording below is retained as decision
 provenance, not active routing.

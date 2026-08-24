@@ -11,8 +11,9 @@
 > PR0a—PR9 ниже фиксируют исторический baseline на момент ревью. PR0a—PR2 и
 > CONV-1—CONV-3A уже реализованы, Mastra runtime и executable `legacy_s05`
 > удалены. Текущий порядок работ задают
-> `docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md` и её active card: CONV-4,
-> затем CONV-5 и общий teach-back. Этот документ сохраняет целевые продуктовые
+> завершённая `docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md`; текущий порядок
+> задают `docs/tasks/AI_LAYER_SIMPLIFICATION_GOAL_RU.md` и её active card. Этот
+> документ сохраняет целевые продуктовые
 > принципы, но не является параллельным active roadmap или описанием current
 > runtime.
 

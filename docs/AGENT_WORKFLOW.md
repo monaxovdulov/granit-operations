@@ -43,8 +43,9 @@ Examples:
 
 Architecture, repo boundaries, release/deploy policy, AI gates and implementation
 order for this repository are decided in repo-local owner docs and ADRs. The
-active AI order is the current `AI-RUNTIME-CONVERGENCE` Goal/card; PR0a—PR9 and
-historical external planning links are provenance only.
+active AI order is the current `AI-LAYER-SIMPLIFICATION` Goal/card;
+`AI-RUNTIME-CONVERGENCE`, PR0a—PR9 and historical external planning links are
+provenance only.
 
 ## Task Rules
 

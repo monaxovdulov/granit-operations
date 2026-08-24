@@ -15,6 +15,7 @@ import {
   sql,
   type SQLWrapper
 } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 
 import {
   aiQualityEvents,
@@ -598,6 +599,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
         let widgetAiJob:
           | {
               id: string;
+              inboundPublicMessageId: string;
               status: string;
               attemptCount: number;
               maxAttempts: number;
@@ -662,6 +664,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
             .onConflictDoNothing({ target: widgetAiJobs.inboundMessageId })
             .returning({
               id: widgetAiJobs.id,
+              inboundPublicMessageId: widgetAiJobs.inboundPublicMessageId,
               status: widgetAiJobs.status,
               attemptCount: widgetAiJobs.attemptCount,
               maxAttempts: widgetAiJobs.maxAttempts,
@@ -695,7 +698,17 @@ export class PostgresIntakeRepository implements IntakeRepository {
               })
             : undefined,
           turnIdentity,
-          widgetAiJob: widgetAiJob ? toSiteWidgetAiJobSummary(widgetAiJob) : undefined
+          currentWidgetAiWindow:
+            input.channel === "site_widget"
+              ? {
+                  inboundPublicMessageId: message.publicMessageId,
+                  respondsThroughSequence: turnIdentity.respondsThroughSequence,
+                  generationEpoch: turnIdentity.expectedGenerationEpoch
+                }
+              : undefined,
+          aiRuntimeEnabled: runtimeControl?.enabled === true,
+          widgetAiJob: widgetAiJob ? toSiteWidgetAiJobSummary(widgetAiJob) : undefined,
+          latestWidgetAiJob: widgetAiJob ? toSiteWidgetAiJobSummary(widgetAiJob) : undefined
         };
       });
     } catch (error) {
@@ -768,7 +781,10 @@ export class PostgresIntakeRepository implements IntakeRepository {
       aiTurnInput: result.aiTurnInput,
       aiTurnExecutionContext: result.aiTurnExecutionContext,
       turnIdentity: result.turnIdentity,
-      widgetAiJob: result.widgetAiJob
+      currentWidgetAiWindow: result.currentWidgetAiWindow,
+      aiRuntimeEnabled: result.aiRuntimeEnabled,
+      widgetAiJob: result.widgetAiJob,
+      latestWidgetAiJob: result.latestWidgetAiJob
     };
   }
 
@@ -1992,76 +2008,127 @@ export class PostgresIntakeRepository implements IntakeRepository {
   }
 
   async getSiteWidgetHistory(publicSessionId: string): Promise<SiteWidgetHistoryResult | null> {
-    const [session] = await this.db
+    const latestVisitorMessages = alias(
+      conversationMessages,
+      "history_latest_visitor_message"
+    );
+    const latestVisitorConversations = alias(
+      conversations,
+      "history_latest_visitor_conversation"
+    );
+    const latestVisitorSessions = alias(widgetSessions, "history_latest_visitor_session");
+    const latestVisitor = this.db
       .select({
-        publicSessionId: widgetSessions.publicSessionId,
-        conversationId: conversations.id,
-        publicConversationId: conversations.publicConversationId,
-        aiState: conversations.aiState,
-        status: conversations.status
+        inboundPublicMessageId: latestVisitorMessages.publicMessageId,
+        respondsThroughSequence: latestVisitorMessages.messageSequence,
+        generationEpoch: latestVisitorConversations.generationEpoch
       })
-      .from(widgetSessions)
-      .innerJoin(conversations, eq(conversations.widgetSessionId, widgetSessions.id))
-      .where(eq(widgetSessions.publicSessionId, publicSessionId))
-      .limit(1);
-
-    if (!session) {
-      return null;
-    }
-
+      .from(latestVisitorSessions)
+      .innerJoin(
+        latestVisitorConversations,
+        eq(latestVisitorConversations.widgetSessionId, latestVisitorSessions.id)
+      )
+      .innerJoin(
+        latestVisitorMessages,
+        and(
+          eq(latestVisitorMessages.conversationId, latestVisitorConversations.id),
+          eq(latestVisitorMessages.direction, "inbound"),
+          eq(latestVisitorMessages.senderRole, "visitor")
+        )
+      )
+      .where(eq(latestVisitorSessions.publicSessionId, publicSessionId))
+      .orderBy(desc(latestVisitorMessages.messageSequence))
+      .limit(1)
+      .as("history_latest_visitor");
     const rows = await this.db
       .select({
+        publicSessionId: widgetSessions.publicSessionId,
+        publicConversationId: conversations.publicConversationId,
+        aiState: conversations.aiState,
+        conversationStatus: conversations.status,
+        agentAllowedToReply: conversations.agentAllowedToReply,
+        runtimeEnabled: aiRuntimeControls.enabled,
+        currentWidgetAiWindow: {
+          inboundPublicMessageId: latestVisitor.inboundPublicMessageId,
+          respondsThroughSequence: latestVisitor.respondsThroughSequence,
+          generationEpoch: latestVisitor.generationEpoch
+        },
         publicMessageId: conversationMessages.publicMessageId,
         senderRole: conversationMessages.senderRole,
         body: conversationMessages.body,
         contentType: conversationMessages.contentType,
         submittedAt: conversationMessages.submittedAt,
-        metadata: conversationMessages.metadata
+        metadata: conversationMessages.metadata,
+        jobStatus: widgetAiJobs.status,
+        jobTerminalReason: widgetAiJobs.terminalReason,
+        jobExpectedGenerationEpoch: widgetAiJobs.expectedGenerationEpoch,
+        jobRespondsThroughSequence: widgetAiJobs.respondsThroughSequence
       })
-      .from(conversationMessages)
-      .where(eq(conversationMessages.conversationId, session.conversationId))
+      .from(widgetSessions)
+      .innerJoin(conversations, eq(conversations.widgetSessionId, widgetSessions.id))
+      .leftJoin(
+        aiRuntimeControls,
+        eq(aiRuntimeControls.scope, "site_widget")
+      )
+      .leftJoin(latestVisitor, sql`true`)
+      .leftJoin(
+        conversationMessages,
+        eq(conversationMessages.conversationId, conversations.id)
+      )
+      .leftJoin(
+        widgetAiJobs,
+        eq(widgetAiJobs.inboundPublicMessageId, conversationMessages.publicMessageId)
+      )
+      .where(eq(widgetSessions.publicSessionId, publicSessionId))
       .orderBy(desc(conversationMessages.messageSequence))
       .limit(100);
-    const jobRows = await this.db
-      .select({
-        inboundPublicMessageId: widgetAiJobs.inboundPublicMessageId,
-        status: widgetAiJobs.status,
-        terminalReason: widgetAiJobs.terminalReason
-      })
-      .from(widgetAiJobs)
-      .where(eq(widgetAiJobs.conversationId, session.conversationId));
-    const jobs = new Map(jobRows.map((job) => [job.inboundPublicMessageId, job] as const));
+
+    const snapshot = rows[0];
+    if (!snapshot) return null;
 
     return {
-      publicSessionId: session.publicSessionId,
-      publicConversationId: session.publicConversationId,
-      state: toPublicWidgetConversationState(session.aiState, session.status),
+      publicSessionId: snapshot.publicSessionId,
+      publicConversationId: snapshot.publicConversationId,
+      state: toPublicWidgetConversationState(snapshot.aiState, snapshot.conversationStatus),
+      agentAllowedToReply: snapshot.agentAllowedToReply,
+      runtimeEnabled: snapshot.runtimeEnabled === true,
+      currentWidgetAiWindow: snapshot.currentWidgetAiWindow ?? undefined,
       messages: [...rows]
         .reverse()
-        .filter(
-          (row) =>
-            row.contentType === "text" &&
-            (row.senderRole === "visitor" ||
-              row.senderRole === "ai_assistant" ||
-              row.senderRole === "manager")
-        )
-        .map((row) => {
-          const job = jobs.get(row.publicMessageId);
+        .flatMap((row) => {
+          if (
+            row.publicMessageId === null ||
+            row.senderRole === null ||
+            row.body === null ||
+            row.contentType !== "text" ||
+            row.submittedAt === null ||
+            row.metadata === null ||
+            (row.senderRole !== "visitor" &&
+              row.senderRole !== "ai_assistant" &&
+              row.senderRole !== "manager")
+          ) {
+            return [];
+          }
+
           const catalogReferences = readWidgetCatalogReferences(row.metadata);
 
-          return {
-            publicMessageId: row.publicMessageId,
-            senderRole: row.senderRole as "visitor" | "ai_assistant" | "manager",
-            text: row.body,
-            submittedAt: row.submittedAt.toISOString(),
-            catalogReferences: catalogReferences.length ? catalogReferences : undefined,
-            automation: job
-              ? {
-                  status: toSiteWidgetAiJobStatus(job.status),
-                  reason: job.terminalReason ?? undefined
-                }
-              : undefined
-          };
+          return [
+            {
+              publicMessageId: row.publicMessageId,
+              senderRole: row.senderRole,
+              text: row.body,
+              submittedAt: row.submittedAt.toISOString(),
+              catalogReferences: catalogReferences.length ? catalogReferences : undefined,
+              automation: row.jobStatus
+                ? {
+                    status: toSiteWidgetAiJobStatus(row.jobStatus),
+                    reason: row.jobTerminalReason ?? undefined,
+                    expectedGenerationEpoch: row.jobExpectedGenerationEpoch!,
+                    respondsThroughSequence: row.jobRespondsThroughSequence!
+                  }
+                : undefined
+            }
+          ];
         })
     };
   }
@@ -2750,12 +2817,15 @@ export class PostgresIntakeRepository implements IntakeRepository {
       : null;
   }
 
-  private async findSiteWidgetAiJobSummary(
-    inboundPublicMessageId: string
-  ): Promise<SiteWidgetAiJobSummary | undefined> {
-    const [row] = await this.db
+  private async loadSiteWidgetReplayProjectionSnapshot(input: {
+    conversationId: string;
+    inboundPublicMessageId: string;
+  }) {
+    const inboundJob = alias(widgetAiJobs, "replay_inbound_widget_ai_job");
+    const latestJob = this.db
       .select({
         id: widgetAiJobs.id,
+        inboundPublicMessageId: widgetAiJobs.inboundPublicMessageId,
         status: widgetAiJobs.status,
         attemptCount: widgetAiJobs.attemptCount,
         maxAttempts: widgetAiJobs.maxAttempts,
@@ -2764,10 +2834,92 @@ export class PostgresIntakeRepository implements IntakeRepository {
         respondsThroughSequence: widgetAiJobs.respondsThroughSequence
       })
       .from(widgetAiJobs)
-      .where(eq(widgetAiJobs.inboundPublicMessageId, inboundPublicMessageId))
+      .where(eq(widgetAiJobs.conversationId, input.conversationId))
+      .orderBy(desc(widgetAiJobs.respondsThroughSequence), desc(widgetAiJobs.createdAt))
+      .limit(1)
+      .as("replay_latest_widget_ai_job");
+    const latestVisitor = this.db
+      .select({
+        inboundPublicMessageId: conversationMessages.publicMessageId,
+        respondsThroughSequence: conversationMessages.messageSequence
+      })
+      .from(conversationMessages)
+      .where(
+        and(
+          eq(conversationMessages.conversationId, input.conversationId),
+          eq(conversationMessages.direction, "inbound"),
+          eq(conversationMessages.senderRole, "visitor")
+        )
+      )
+      .orderBy(desc(conversationMessages.messageSequence))
+      .limit(1)
+      .as("replay_latest_widget_visitor");
+    const [snapshot] = await this.db
+      .select({
+        aiState: conversations.aiState,
+        agentAllowedToReply: conversations.agentAllowedToReply,
+        runtimeEnabled: aiRuntimeControls.enabled,
+        generationEpoch: conversations.generationEpoch,
+        latestVisitor: {
+          inboundPublicMessageId: latestVisitor.inboundPublicMessageId,
+          respondsThroughSequence: latestVisitor.respondsThroughSequence
+        },
+        inboundJob: {
+          id: inboundJob.id,
+          inboundPublicMessageId: inboundJob.inboundPublicMessageId,
+          status: inboundJob.status,
+          attemptCount: inboundJob.attemptCount,
+          maxAttempts: inboundJob.maxAttempts,
+          terminalReason: inboundJob.terminalReason,
+          expectedGenerationEpoch: inboundJob.expectedGenerationEpoch,
+          respondsThroughSequence: inboundJob.respondsThroughSequence
+        },
+        latestJob: {
+          id: latestJob.id,
+          inboundPublicMessageId: latestJob.inboundPublicMessageId,
+          status: latestJob.status,
+          attemptCount: latestJob.attemptCount,
+          maxAttempts: latestJob.maxAttempts,
+          terminalReason: latestJob.terminalReason,
+          expectedGenerationEpoch: latestJob.expectedGenerationEpoch,
+          respondsThroughSequence: latestJob.respondsThroughSequence
+        }
+      })
+      .from(conversations)
+      .leftJoin(aiRuntimeControls, eq(aiRuntimeControls.scope, "site_widget"))
+      .leftJoin(
+        inboundJob,
+        and(
+          eq(inboundJob.conversationId, conversations.id),
+          eq(inboundJob.inboundPublicMessageId, input.inboundPublicMessageId)
+        )
+      )
+      .leftJoin(latestJob, sql`true`)
+      .leftJoin(latestVisitor, sql`true`)
+      .where(eq(conversations.id, input.conversationId))
       .limit(1);
 
-    return row ? toSiteWidgetAiJobSummary(row) : undefined;
+    if (!snapshot) return null;
+
+    return {
+      aiState: toAiState(snapshot.aiState),
+      agentAllowedToReply:
+        snapshot.agentAllowedToReply && snapshot.runtimeEnabled === true,
+      runtimeEnabled: snapshot.runtimeEnabled === true,
+      currentWidgetAiWindow: snapshot.latestVisitor
+        ? {
+            inboundPublicMessageId: snapshot.latestVisitor.inboundPublicMessageId,
+            respondsThroughSequence: snapshot.latestVisitor.respondsThroughSequence,
+            generationEpoch: snapshot.generationEpoch
+          }
+        : undefined,
+      inboundJob: snapshot.inboundJob
+        ? toSiteWidgetAiJobSummary(snapshot.inboundJob)
+        : undefined,
+      latestJob: snapshot.latestJob
+        ? toSiteWidgetAiJobSummary(snapshot.latestJob)
+        : undefined
+    };
   }
 
   private async findPublicWidgetReferenceForLead(leadId: string): Promise<string> {
@@ -3157,14 +3309,21 @@ export class PostgresIntakeRepository implements IntakeRepository {
     const existingAiReply = await this.findExistingAiMessageByIdempotencyKey(
       `ai:${existing.publicMessageId}`
     );
-    const widgetAiJob = await this.findSiteWidgetAiJobSummary(existing.publicMessageId);
+    const replaySnapshot =
+      existing.channel === "site_widget"
+        ? await this.loadSiteWidgetReplayProjectionSnapshot({
+            conversationId: existing.conversationId,
+            inboundPublicMessageId: existing.publicMessageId
+          })
+        : null;
+    const widgetAiJob = replaySnapshot?.inboundJob;
     const context = await this.loadAiDialogContext(
       existing.conversationId,
       existing.publicMessageId
     );
     const effectiveAgentAllowedToReply =
-      existing.agentAllowedToReply &&
-      (existing.channel !== "site_widget" || (await this.isSiteWidgetAiRuntimeEnabled()));
+      replaySnapshot?.agentAllowedToReply ?? existing.agentAllowedToReply;
+    const currentAiState = replaySnapshot?.aiState ?? toAiState(existing.aiState);
     const persistedInput = {
       ...existing,
       agentAllowedToReply: effectiveAgentAllowedToReply
@@ -3181,7 +3340,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
       submittedAt: existing.submittedAt.toISOString(),
       widgetPublicSessionId: existing.publicSessionId ?? undefined,
       agentAllowedToReply: effectiveAgentAllowedToReply,
-      aiState: toAiState(existing.aiState),
+      aiState: currentAiState,
       replayed: true,
       existingAiReply: existingAiReply
         ? {
@@ -3206,18 +3365,11 @@ export class PostgresIntakeRepository implements IntakeRepository {
       // Legacy synchronous retries without a persisted reply fail closed instead
       // of treating the conversation's current epoch as the original turn epoch.
       turnIdentity: widgetAiJob,
-      widgetAiJob
+      currentWidgetAiWindow: replaySnapshot?.currentWidgetAiWindow,
+      aiRuntimeEnabled: replaySnapshot?.runtimeEnabled,
+      widgetAiJob,
+      latestWidgetAiJob: replaySnapshot?.latestJob
     };
-  }
-
-  private async isSiteWidgetAiRuntimeEnabled(): Promise<boolean> {
-    const [runtimeControl] = await this.db
-      .select({ enabled: aiRuntimeControls.enabled })
-      .from(aiRuntimeControls)
-      .where(eq(aiRuntimeControls.scope, "site_widget"))
-      .limit(1);
-
-    return runtimeControl?.enabled === true;
   }
 
   private async loadFreshClaimedSiteWidgetAiTurn(input: {
@@ -3482,6 +3634,7 @@ function recordedBoundarySpan(
 
 function toSiteWidgetAiJobSummary(row: {
   id: string;
+  inboundPublicMessageId: string;
   status: string;
   attemptCount: number;
   maxAttempts: number;
@@ -3491,6 +3644,7 @@ function toSiteWidgetAiJobSummary(row: {
 }): SiteWidgetAiJobSummary {
   return {
     id: row.id,
+    inboundPublicMessageId: row.inboundPublicMessageId,
     status: toSiteWidgetAiJobStatus(row.status),
     attemptCount: row.attemptCount,
     maxAttempts: row.maxAttempts,

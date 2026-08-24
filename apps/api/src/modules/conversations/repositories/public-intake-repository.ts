@@ -10,6 +10,7 @@ import type {
   SaveSiteWidgetAiMessageInput,
   SaveSiteWidgetAiMessageResult,
   SiteWidgetStoredAiReply,
+  WidgetAiCurrentResponseWindow,
   WidgetAiTurnIdentity
 } from "./conversation-message-repository.js";
 
@@ -52,7 +53,10 @@ export type SaveAcceptedSiteWidgetMessageResult = {
   aiTurnInput?: AiTurnInput;
   aiTurnExecutionContext?: AiTurnExecutionContext;
   turnIdentity?: WidgetAiTurnIdentity;
+  currentWidgetAiWindow?: WidgetAiCurrentResponseWindow;
+  aiRuntimeEnabled?: boolean;
   widgetAiJob?: SiteWidgetAiJobSummary;
+  latestWidgetAiJob?: SiteWidgetAiJobSummary;
 };
 
 export type SiteWidgetAiJobStatus =
@@ -67,6 +71,7 @@ export type SiteWidgetAiJobStatus =
 
 export type SiteWidgetAiJobSummary = WidgetAiTurnIdentity & {
   id: string;
+  inboundPublicMessageId: string;
   status: SiteWidgetAiJobStatus;
   attemptCount: number;
   maxAttempts: number;
@@ -120,6 +125,9 @@ export type SiteWidgetHistoryResult = {
   publicSessionId: string;
   publicConversationId: string;
   state: "ai_active" | "manager_pending" | "manager_active" | "closed";
+  agentAllowedToReply: boolean;
+  runtimeEnabled: boolean;
+  currentWidgetAiWindow?: WidgetAiCurrentResponseWindow;
   messages: Array<{
     publicMessageId: string;
     senderRole: "visitor" | "ai_assistant" | "manager";
@@ -129,6 +137,8 @@ export type SiteWidgetHistoryResult = {
     automation?: {
       status: SiteWidgetAiJobStatus;
       reason?: string;
+      expectedGenerationEpoch: number;
+      respondsThroughSequence: number;
     };
   }>;
 };

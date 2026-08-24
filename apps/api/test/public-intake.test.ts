@@ -839,7 +839,7 @@ describe("public site_widget intake", () => {
     expect(repository.listAiAttempts()).toMatchObject([{ status: "fenced" }]);
   });
 
-  it("returns public success only after widget message persistence and exposes manager dialog", async () => {
+  it("returns public success only after widget message persistence and exposes the dialog", async () => {
     const repository = new MemoryIntakeRepository();
     const managerAuthRepository = new MemoryManagerAuthRepository();
     const app = track(
@@ -865,10 +865,13 @@ describe("public site_widget intake", () => {
       status: "accepted",
       action: "show_widget_saved",
       automation: {
-        status: "disabled",
-        next_step: "manager_review"
+        status: "degraded",
+        next_step: "retry_or_manager",
+        conversation_state: "ai_active",
+        reason: "worker_failed"
       }
     });
+    expect(response.json().message_to_user.toLowerCase()).not.toContain("менеджер");
     expect(SiteWidgetResponseSchema.safeParse(response.json()).success).toBe(true);
     expect(response.json().public_session_id).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/

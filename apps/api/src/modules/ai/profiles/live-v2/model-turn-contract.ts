@@ -7,11 +7,21 @@ import type {
   AiSlotName,
   AiSlotUpdate
 } from "../../ai-dialog-contract.js";
+import type { AiValidatorFailureCode } from "../../observability/ai-validator-failure-code.js";
 
 export const MODEL_TURN_OUTPUT_VERSION = "granit_model_turn.v1" as const;
 export const MODEL_TURN_PROMPT_VERSION = "granit_model_turn_prompt.v1" as const;
 export const MODEL_TURN_MODEL_PROFILE_VERSION =
   "granit_model_turn_openai_luna.v1" as const;
+
+export const MODEL_TURN_TERMINAL_VALIDATION_CODES = [
+  "invalid_shape",
+  "invalid_answer",
+  "invalid_question"
+] as const;
+
+export type ModelTurnTerminalValidationCode =
+  (typeof MODEL_TURN_TERMINAL_VALIDATION_CODES)[number];
 
 export const MODEL_TURN_HANDOFF_REASONS = [
   "customer_requested_manager",
@@ -63,17 +73,11 @@ export type ModelTurnOutput = {
 };
 
 export type ModelTurnValidationIssue =
-  | "invalid_shape"
-  | "invalid_answer"
-  | "invalid_question"
-  | "known_slot_requested"
-  | "duplicate_question"
-  | "unsafe_claim"
-  | "tone_violation"
-  | "repeated_reply"
+  | AiValidatorFailureCode
   | "unsupported_recommendation"
   | "invalid_patch_evidence"
-  | "duplicate_patch";
+  | "duplicate_patch"
+  | "question_dropped_for_length";
 
 export type RejectedStatePatch = {
   patch: ProposedStatePatch;
@@ -112,4 +116,4 @@ export type CommittedTurn = {
 
 export type ModelTurnValidationResult =
   | { ok: true; output: ModelTurnOutput; plan: ValidatedTurnPlan }
-  | { ok: false; code: ModelTurnValidationIssue };
+  | { ok: false; code: ModelTurnTerminalValidationCode };

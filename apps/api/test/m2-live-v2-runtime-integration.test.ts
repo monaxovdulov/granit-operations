@@ -124,6 +124,133 @@ describe("M2 app-owned direct live_v2 runtime", () => {
       },
       outboundMessageId: expect.any(String)
     });
+    expect(repository.listAiRuns()[0]).not.toHaveProperty("validatorFailureCode");
+  });
+
+  it.each([
+    {
+      label: "invalid shape",
+      candidate: { version: "wrong_model_turn_contract" },
+      expectedCode: "invalid_shape",
+      requestId: "ailr-01-validator-reject-0001"
+    },
+    {
+      label: "handoff and question conflict",
+      candidate: {
+        version: "granit_model_turn.v1",
+        message: {
+          answerText: "Передам запрос менеджеру.",
+          question: { text: "Какой материал рассматриваете?", target: "material" }
+        },
+        statePatches: [],
+        recommendationIds: [],
+        handoffIntent: { reason: "customer_requested_manager" }
+      },
+      expectedCode: "invalid_question",
+      requestId: "ailr-02-handoff-question-reject-0001"
+    }
+  ])("records $label without an outbound or public leak", async (testCase) => {
+    const repository = new MemoryIntakeRepository();
+    const generateDecision = vi.fn<ObservedLiveV2DecisionGenerator["generateDecision"]>(
+      async () => ({
+        candidate: testCase.candidate,
+        observation: {
+          observedModelProvider: "openai",
+          observedModelName: "gpt-5.6-luna",
+          runtimeRunId: "resp_direct_model_turn_invalid_001"
+        }
+      })
+    );
+    const app = track(
+      buildApi({
+        repository,
+        widgetAi: {
+          enabled: true,
+          directLiveV2: {
+            generator: { generateDecision },
+            modelName: "gpt-5.6-luna",
+            approvedFacts: TEST_LIVE_V2_FACTS
+          },
+          jobWorker: testJobWorkerOptions()
+        }
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/public/intake/site-widget/messages",
+      payload: widgetRequest(testCase.requestId, "Покажите варианты памятников")
+    });
+    const history = await waitForTerminalHistory(app, response.json().public_session_id);
+
+    expect(generateDecision).toHaveBeenCalledTimes(1);
+    expect(history.messages).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ sender_role: "ai_assistant" })])
+    );
+    expect(JSON.stringify(history)).not.toContain(testCase.expectedCode);
+    expect(JSON.stringify(history)).not.toContain(JSON.stringify(testCase.candidate));
+    expect(repository.listAiRuns()[0]).toMatchObject({
+      status: "blocked",
+      outcomeReason: "candidate_invalid",
+      failureCode: "invalid_candidate",
+      validatorResult: "rejected",
+      validatorFailureCode: testCase.expectedCode
+    });
+    expect(repository.listAiRuns()[0]).not.toHaveProperty("outboundMessageId");
+  });
+
+  it("does not turn a tone regex match into a silent terminal turn", async () => {
+    const repository = new MemoryIntakeRepository();
+    const finalText = "Понимаю ваши чувства. Давайте посмотрим подходящие варианты.";
+    const generateDecision = vi.fn<ObservedLiveV2DecisionGenerator["generateDecision"]>(
+      async () => ({
+        candidate: {
+          version: "granit_model_turn.v1",
+          message: { answerText: finalText, question: null },
+          statePatches: [],
+          recommendationIds: [],
+          handoffIntent: null
+        },
+        observation: {
+          observedModelProvider: "openai",
+          observedModelName: "gpt-5.6-luna",
+          runtimeRunId: "resp_ailr_02_quality_001"
+        }
+      })
+    );
+    const app = track(
+      buildApi({
+        repository,
+        widgetAi: {
+          enabled: true,
+          directLiveV2: {
+            generator: { generateDecision },
+            modelName: "gpt-5.6-luna",
+            approvedFacts: TEST_LIVE_V2_FACTS
+          },
+          jobWorker: testJobWorkerOptions()
+        }
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/public/intake/site-widget/messages",
+      payload: widgetRequest("ailr-02-quality-not-terminal-0001", "Покажите варианты")
+    });
+    const history = await waitForTerminalHistory(app, response.json().public_session_id);
+
+    expect(generateDecision).toHaveBeenCalledTimes(1);
+    expect(history.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ sender_role: "ai_assistant", text: finalText })
+      ])
+    );
+    expect(repository.listAiRuns()[0]).toMatchObject({
+      status: "persisted",
+      outboundMessageId: expect.any(String)
+    });
+    expect(repository.listAiRuns()[0]).not.toHaveProperty("validatorFailureCode");
   });
 });
 

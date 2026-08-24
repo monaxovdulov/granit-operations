@@ -1,6 +1,7 @@
 import { sha256Hex } from "@granit/shared";
 import { describe, expect, it } from "vitest";
 
+import { MODEL_TURN_TERMINAL_VALIDATION_CODES } from "../src/modules/ai/profiles/live-v2/model-turn-contract.js";
 import { validateModelTurnOutput } from "../src/modules/ai/profiles/live-v2/model-turn-validator.js";
 import { buildLiveV2TestTurn, contextMessage } from "./fixtures/live-v2-synthetic.v1.js";
 
@@ -37,27 +38,42 @@ describe("CONV-2 granit_model_turn.v1 validation", () => {
       ok: true,
       plan: {
         action: "ask_clarifying_question",
-        finalText: "Подберём вариант.\n\nКакой материал рассматриваете?"
+        finalText: "Подберём вариант.\n\nКакой материал рассматриваете?",
+        validationResults: ["duplicate_question"]
       }
     });
   });
 
-  it("rejects a question for a known slot and unsafe commercial text", () => {
-    expect(
-      validateModelTurnOutput({
-        value: output({
-          question: { text: "В каком городе нужна установка?", target: "city" }
-        }),
-        turnInput: buildLiveV2TestTurn({ city: "Москва" })
-      })
-    ).toEqual({ ok: false, code: "known_slot_requested" });
+  it("drops a known-slot question and does not infer claim safety from prose", () => {
+    const repaired = validateModelTurnOutput({
+      value: output({
+        question: { text: "В каком городе нужна установка?", target: "city" }
+      }),
+      turnInput: buildLiveV2TestTurn({ city: "Москва" })
+    });
 
-    expect(
-      validateModelTurnOutput({
-        value: output({ answerText: "Сделаем за три дня." }),
-        turnInput: buildLiveV2TestTurn()
-      })
-    ).toEqual({ ok: false, code: "unsafe_claim" });
+    expect(repaired).toMatchObject({
+      ok: true,
+      plan: {
+        action: "answer",
+        finalText: "Подберём подходящий вариант.",
+        validationResults: ["known_slot_requested"]
+      }
+    });
+
+    const unclassifiedProse = validateModelTurnOutput({
+      value: output({ answerText: "Сделаем за три дня." }),
+      turnInput: buildLiveV2TestTurn()
+    });
+
+    expect(unclassifiedProse).toMatchObject({
+      ok: true,
+      plan: {
+        action: "answer",
+        finalText: "Сделаем за три дня.",
+        validationResults: []
+      }
+    });
   });
 
   it("derives current-message slot and requirement updates from unique quote evidence", () => {
@@ -169,24 +185,32 @@ describe("CONV-2 granit_model_turn.v1 validation", () => {
     });
   });
 
-  it("rejects a question for a slot extracted from the same inbound", () => {
-    expect(
-      validateModelTurnOutput({
-        value: output({
-          question: { text: "Какой материал рассматриваете?", target: "material" },
-          statePatches: [
-            {
-              operation: "set_slot",
-              name: "material",
-              value: "чёрный гранит",
-              confidence: 0.95,
-              evidence: { quote: "чёрный гранит" }
-            }
-          ]
-        }),
-        turnInput: buildLiveV2TestTurn({ inbound: "Нужен чёрный гранит" })
-      })
-    ).toEqual({ ok: false, code: "known_slot_requested" });
+  it("keeps a same-turn patch while dropping its redundant question", () => {
+    const result = validateModelTurnOutput({
+      value: output({
+        question: { text: "Какой материал рассматриваете?", target: "material" },
+        statePatches: [
+          {
+            operation: "set_slot",
+            name: "material",
+            value: "чёрный гранит",
+            confidence: 0.95,
+            evidence: { quote: "чёрный гранит" }
+          }
+        ]
+      }),
+      turnInput: buildLiveV2TestTurn({ inbound: "Нужен чёрный гранит" })
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      plan: {
+        action: "answer",
+        finalText: "Подберём подходящий вариант.",
+        appliedPatches: [{ name: "material", value: "чёрный гранит" }],
+        validationResults: ["known_slot_requested"]
+      }
+    });
   });
 
   it("derives the bounded manager handoff action and forbids a simultaneous question", () => {
@@ -221,18 +245,79 @@ describe("CONV-2 granit_model_turn.v1 validation", () => {
     ).toEqual({ ok: false, code: "invalid_question" });
   });
 
-  it("rejects a byte-equivalent repeated assistant reply", () => {
+  it("does not block repeated or stylistically weak prose in the live validator", () => {
     const previous = contextMessage({
       id: 91,
       role: "assistant",
       text: "Подберём подходящий вариант."
     });
+    const repeated = validateModelTurnOutput({
+      value: output(),
+      turnInput: buildLiveV2TestTurn({ previousMessagesNewestFirst: [previous] })
+    });
+    const weakTone = validateModelTurnOutput({
+      value: output({
+        answerText: "Искренне сочувствую. Оставьте ваш телефон. Что покажем?"
+      }),
+      turnInput: buildLiveV2TestTurn()
+    });
+
+    expect(repeated).toMatchObject({
+      ok: true,
+      plan: { finalText: "Подберём подходящий вариант.", validationResults: [] }
+    });
+    expect(weakTone).toMatchObject({
+      ok: true,
+      plan: {
+        finalText: "Искренне сочувствую. Оставьте ваш телефон. Что покажем?",
+        validationResults: []
+      }
+    });
+  });
+
+  it("keeps the current hard allowlist structural", () => {
+    expect(MODEL_TURN_TERMINAL_VALIDATION_CODES).toEqual([
+      "invalid_shape",
+      "invalid_answer",
+      "invalid_question"
+    ]);
+
     expect(
       validateModelTurnOutput({
-        value: output(),
-        turnInput: buildLiveV2TestTurn({ previousMessagesNewestFirst: [previous] })
+        value: { version: "wrong" },
+        turnInput: buildLiveV2TestTurn()
       })
-    ).toEqual({ ok: false, code: "repeated_reply" });
+    ).toEqual({ ok: false, code: "invalid_shape" });
+
+    expect(
+      validateModelTurnOutput({
+        value: output({
+          answerText: "В каком городе нужна установка?",
+          question: { text: "В каком городе нужна установка?", target: "city" }
+        }),
+        turnInput: buildLiveV2TestTurn({ city: "Москва" })
+      })
+    ).toEqual({ ok: false, code: "invalid_answer" });
+  });
+
+  it("drops only an optional question when canonical text would exceed the limit", () => {
+    const answerText = "а".repeat(890);
+    const result = validateModelTurnOutput({
+      value: output({
+        answerText,
+        question: { text: "Какой материал рассматриваете?", target: "material" }
+      }),
+      turnInput: buildLiveV2TestTurn()
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      plan: {
+        action: "answer",
+        finalText: answerText,
+        validationResults: ["question_dropped_for_length"]
+      }
+    });
   });
 });
 

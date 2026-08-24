@@ -19,6 +19,7 @@ import {
   type AiRunVersions,
   type BeginAiRunInput
 } from "../repositories/ai-run-repository.js";
+import { AI_VALIDATOR_FAILURE_CODES } from "./ai-validator-failure-code.js";
 
 const AI_CONFIGURED_MODEL_PROVIDERS = ["openai", "fake", "none"] as const;
 const AI_MODEL_PROVIDERS = ["openai", "fake", "policy", "none"] as const;
@@ -184,6 +185,13 @@ export function sanitizeAiRunStart(value: unknown): BeginAiRunInput {
 /** Rebuilds terminal run evidence, spans and quality events from one centralized allowlist. */
 export function sanitizeAiRunCompletion(value: unknown): AiRunTerminalCompletion {
   const input = record(value);
+  const status = enumValue(
+    AI_RUN_STATUSES.filter((candidate) => candidate !== "running"),
+    input.status
+  ) as AiRunTerminalCompletion["status"];
+  const normalizedAction = enumValue(AI_RUN_NORMALIZED_ACTIONS, input.normalizedAction);
+  const outcomeReason = enumValue(AI_RUN_OUTCOME_REASONS, input.outcomeReason);
+  const validatorResult = enumValue(AI_RUN_VALIDATOR_RESULTS, input.validatorResult);
   const runtimeRunId = optional(input.runtimeRunId, runtimeRunIdentifier);
   const observedModelProvider = enumValue(AI_MODEL_PROVIDERS, input.observedModelProvider);
   const observedModelName = optional(input.observedModelName, safeModelName);
@@ -194,6 +202,9 @@ export function sanitizeAiRunCompletion(value: unknown): AiRunTerminalCompletion
   const failureCode = optional(input.failureCode, (candidate) =>
     enumValue(AI_RUN_FAILURE_CODES, candidate)
   );
+  const validatorFailureCode = optional(input.validatorFailureCode, (candidate) =>
+    enumValue(AI_VALIDATOR_FAILURE_CODES, candidate)
+  );
 
   if ((observedModelProvider === "none") !== (observedModelName === undefined)) {
     throw new AiObservabilitySanitizationError();
@@ -203,19 +214,28 @@ export function sanitizeAiRunCompletion(value: unknown): AiRunTerminalCompletion
     throw new AiObservabilitySanitizationError();
   }
 
+  if (
+    validatorFailureCode !== undefined &&
+    (status !== "blocked" ||
+      normalizedAction !== "no_reply" ||
+      outcomeReason !== "candidate_invalid" ||
+      failureCode !== "invalid_candidate" ||
+      validatorResult !== "rejected")
+  ) {
+    throw new AiObservabilitySanitizationError();
+  }
+
   if (!Array.isArray(input.spans) || !Array.isArray(input.qualityEvents)) {
     throw new AiObservabilitySanitizationError();
   }
 
   return {
-    status: enumValue(
-      AI_RUN_STATUSES.filter((status) => status !== "running"),
-      input.status
-    ) as AiRunTerminalCompletion["status"],
-    normalizedAction: enumValue(AI_RUN_NORMALIZED_ACTIONS, input.normalizedAction),
-    outcomeReason: enumValue(AI_RUN_OUTCOME_REASONS, input.outcomeReason),
+    status,
+    normalizedAction,
+    outcomeReason,
     ...(failureCode === undefined ? {} : { failureCode }),
-    validatorResult: enumValue(AI_RUN_VALIDATOR_RESULTS, input.validatorResult),
+    validatorResult,
+    ...(validatorFailureCode === undefined ? {} : { validatorFailureCode }),
     ...(runtimeRunId === undefined ? {} : { runtimeRunId }),
     observedModelProvider,
     ...(observedModelName === undefined ? {} : { observedModelName }),

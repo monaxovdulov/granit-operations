@@ -123,10 +123,10 @@ describe("live_v2 strict candidate validator", () => {
     "У нас собственное производство.",
     "Доставляем по всей России.",
     "Это самая популярная модель."
-  ])("rejects unsafe promise: %s", (replyDraft) => {
-    expect(validate(answerCandidate({ replyDraft }))).toEqual({
-      ok: false,
-      code: "unsafe_claim"
+  ])("does not classify free-form claim prose with a semantic regex: %s", (replyDraft) => {
+    expect(validate(answerCandidate({ replyDraft }))).toMatchObject({
+      ok: true,
+      decision: { replyDraft }
     });
   });
 
@@ -203,7 +203,7 @@ describe("live_v2 strict candidate validator", () => {
     ).toEqual({ ok: false, code: "question_limit_exceeded" });
   });
 
-  it("rejects exact echo, repeated AI text, fake empathy and premature phone pressure", () => {
+  it("leaves echo, repetition and tone to offline quality evaluation", () => {
     const turnView = buildLiveV2TurnView(
       buildLiveV2TestTurn({
         inbound: "Нужен вертикальный памятник",
@@ -222,16 +222,16 @@ describe("live_v2 strict candidate validator", () => {
         answerCandidate({ replyDraft: "Нужен вертикальный памятник", factIds: [] }),
         turnView
       )
-    ).toEqual({ ok: false, code: "repeated_reply" });
+    ).toMatchObject({ ok: true });
     expect(
       validate(
         answerCandidate({ replyDraft: "В каталоге есть вертикальные памятники." }),
         turnView
       )
-    ).toEqual({ ok: false, code: "repeated_reply" });
+    ).toMatchObject({ ok: true });
     expect(
       validate(answerCandidate({ replyDraft: "Искренне сочувствую. Оставьте ваш телефон." }))
-    ).toEqual({ ok: false, code: "tone_violation" });
+    ).toMatchObject({ ok: true });
 
     expect(
       validate(
@@ -245,13 +245,10 @@ describe("live_v2 strict candidate validator", () => {
       reason: "manager_required"
     });
     pressuredHandoff.replyDraft = "Оставьте ваш телефон, и менеджер свяжется с вами.";
-    expect(validate(pressuredHandoff, turnView)).toEqual({
-      ok: false,
-      code: "tone_violation"
-    });
+    expect(validate(pressuredHandoff, turnView)).toMatchObject({ ok: true });
   });
 
-  it("rejects the last AI question repeated inside a newly prefixed reply", () => {
+  it("does not use a normalized previous message as a live send gate", () => {
     const turnView = buildLiveV2TurnView(
       buildLiveV2TestTurn({
         inbound: "Я пока не решил",
@@ -273,7 +270,7 @@ describe("live_v2 strict candidate validator", () => {
         }),
         turnView
       )
-    ).toEqual({ ok: false, code: "repeated_reply" });
+    ).toMatchObject({ ok: true });
   });
 });
 

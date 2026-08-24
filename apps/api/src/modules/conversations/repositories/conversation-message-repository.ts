@@ -33,6 +33,12 @@ export type WidgetAiTurnIdentity = {
   respondsThroughSequence: number;
 };
 
+export type WidgetAiCurrentResponseWindow = {
+  inboundPublicMessageId: string;
+  respondsThroughSequence: number;
+  generationEpoch: number;
+};
+
 export type WidgetAiJobCommitIdentity = {
   jobId: string;
   attemptCount: number;
@@ -122,8 +128,27 @@ export type AcceptInboundMessageResult = {
   aiTurnInput?: AiTurnInput;
   aiTurnExecutionContext?: AiTurnExecutionContext;
   turnIdentity?: WidgetAiTurnIdentity;
+  currentWidgetAiWindow?: WidgetAiCurrentResponseWindow;
+  aiRuntimeEnabled?: boolean;
   widgetAiJob?: WidgetAiTurnIdentity & {
     id: string;
+    inboundPublicMessageId: string;
+    status:
+      | "pending"
+      | "processing"
+      | "retrying"
+      | "replied"
+      | "degraded"
+      | "blocked"
+      | "failed"
+      | "superseded";
+    attemptCount: number;
+    maxAttempts: number;
+    terminalReason?: string;
+  };
+  latestWidgetAiJob?: WidgetAiTurnIdentity & {
+    id: string;
+    inboundPublicMessageId: string;
     status:
       | "pending"
       | "processing"

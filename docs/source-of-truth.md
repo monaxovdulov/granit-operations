@@ -7,6 +7,7 @@ AGENTS.md
 README.md
 docs/AGENT_WORKFLOW.md
 docs/AI_AGENT_REFACTOR_PLAYBOOK_RU.md
+docs/AI_POLICY.md
 docs/adr/ADR-010-AI_OBSERVABILITY_RUNTIME_BOUNDARY_RU.md
 docs/adr/ADR-011-CUSTOMER_FACING_LANDING_SOURCE_RU.md
 docs/adr/ADR-012-REPO_LOCAL_AI_SOURCE_OF_TRUTH_RU.md
@@ -14,8 +15,8 @@ docs/architecture/AI_LIVE_AGENT_REFACTOR_FINAL_OWNER_REVIEW_RU.md
 docs/architecture/AI_LIVE_AGENT_REFACTOR_OWNER_SPEC_RU.md
 docs/architecture/AI_REFACTOR_MINIMAL_GOAL_GOVERNANCE_RU.md
 docs/source-of-truth.md
-docs/tasks/AI_REF_CONV_5_ANTI_CLUTTER_GUARDRAILS_RU.md
-docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md
+docs/tasks/AI_LAYER_SIMPLIFICATION_GOAL_RU.md
+docs/tasks/AI_REF_AILR_02_VALIDATOR_POLICY_RU.md
 docs/tasks/README.md
 -->
 
@@ -39,7 +40,7 @@ The active decision hierarchy is:
 3. `docs/architecture/AI_LIVE_AGENT_REFACTOR_OWNER_SPEC_RU.md`;
 4. `docs/architecture/AI_REFACTOR_MINIMAL_GOAL_GOVERNANCE_RU.md`;
 5. `docs/AI_AGENT_REFACTOR_PLAYBOOK_RU.md`;
-6. `docs/tasks/AI_REF_CONV_5_ANTI_CLUTTER_GUARDRAILS_RU.md`, единственная active
+6. `docs/tasks/AI_REF_AILR_02_VALIDATOR_POLICY_RU.md`, единственная active
    AI-card, и exact-SHA evidence;
 7. current code, contracts, migrations and tests for factual implementation
    details not decided above.
@@ -70,21 +71,24 @@ Mastra dependency/runtime и executable `legacy_s05` path удалены при�
 CONV-3. Единственный production assembly использует app-owned direct model
 boundary; возвращение второго runtime требует нового accepted ADR/owner gate.
 
-Активный порядок определяется Goal `AI-RUNTIME-CONVERGENCE`: сейчас CONV-5,
-затем общий teach-back. PR0a—PR9, CONV-1—CONV-4, AI_DIALOG/Mastra и S01—S15 —
-исторические этапы, не active routing.
+Goal `AI-RUNTIME-CONVERGENCE` закрыта как `understanding_verified`. Активный
+порядок определяется Goal `AI-LAYER-SIMPLIFICATION`: AILR-00 и AILR-01 приняты,
+сейчас AILR-02 сужает terminal validator policy и убирает semantic regex из
+live path. Следующие срезы берутся только из этой Goal после independent
+`accept`. PR0a—PR9, CONV-1—CONV-5,
+AI_DIALOG/Mastra и S01—S15 — исторические этапы, не active routing.
 
 ## Active AI Route
 
 Новый агент читает только:
 
 1. корневой `README.md` и этот source map;
-2. ADR-010 и ADR-012;
+2. текущую `docs/AI_POLICY.md`, ADR-010 и ADR-012;
 3. `AI_LIVE_AGENT_REFACTOR_FINAL_OWNER_REVIEW_RU.md` и
    `AI_LIVE_AGENT_REFACTOR_OWNER_SPEC_RU.md`;
 4. `AI_REFACTOR_MINIMAL_GOAL_GOVERNANCE_RU.md` и
    `AI_AGENT_REFACTOR_PLAYBOOK_RU.md`;
-5. `AI_RUNTIME_CONVERGENCE_GOAL_RU.md` и active card из
+5. `AI_LAYER_SIMPLIFICATION_GOAL_RU.md` и active card из
    `docs/tasks/README.md`.
 
 Завершённые task records сведены в `docs/tasks/ARCHIVE_RU.md`; archive и Git

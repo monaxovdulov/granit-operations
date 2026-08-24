@@ -1,3 +1,5 @@
+import type { AiValidatorFailureCode } from "../observability/ai-validator-failure-code.js";
+
 export const AI_RUN_STATUSES = [
   "running",
   "persisted",
@@ -233,6 +235,8 @@ export type AiRunTerminalCompletion = {
   outcomeReason: AiRunOutcomeReason;
   failureCode?: AiRunFailureCode;
   validatorResult: AiRunValidatorResult;
+  /** Finite internal reason for a terminal model-turn validator rejection. */
+  validatorFailureCode?: AiValidatorFailureCode;
   /** Trusted provider/runtime execution identifier for the recorded live_v2 boundary. */
   runtimeRunId?: string;
   /**

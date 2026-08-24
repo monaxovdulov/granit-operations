@@ -1247,10 +1247,24 @@ export class MemoryIntakeRepository implements IntakeRepository {
           (candidate) =>
             candidate.channelIdentity.widgetPublicSessionId === existing.publicSessionId
         );
-      const agentAllowedToReply = conversation?.agentAllowedToReply ?? false;
+      const agentAllowedToReply =
+        Boolean(conversation?.agentAllowedToReply) && this.managerAiControl.enabled;
       const aiState = conversation?.aiState ?? "ai_collecting_info";
       const existingJobId = this.widgetAiJobIdsByInboundMessage.get(existing.publicMessageId);
       const existingJob = existingJobId ? this.widgetAiJobs.get(existingJobId) : undefined;
+      const latestJob = [...this.widgetAiJobs.values()]
+        .filter((job) => job.conversationId === conversationId)
+        .sort(
+          (left, right) =>
+            right.respondsThroughSequence - left.respondsThroughSequence ||
+            right.availableAt.getTime() - left.availableAt.getTime()
+        )[0];
+      const currentInbound = [...this.widgetIdempotency.values()]
+        .filter((candidate) => candidate.publicSessionId === existing.publicSessionId)
+        .sort(
+          (left, right) => right.respondsThroughSequence - left.respondsThroughSequence
+        )[0];
+      const currentGenerationEpoch = this.conversationGenerationEpochs.get(conversationId);
       const aiReply =
         (existingJob
           ? this.widgetAiIdempotency.get(
@@ -1302,6 +1316,14 @@ export class MemoryIntakeRepository implements IntakeRepository {
           respondsThroughSequence:
             existingJob?.respondsThroughSequence ?? existing.respondsThroughSequence
         },
+        currentWidgetAiWindow:
+          currentInbound && currentGenerationEpoch !== undefined
+            ? {
+                inboundPublicMessageId: currentInbound.publicMessageId,
+                respondsThroughSequence: currentInbound.respondsThroughSequence,
+                generationEpoch: currentGenerationEpoch
+              }
+            : undefined,
         aiReply: aiReply
           ? {
               publicMessageId: aiReply.publicMessageId,
@@ -1309,7 +1331,9 @@ export class MemoryIntakeRepository implements IntakeRepository {
               createdAt: aiReply.createdAt
             }
           : undefined,
+        aiRuntimeEnabled: this.managerAiControl.enabled,
         widgetAiJob: existingJob ? toMemoryWidgetAiJobSummary(existingJob) : undefined,
+        latestWidgetAiJob: latestJob ? toMemoryWidgetAiJobSummary(latestJob) : undefined,
         aiTurnInput: replayAiTurnInput,
         aiTurnExecutionContext: buildSiteWidgetAiTurnExecutionContext({
           leadId: existing.leadId,
@@ -1530,7 +1554,14 @@ export class MemoryIntakeRepository implements IntakeRepository {
         expectedGenerationEpoch,
         respondsThroughSequence
       },
-      widgetAiJob
+      currentWidgetAiWindow: {
+        inboundPublicMessageId: input.publicMessageId,
+        respondsThroughSequence,
+        generationEpoch: expectedGenerationEpoch
+      },
+      aiRuntimeEnabled: this.managerAiControl.enabled,
+      widgetAiJob,
+      latestWidgetAiJob: widgetAiJob
     };
   }
 
@@ -2136,6 +2167,13 @@ export class MemoryIntakeRepository implements IntakeRepository {
       return null;
     }
 
+    const currentInbound = [...this.widgetIdempotency.values()]
+      .filter((candidate) => candidate.publicSessionId === publicSessionId)
+      .sort((left, right) => right.respondsThroughSequence - left.respondsThroughSequence)[0];
+    const currentGenerationEpoch = conversationId
+      ? this.conversationGenerationEpochs.get(conversationId)
+      : undefined;
+
     return {
       publicSessionId,
       publicConversationId: conversation.publicConversationId,
@@ -2147,6 +2185,16 @@ export class MemoryIntakeRepository implements IntakeRepository {
             : conversation.aiState === "needs_manager"
               ? "manager_pending"
               : "ai_active",
+      agentAllowedToReply: conversation.agentAllowedToReply,
+      runtimeEnabled: this.managerAiControl.enabled,
+      currentWidgetAiWindow:
+        currentInbound && currentGenerationEpoch !== undefined
+          ? {
+              inboundPublicMessageId: currentInbound.publicMessageId,
+              respondsThroughSequence: currentInbound.respondsThroughSequence,
+              generationEpoch: currentGenerationEpoch
+            }
+          : undefined,
       messages: conversation.messages
         .filter(
           (message) =>
@@ -2168,7 +2216,9 @@ export class MemoryIntakeRepository implements IntakeRepository {
             automation: job
               ? {
                   status: job.status,
-                  reason: job.terminalReason
+                  reason: job.terminalReason,
+                  expectedGenerationEpoch: job.expectedGenerationEpoch,
+                  respondsThroughSequence: job.respondsThroughSequence
                 }
               : undefined
           };
@@ -2995,6 +3045,7 @@ function toManagerWidgetLead(
 function toMemoryWidgetAiJobSummary(job: ClaimedSiteWidgetAiJob): SiteWidgetAiJobSummary {
   return {
     id: job.id,
+    inboundPublicMessageId: job.inboundPublicMessageId,
     status: job.status,
     attemptCount: job.attemptCount,
     maxAttempts: job.maxAttempts,

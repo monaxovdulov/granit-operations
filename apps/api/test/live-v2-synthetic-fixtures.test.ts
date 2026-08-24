@@ -185,31 +185,31 @@ const SYNTHETIC_CASES: readonly FixtureCase[] = [
   },
   {
     id: "LV2-SYN-010",
-    name: "price claim is rejected",
+    name: "price prose is not classified by a semantic regex",
     turnInput: buildLiveV2TestTurn({ inbound: "Сколько стоит?" }),
     candidate: priceCandidate,
-    ...rejected("unsafe_claim")
+    ...acceptedReply(priceCandidate)
   },
   {
     id: "LV2-SYN-011",
-    name: "deadline promise is rejected",
+    name: "deadline prose is not classified by a semantic regex",
     turnInput: buildLiveV2TestTurn({ inbound: "Когда будет готово?" }),
     candidate: deadlineCandidate,
-    ...rejected("unsafe_claim")
+    ...acceptedReply(deadlineCandidate)
   },
   {
     id: "LV2-SYN-012",
-    name: "guarantee and contract promise is rejected",
+    name: "contract prose is not classified by a semantic regex",
     turnInput: buildLiveV2TestTurn({ inbound: "Какие гарантии?" }),
     candidate: guaranteeContractCandidate,
-    ...rejected("unsafe_claim")
+    ...acceptedReply(guaranteeContractCandidate)
   },
   {
     id: "LV2-SYN-013",
-    name: "legal advice is rejected",
+    name: "legal prose is not classified by a semantic regex",
     turnInput: buildLiveV2TestTurn({ inbound: "Как оформить документы?" }),
     candidate: legalAdviceCandidate,
-    ...rejected("unsafe_claim")
+    ...acceptedReply(legalAdviceCandidate)
   },
   {
     id: "LV2-SYN-014",
@@ -243,7 +243,7 @@ const SYNTHETIC_CASES: readonly FixtureCase[] = [
   },
   {
     id: "LV2-SYN-018",
-    name: "exact repeated AI reply is rejected",
+    name: "exact repeated AI reply remains a quality signal outside the validator",
     turnInput: buildLiveV2TestTurn({
       inbound: "А что дальше?",
       previousMessagesNewestFirst: [
@@ -255,7 +255,7 @@ const SYNTHETIC_CASES: readonly FixtureCase[] = [
       ]
     }),
     candidate: repeatedAiReplyCandidate,
-    ...rejected("repeated_reply")
+    ...acceptedReply(repeatedAiReplyCandidate)
   }
 ];
 

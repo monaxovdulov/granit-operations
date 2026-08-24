@@ -228,9 +228,9 @@ Per-slice учебные интервью отменены. Карточка с�
 
 ## 12. Исторический umbrella roadmap
 
-Этот порядок был исходным baseline. Текущий активный порядок задаётся Goal
-`docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md`: CONV-4, затем CONV-5 и общий
-Teach-back.
+Этот порядок был исходным baseline. Goal `AI-RUNTIME-CONVERGENCE` завершена с
+`understanding_verified`; текущий активный порядок задаётся Goal
+`docs/tasks/AI_LAYER_SIMPLIFICATION_GOAL_RU.md` и её единственной active card.
 
 Первоначальный umbrella порядок:
 

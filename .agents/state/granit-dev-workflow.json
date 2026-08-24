@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
   "repo": "granit-operations",
-  "updated_at": "2026-08-18T20:33:00Z",
-  "git_head": "d3ce2908faeb2905c54e635cf5b00925296eed3a",
-  "mode": "staging_manual_verification",
-  "state": "audit_snapshot_deployed_manual_smoke_pending",
+  "updated_at": "2026-08-24T21:10:00Z",
+  "git_head": "4c91d162e13251883125ab5b1b32565172f570c6",
+  "mode": "ai_layer_simplification",
+  "state": "ailr_02_staging_deploy_authorized",
   "dirty_worktree": {
-    "status": "deployment_evidence_uncommitted",
-    "summary": "Audit snapshot d3ce2908 is live on staging with migrations 0017-0022 and canonical public AI gate; owner requested no paid or mutation smoke and will verify manually; new 2026-08-16 catalog RAG alignment remains an implementation gap; output/ remains untouched"
+    "status": "ailr_02_accepted_uncommitted_staging_authorized",
+    "summary": "AILR-00/01/02 are accepted in the uncommitted Goal payload; eighth fresh review accepted the 41-entry AILR-02 fingerprint with no findings; owner explicitly authorized commit, push and staging deploy"
   },
   "context": {
     "last_scan_at": "2026-08-04T23:37:25Z",
@@ -19,9 +19,9 @@
     "last_refresh_at": "2026-08-04T23:37:25Z"
   },
   "task": {
-    "type": "audit-staging-deploy",
-    "summary": "Deploy the exact current audit backend against the already-live rebuilt landing catalog and widget for owner manual verification.",
-    "source": "docs/tasks/STAGING_WIDGET_AI_RAG_ROLLOUT_RU.md; docs/release/evidence/AUDIT_STAGING_DEPLOY_20260818_RU.md",
+    "type": "ai-layer-simplification",
+    "summary": "AILR-02 keeps terminal validation structural, repairs recoverable question defects, and removes semantic regex decisions from the live send path.",
+    "source": "docs/tasks/AI_LAYER_SIMPLIFICATION_GOAL_RU.md; docs/tasks/AI_REF_AILR_02_VALIDATOR_POLICY_RU.md",
     "owner_decisions": {
       "conv2_runtime_model": {
         "decided_at": "2026-08-05",
@@ -39,10 +39,254 @@
         "decided_at": "2026-08-05",
         "decision": "insert CONV-3A before CONV-4; keep one logical ai_run and store physical lease/model executions in versioned child ai_run_attempts",
         "reason": "preserve stable logical review/eval identity, explicit fenced retries and a single atomic winning attempt instead of conflating turns with executions"
+      },
+      "ailr_02_validator_policy": {
+        "decided_at": "2026-08-24",
+        "decision": "terminal validation is limited to invalid shape, no usable text after deterministic repair, and handoff/question conflict; semantic unsafe/tone/repetition regex gates are removed",
+        "reason": "the owner approved the hard/repair/quality split and explicitly requested removal of brittle regex-based meaning inference; structured factual evidence remains mandatory before deploy"
       }
     }
   },
   "checks": {
+    "ai_runtime_convergence_teach_back": {
+      "status": "understanding_verified",
+      "reason": "On 2026-08-24 the owner explained the single-runtime tradeoff, stale/error/takeover blocking, test evidence versus manual verification, whole-slice rollback and separate manual deploy approval across all six required dimensions"
+    },
+    "ailr_00_technical_evidence": {
+      "status": "superseded_by_review_repair",
+      "base_head": "4c91d162e13251883125ab5b1b32565172f570c6",
+      "fingerprint": "0a08c471cc6d5d0ac2887ef91a3fa8053186241bb8b7ed0bca4dc28df275cde3",
+      "scope": "15 review-payload files plus self-recording active card and machine state; production code unchanged",
+      "reason": "current/target Harness and catalog/runtime gaps are code-derived; architecture guard 21/21, 133-file Markdown link scan, JSON and diff checks passed; exact 140-source production path/content hashes are unchanged"
+    },
+    "ailr_00_first_independent_review": {
+      "session_id": "01a033ff-3070-7cc2-850d-2a4a175cdf3b",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "high",
+      "status": "changes_requested",
+      "reason": "found a medium stale docs/AI_POLICY grounded-runtime claim reachable from README and a low conflation of the eleven-code validation union with eight terminal reject codes; independently confirmed the runtime/caller/fence/catalog map and found no routing-guard bypass"
+    },
+    "ailr_00_repair_evidence": {
+      "status": "superseded_by_second_review",
+      "base_head": "4c91d162e13251883125ab5b1b32565172f570c6",
+      "fingerprint": "733c334bf36ff9773c91cdb47767127e503a87454f111ae29c650e46bb0ebc0c",
+      "fingerprint_scope": "16 sorted porcelain status entries excluding only .agents/state/granit-dev-workflow.json and output/; each entry hashes XY path, NUL and SHA-256 file bytes",
+      "reason": "both reviewer findings are repaired in the active card without changing AI policy behavior; architecture guard 21/21, 133-file Markdown links, JSON/diff checks and unchanged 140-source production hashes passed"
+    },
+    "ailr_00_second_independent_review": {
+      "session_id": "01a0340c-11fb-7101-a08c-f2ee8b62aa5b",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "high",
+      "status": "changes_requested",
+      "reason": "found one low privacy/state-ownership inaccuracy: local storage keeps the widget session identifier and UI state, while transcript is restored from backend history.v2; independently confirmed both earlier repairs and the full runtime/Code Scout map"
+    },
+    "ailr_00_second_repair_evidence": {
+      "status": "superseded_by_third_review",
+      "base_head": "4c91d162e13251883125ab5b1b32565172f570c6",
+      "fingerprint": "57241a212cc6bd446f49c3cf887a9c4db728685338c46d03ee43ec715fdb28f6",
+      "fingerprint_scope": "16 sorted porcelain status entries excluding only .agents/state/granit-dev-workflow.json and output/; each entry hashes XY path, NUL and SHA-256 file bytes",
+      "reason": "widget state ownership is corrected in the active card without production/public/privacy behavior changes; local architecture guard 21/21 and diff check passed"
+    },
+    "ailr_00_third_independent_review": {
+      "session_id": "01a03419-a053-7e82-964a-819582020007",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "high",
+      "status": "changes_requested",
+      "fingerprint": "57241a212cc6bd446f49c3cf887a9c4db728685338c46d03ee43ec715fdb28f6",
+      "reason": "found one medium runtime-map error: provider exceptions are terminalized as generator_failed and block the job without worker retry; the fallback_unavailable completion currently records the physical attempt as succeeded even though runtime evidence reports failure"
+    },
+    "ailr_00_third_repair_evidence": {
+      "status": "superseded_by_fourth_review",
+      "base_head": "4c91d162e13251883125ab5b1b32565172f570c6",
+      "fingerprint": "2704e2547faf079aa130ce3e0c0038ef73e3342ab9de083715dd2002d9fea6bb",
+      "fingerprint_scope": "16 sorted porcelain status entries excluding only .agents/state/granit-dev-workflow.json and output/; each entry hashes XY path, NUL, SHA-256 file bytes and a trailing newline including after the final entry",
+      "reason": "provider terminalization is now separated from worker retry in the active map without changing production behavior; architecture guard 21/21, 133-file Markdown links, JSON/diff checks and unchanged 140-source production closure passed; a fresh independent review is required"
+    },
+    "ailr_00_fourth_independent_review": {
+      "session_id": "01a03427-3db1-7733-b7fa-4b9d184c1f5a",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "high",
+      "status": "changes_requested",
+      "fingerprint": "2704e2547faf079aa130ce3e0c0038ef73e3342ab9de083715dd2002d9fea6bb",
+      "reason": "found one medium false-green where a hardcoded filename exemption allowed the completed historical Goal to be reactivated beside the current Goal, plus two low evidence-routing inaccuracies: stale next_action and an omitted terminal newline in the documented fingerprint byte stream"
+    },
+    "ailr_00_fourth_repair_evidence": {
+      "status": "accepted_by_fifth_review",
+      "base_head": "4c91d162e13251883125ab5b1b32565172f570c6",
+      "fingerprint": "5ab09846f682dfe618dbd973b29a4e8b0b3736e7319233c8b37c60f9a8974cbb",
+      "fingerprint_scope": "16 sorted porcelain status entries excluding only .agents/state/granit-dev-workflow.json and output/; each entry hashes XY path, NUL, SHA-256 file bytes and a trailing newline including after the final entry",
+      "reason": "historical Goal reactivation now fails through the production evaluator after a reproduced red test; architecture guard 21/21, 133-file Markdown links, JSON/diff checks and unchanged 140-source production closure passed; a fifth fresh independent review is required"
+    },
+    "ailr_00_fifth_independent_review": {
+      "session_id": "01a03437-a21a-73b3-8279-5376fb307fc6",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "high",
+      "status": "accept",
+      "fingerprint": "5ab09846f682dfe618dbd973b29a4e8b0b3736e7319233c8b37c60f9a8974cbb",
+      "reason": "fresh read-only Code Scout found no critical/high/medium/low findings; independently reproduced the exact 16-entry trailing-newline fingerprint, production Goal-reactivation failures, runtime/failure/concurrency/privacy map, empty production diff and tracked-only widget/landing 194+35 catalog cross-check"
+    },
+    "ailr_01_technical_evidence": {
+      "status": "accepted_by_first_review",
+      "base_head": "4c91d162e13251883125ab5b1b32565172f570c6",
+      "fingerprint": "d72aa14603fb500b7a6cac4848863880bf71f2b75a7783e97cdd8a18cd47624e",
+      "fingerprint_scope": "sorted porcelain status entries excluding only .agents/state/granit-dev-workflow.json and output/; each entry hashes XY path, NUL, SHA-256 file bytes and a trailing newline including after the final entry",
+      "scope": "nine production/test files plus AILR-01 route/card and two architecture checksum files; no migration, schema, public DTO, prompt, model, policy, privacy, send-gate, takeover, widget/catalog or deploy change",
+      "reason": "red-to-green sanitizer/runtime/PostgreSQL tests pass; all 32 PostgreSQL concurrency/takeover/stale/rollback invariants pass; applicable suite is 359 passed and 2 skipped; architecture 21/21, bounded typecheck, manager build and diff check pass; the unfiltered suite retains only the three inherited context failures plus Vitest collecting the node:test guard file"
+    },
+    "ailr_01_first_independent_review": {
+      "session_id": "01a0345d-bf7f-7963-ba74-147c8869b527",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "high",
+      "status": "accept",
+      "fingerprint": "d72aa14603fb500b7a6cac4848863880bf71f2b75a7783e97cdd8a18cd47624e",
+      "reason": "fresh read-only Code Scout found no critical/high/medium/low findings; independently reproduced the exact 26-entry fingerprint and audited production assembly, terminal/nonterminal codes, model-turn-only propagation, sanitizer and PostgreSQL replay fail-closed behavior, JSONB merge, concurrency/stale/takeover, public and manager privacy, scope, false-green tests and rollback; read-only temp filesystem prevented an independent Vitest rerun"
+    },
+    "ailr_02_technical_evidence": {
+      "status": "superseded_by_first_review",
+      "base_head": "4c91d162e13251883125ab5b1b32565172f570c6",
+      "fingerprint": "80732ce00c992658e14f98629e34cd641fcfcd639426248e96294b00f40f53d1",
+      "fingerprint_scope": "33 sorted porcelain status entries excluding only .agents/state/granit-dev-workflow.json and output/; each entry hashes XY path, NUL, SHA-256 file bytes and a trailing newline including after the final entry",
+      "scope": "three validator production files, four focused/integration tests, current AI policy and route/card/architecture evidence; no migration, schema, public DTO, prompt, model, tool, send-gate, takeover, widget/catalog or deploy change",
+      "reason": "red policy tests reproduced old terminal behavior; focused 91/91, related 138/138 and real PostgreSQL 32/32 passed; build passed architecture 21/21, bounded API/manager typecheck and Vite; unfiltered suite retained only three inherited context failures plus Vitest/node:test discovery mismatch; structured published factual evidence remains mandatory before deploy"
+    },
+    "ailr_02_first_independent_review": {
+      "session_id": "01a034ba-fd73-71a2-8cc8-edcf282f0d71",
+      "model": "GPT-5 Codex (exact runtime identifier not exposed)",
+      "reasoning_effort": "not exposed by reviewer interface",
+      "status": "changes_requested",
+      "fingerprint": "80732ce00c992658e14f98629e34cd641fcfcd639426248e96294b00f40f53d1",
+      "reason": "found one medium privacy/false-green issue: PostgreSQL history.v2 passed internal candidate_invalid through publicly while the memory helper pre-projected it to unsafe_model_response; all other validator, caller, concurrency, takeover, scope and rollback checks matched the card"
+    },
+    "ailr_02_repair_evidence": {
+      "status": "technical_done",
+      "base_head": "4c91d162e13251883125ab5b1b32565172f570c6",
+      "fingerprint": "0b53bac2ab3036e3ab9132b88df4a90b228902a9346867ce506a302cef760929",
+      "fingerprint_scope": "34 sorted porcelain status entries excluding only .agents/state/granit-dev-workflow.json and output/; each entry hashes XY path, NUL, SHA-256 file bytes and a trailing newline including after the final entry",
+      "scope": "first-review repair adds one status-aware public history projection and two real PostgreSQL validator-reject cases; exact internal job/run evidence remains private; no migration, public DTO, prompt, model, tool, send-gate, takeover, widget/catalog or deploy change",
+      "reason": "red PostgreSQL 2/2 reproduced public candidate_invalid, green 2/2 proved unsafe_model_response projection with exact internal codes retained; PostgreSQL 34/34, related 129 passed and 1 skipped, build/typecheck/architecture 21/21 and diff/JSON checks passed; unfiltered suite retains only three inherited context failures plus Vitest/node:test discovery mismatch"
+    },
+    "ailr_02_second_independent_review": {
+      "session_id": "01a034d3-fec8-7660-8b88-b0402bca772a",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "high",
+      "status": "changes_requested",
+      "fingerprint": "0b53bac2ab3036e3ab9132b88df4a90b228902a9346867ce506a302cef760929",
+      "reason": "found one medium replay/false-green issue: after candidate_invalid an idempotent public POST projected the still AI-active conversation as manager_pending even though history.v2 was ai_active and no handoff or takeover existed"
+    },
+    "ailr_02_second_repair_evidence": {
+      "status": "technical_done",
+      "base_head": "4c91d162e13251883125ab5b1b32565172f570c6",
+      "fingerprint": "b8e9be10e9a6e4937633ae67fd5e26f0902c5e000b1afdef32728feb3e2b7384",
+      "fingerprint_scope": "34 sorted porcelain status entries excluding only .agents/state/granit-dev-workflow.json and output/; each entry hashes XY path, NUL, SHA-256 file bytes and a trailing newline including after the final entry",
+      "scope": "second-review repair reuses the status-aware public reason projection for idempotent blocked POST replay and extends both real PostgreSQL validator-reject cases; manager-owned blocked state remains manager_pending; no migration, public DTO, prompt, model, tool, send-gate, takeover, widget/catalog or deploy change",
+      "reason": "red PostgreSQL 2/2 reproduced false manager_pending replay, green 2/2 proved degraded/ai_active/unsafe_model_response; PostgreSQL 34/34, related 129 passed and 1 skipped, build/typecheck/architecture 21/21 and diff/JSON checks passed; unfiltered suite retains only three inherited context failures plus Vitest/node:test discovery mismatch"
+    },
+    "ailr_02_third_independent_review": {
+      "session_id": "01a034e8-4c63-7411-94ef-adaa6a81a1ca",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "high",
+      "status": "changes_requested",
+      "fingerprint": "b8e9be10e9a6e4937633ae67fd5e26f0902c5e000b1afdef32728feb3e2b7384",
+      "reason": "found one medium ownership/false-green issue: production execution_context_mismatch kept the conversation AI-active but unknown blocked reason was publicly projected as agent_reply_blocked and replay falsely became manager_pending without handoff or takeover"
+    },
+    "ailr_02_third_repair_evidence": {
+      "status": "technical_done",
+      "base_head": "4c91d162e13251883125ab5b1b32565172f570c6",
+      "fingerprint": "d7bdb5facda04fd020a18fd1e3dea7d7a61ed59e87dbc3b8b4289a39be842192",
+      "fingerprint_scope": "34 sorted porcelain status entries excluding only .agents/state/granit-dev-workflow.json and output/; each entry hashes XY path, NUL, SHA-256 file bytes and a trailing newline including after the final entry",
+      "scope": "third-review repair makes public manager ownership depend only on conversation state, maps unknown AI-active blocked reasons to worker_failed and adds a real PostgreSQL before/after-takeover oracle; no migration, public DTO, prompt, model, tool, send-gate, takeover implementation, widget/catalog or deploy change",
+      "reason": "red PostgreSQL 1/1 reproduced false agent_reply_blocked history, green 1/1 proved degraded/ai_active/worker_failed before takeover and manager_pending only after real takeover with stable IDs and no outbound/handoff/raw reason; PostgreSQL 35/35, related 129 passed and 1 skipped, full build/typecheck/architecture 21/21 and diff/JSON checks passed; unfiltered suite retains only three inherited context failures with 374 passed and 2 skipped"
+    },
+    "ailr_02_fourth_independent_review": {
+      "session_id": "01a034fb-4ff8-70d0-bd66-fec5962f3d51",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "high",
+      "status": "needs_redesign",
+      "fingerprint": "d7bdb5facda04fd020a18fd1e3dea7d7a61ed59e87dbc3b8b4289a39be842192",
+      "reason": "found one medium repeated ownership/replay false-green: replay branches derived public state from stale pending/processing/retrying/degraded/failed/superseded job status before current conversation ownership, masking real takeover and inventing manager review for an old superseded inbound; playbook requires Architect redesign before another repair"
+    },
+    "ailr_02_architect_redesign": {
+      "session_id": "01a03509-0df3-7823-a818-0abc03c909f0",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "high",
+      "status": "recommended",
+      "reason": "compared branch reordering, one ownership-first domain projector with coherent PostgreSQL replay/history snapshots, and repository-owned public DTO projection; selected the middle option because conversation ownership remains authoritative, job status remains turn evidence, POST and history share one reason policy, and no public contract/schema/prompt/model/tool/privacy/send-gate/takeover/runtime/roadmap or module-ownership change is required"
+    },
+    "ailr_02_architect_repair_evidence": {
+      "status": "technical_done",
+      "base_head": "4c91d162e13251883125ab5b1b32565172f570c6",
+      "fingerprint": "0b93b88d173b044b47ae6a746f7b4c6c5cc2c1e5f58444c1cfd9abcac6d28cb3",
+      "fingerprint_scope": "41 sorted porcelain status entries excluding only .agents/state/granit-dev-workflow.json and output/; each entry hashes XY path, NUL, SHA-256 file bytes and a trailing newline including after the final entry",
+      "scope": "Architect-selected ownership-first public projector, coherent PostgreSQL replay/history snapshots, internal repository projection fields, memory contract double and real PostgreSQL/public regressions; no migration, public value union, prompt, model, tool, send-gate, takeover implementation, catalog/widget browser code or deploy change",
+      "reason": "eight red PostgreSQL scenarios reproduced stale ownership/current-window/runtime projection failures; PostgreSQL 43/43 and related 134 passed with 1 skip; full build passed architecture 21/21, 142-source closure, bounded API/manager typecheck and Vite; unfiltered suite preserved only inherited context and Vitest/node:test runner failures with 382 passed and 2 skipped; diff/JSON checks passed"
+    },
+    "ailr_02_fifth_independent_review": {
+      "session_id": "01a0352a-7da3-76b2-9aab-794cfc4e233d",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "high",
+      "status": "needs_redesign",
+      "fingerprint": "0b93b88d173b044b47ae6a746f7b4c6c5cc2c1e5f58444c1cfd9abcac6d28cb3",
+      "reason": "found one medium repeated ownership/evidence false-green: a later manager takeover retrospectively maps already replied or superseded historical jobs to agent_reply_blocked, so history can contain the persisted assistant reply and simultaneously claim that same turn was blocked; replied/superseded takeover cases were missing from the PostgreSQL matrix"
+    },
+    "ailr_02_second_architect_redesign": {
+      "session_id": "01a03536-7745-7323-8b41-757e764bd2ca",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "high",
+      "status": "recommended",
+      "reason": "compared manager-branch status exceptions, a pure two-axis projection, and durable ownership snapshots/timeline reconstruction; selected the pure two-axis option so current ownership controls conversation actions and polling while intrinsic job status/reason remains immutable history evidence, with no contract/schema/policy/send-gate/takeover/runtime/roadmap change or new owner stop-gate"
+    },
+    "ailr_02_second_architect_repair_evidence": {
+      "status": "technical_done",
+      "base_head": "4c91d162e13251883125ab5b1b32565172f570c6",
+      "fingerprint": "43b5f809302b5716ae811740494aa8cb1c545c63c4907110b9fdaf5cb797e5ac",
+      "fingerprint_scope": "41 sorted porcelain status entries excluding only .agents/state/granit-dev-workflow.json and output/; each entry hashes XY path, NUL, hexadecimal SHA-256 file bytes and a trailing newline including after the final entry",
+      "scope": "pure two-axis public projection repair plus real PostgreSQL normal-reply, handoff, superseded, takeover and runtime-stop evidence; no migration, public value union, prompt, model, tool, send-gate, takeover implementation, catalog/widget browser code or deploy change",
+      "reason": "eight exact red PostgreSQL assertions reproduced retroactive agent_reply_blocked projection; PostgreSQL 44/44, related 132/132, API typecheck, build and architecture 21/21 passed; the unfiltered suite retains only the three inherited context failures with 383 passed and 2 skipped; production closure is 142 sources with content hash 7428eb1c1823972159f26d0e0a7bb1ea5010675c25b6a45314bac7d563116459 and PostgreSQL evidence hash 647f026d66184eafb3e2a0ba40093264717a805d7694ef2944756395a6df38a2"
+    },
+    "ailr_02_sixth_independent_review": {
+      "session_id": "01a03549-68b3-7592-ad1d-f47cafd4e9d6",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "high",
+      "status": "needs_redesign",
+      "fingerprint": "43b5f809302b5716ae811740494aa8cb1c545c63c4907110b9fdaf5cb797e5ac",
+      "reason": "found one medium repeated current-window replay false green: selectCurrentJob uses latest job only for old superseded inbound, so old replied or no-job replay masks a newer pending response window; the pure projector reproduced replied or persistence-unconfirmed instead of processing, while the PostgreSQL oracle covered only superseded"
+    },
+    "ailr_02_third_architect_redesign": {
+      "session_id": "01a03555-b4d7-7533-9832-7d234924cfe6",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "high",
+      "status": "recommended",
+      "reason": "compared always-latest-job, explicit identity-based pure projection and repository-owned public classification; selected latest visitor public id/sequence plus current generation in the pure projector so old reply/job cannot mask the current window, without schema, public contract, policy, ownership, send-gate, takeover, runtime, roadmap or catalog change"
+    },
+    "ailr_02_identity_window_repair_evidence": {
+      "status": "technical_done",
+      "base_head": "4c91d162e13251883125ab5b1b32565172f570c6",
+      "fingerprint_scope": "41 sorted porcelain status entries excluding only .agents/state/granit-dev-workflow.json and output/; each entry hashes XY path, NUL, hexadecimal SHA-256 file bytes and a trailing newline including after the final entry",
+      "scope": "explicit current visitor window identity in the pure public projector, coherent PostgreSQL replay/history snapshots, internal repository result types, memory contract parity and four real PostgreSQL regressions; no schema, migration, public DTO/value union, prompt, model, tool, privacy, send gate, takeover/runtime implementation, catalog/browser code or deploy change",
+      "reason": "four exact red PostgreSQL scenarios reproduced old replied/no-job masking and stale-epoch polling; PostgreSQL 48/48 and related 132/132 passed; full build passed architecture 21/21, 142-source closure, bounded API/manager typecheck and Vite; unfiltered suite retained only three inherited context failures with 387 passed and 2 skipped; production hash a1f8640a53d57d226a7e1749b8a3081b4525737e446e648ad9e6cc9ff85bc60c and evidence hash 7140640b82acca3d2e4fd20cac64fdcd2da179aa9943d8641402dd67d228f1f7"
+    },
+    "ailr_02_seventh_independent_review": {
+      "session_id": "01a0356f-f385-7803-afe8-c732692e363f",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "high",
+      "status": "needs_fix",
+      "fingerprint": "070c9bbda61d02b7fa0e083284483a900c6653243a508b4d90264c77cdd2319c",
+      "reason": "found no production defect and two low handoff-evidence inaccuracies: stale next_action and omitted Vitest/node:test discovery mismatch in the final card summary"
+    },
+    "ailr_02_handoff_evidence_repair": {
+      "status": "technical_done",
+      "base_head": "4c91d162e13251883125ab5b1b32565172f570c6",
+      "scope": "card, Goal and workflow state only; production, tests, catalog/browser and deploy are unchanged",
+      "reason": "final card evidence now names both inherited context failures and the separate Vitest/node:test discovery mismatch; next_action now records fresh review of this repair before the predeclared AILR-03 transition"
+    },
+    "ailr_02_eighth_independent_review": {
+      "session_id": "01a0357d-6426-7fe1-8f3f-fcabe19aa4e3",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "high",
+      "status": "accept",
+      "fingerprint": "98e9d6ec4997ee57a4d9022acd53f8fa2fb0211c234ffa25d13c3ced7321f742",
+      "reason": "fresh read-only Code Scout found no critical/high/medium/low findings; both handoff-evidence repairs, exact fingerprint twice, production closure, PostgreSQL evidence hash, pure projector 16/16 and unchanged catalog/browser/deploy/schema/contracts were confirmed"
+    },
     "ai_layer_refactor_skill_validation": {
       "command": "python3 scripts/validate.py; python3 -m unittest discover -s tests -v",
       "status": "passed",
@@ -394,5 +638,5 @@
       "reason": "ordinary fast-forward push from the reviewed b678a37 base; force-push, deploy and external runtime activation were not used"
     }
   },
-  "next_action": "Wait for the owner's final teach-back explanation; verify all six required dimensions, then record understanding_verified and close the Goal only if the explanation is sufficient. AILR-00 remains a queued non-active candidate until that route is completed and separately activated."
+  "next_action": "Commit and push the accepted payload without output/, deploy that exact commit to staging with a recoverable image/compose rollback, then record read-only health, CORS and runtime evidence; do not deploy production or restore the old catalog."
 }

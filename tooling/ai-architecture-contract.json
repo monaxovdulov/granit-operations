@@ -9,18 +9,19 @@
       "apps/api/src/widget-ai-runtime-assembly.ts"
     ],
     "provider_boundary": "apps/api/src/modules/ai/adapters/openai-live-v2-decision-generator.ts",
-    "source_count": 140,
-    "source_paths_sha256": "95f2c18c9ddc7aaba769ec2f422bbfffaa35d8b7881f5c5548ba726d08827781",
-    "source_contents_sha256": "efc78259159baf5ee4980a503f17a16eae0a1b5d89fe520d3c9d2b4fe356cfdf"
+    "source_count": 142,
+    "source_paths_sha256": "6cb1521df7da32b26657c18fc54136ab132ff3bf6cd75ef376d146e7e46e4b46",
+    "source_contents_sha256": "a1f8640a53d57d226a7e1749b8a3081b4525737e446e648ad9e6cc9ff85bc60c"
   },
   "documents": {
-    "active_goal": "docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md",
-    "active_card": "docs/tasks/AI_REF_CONV_5_ANTI_CLUTTER_GUARDRAILS_RU.md",
+    "active_goal": "docs/tasks/AI_LAYER_SIMPLIFICATION_GOAL_RU.md",
+    "active_card": "docs/tasks/AI_REF_AILR_02_VALIDATOR_POLICY_RU.md",
     "active_authority_paths": [
       "AGENTS.md",
       "README.md",
       "docs/AGENT_WORKFLOW.md",
       "docs/AI_AGENT_REFACTOR_PLAYBOOK_RU.md",
+      "docs/AI_POLICY.md",
       "docs/adr/ADR-010-AI_OBSERVABILITY_RUNTIME_BOUNDARY_RU.md",
       "docs/adr/ADR-011-CUSTOMER_FACING_LANDING_SOURCE_RU.md",
       "docs/adr/ADR-012-REPO_LOCAL_AI_SOURCE_OF_TRUTH_RU.md",
@@ -28,18 +29,18 @@
       "docs/architecture/AI_LIVE_AGENT_REFACTOR_OWNER_SPEC_RU.md",
       "docs/architecture/AI_REFACTOR_MINIMAL_GOAL_GOVERNANCE_RU.md",
       "docs/source-of-truth.md",
-      "docs/tasks/AI_REF_CONV_5_ANTI_CLUTTER_GUARDRAILS_RU.md",
-      "docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md",
+      "docs/tasks/AI_LAYER_SIMPLIFICATION_GOAL_RU.md",
+      "docs/tasks/AI_REF_AILR_02_VALIDATOR_POLICY_RU.md",
       "docs/tasks/README.md"
     ],
     "allowed_provenance_paths": [
       "docs/tasks/ARCHIVE_RU.md"
     ],
-    "task_count": 22,
-    "task_paths_sha256": "31c65ad154eb5feb9152e5e205feec0f9c589db6f5de5efed95bb29ffb5e82c6",
+    "task_count": 26,
+    "task_paths_sha256": "3cbdf0ebcf8521cad137d31621bf51dd70aa58a2492c042f76790473858c56cd",
     "routing_surface_hashes": {
-      "docs/source-of-truth.md": "55d6f093ca4f15b8f4c1c57552648e861afd79eb96c9a49cfd482de030126f15",
-      "docs/tasks/README.md": "26d220459fa9d9b0ae8b43833d380308736b3e9a0113302e3200f9250e3cf418"
+      "docs/source-of-truth.md": "b99a2742bf9d48b5e76903d959530348b3586afc3788f9b88861a898dd955c5f",
+      "docs/tasks/README.md": "95702e5ac6f4ab730833ff45ca872b27587174fc69f9fd751451b6080485e01d"
     }
   },
   "compatibility": {

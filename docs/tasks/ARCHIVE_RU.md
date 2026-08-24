@@ -16,12 +16,21 @@ release evidence и активной карточкой из `docs/tasks/README.
 | CONV-2 turn contract/direct cutover | `4d567d8acfef3718d92358c3980430539aea367d` | Goal, owner architecture и current model-turn contract/tests |
 | CONV-3 Mastra/legacy removal | `8122a8ef44568d6b97dccee54dee074c4a1c4733` | Goal и current single-runtime assembly |
 | CONV-3A logical run/attempt ledger | `e4cfe371a96ff5a7a3262c19c02776a36d979936` | Goal, migration `0022`, schema/repositories и PostgreSQL evidence tests |
-| CONV-4 active documentation reduction | `d3f9cbd2213ec60bba3953c43f212aa307fd8175` | Source map, task index, этот archive и current CONV-5 card |
+| CONV-4 active documentation reduction | `d3f9cbd2213ec60bba3953c43f212aa307fd8175` | Source map, task index и этот archive |
+| CONV-5 anti-clutter guardrails | `e86ce2d908d32adb538b060af698df7f8ae88268` | Architecture guard, machine contract и accepted CONV-5 card |
 
 CONV-4 принят fresh independent Reviewer в session
 `019fd523-6f6f-7741-9133-3556d176c55e` с verdict `accept` на fingerprint
 `c89b49a847bf45813d3708bde8cd26ca60e4982fafe85f047a612f957c4fba76`;
 замечаний всех уровней не было.
+
+CONV-5 принят fresh independent Reviewer в session
+`019fd5bc-b462-7433-85b4-f34e5cda61bf` с verdict `accept` на fingerprint
+`7d9da2f34627e1e8ea26bcc6146d452743624bdc5f865bb1e1b65b2da9eb4ee8` и
+опубликован указанным выше commit. Общий owner teach-back завершён 2026-08-24:
+архитектурный путь, компромиссы, failure paths, evidence, rollback и deploy
+boundary получили `understanding_verified`. Завершённая Goal и accepted card
+остаются provenance, но не входят в active routing.
 
 Удалённые карточки:
 

@@ -2,11 +2,10 @@
 
 Статус: принят владельцем 2026-08-03
 
-Актуализация 2026-08-06: правила одной Goal, одного среза и независимой приёмки
-остаются действующими. Первоначальный roadmap PR0a—PR9 ниже является
-историческим baseline. Текущий порядок задаёт Goal
-`docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md`: CONV-4, затем CONV-5 и общий
-Teach-back.
+Актуализация 2026-08-24: правила одной Goal, одного среза и независимой приёмки
+остаются действующими. Первоначальный roadmap PR0a—PR9 ниже и завершённая Goal
+`AI-RUNTIME-CONVERGENCE` являются историческим baseline. Текущий порядок задаёт
+`docs/tasks/AI_LAYER_SIMPLIFICATION_GOAL_RU.md` и её единственная active card.
 
 Репозиторий: `granit-operations`
 

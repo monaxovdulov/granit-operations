@@ -39,6 +39,7 @@ import {
 } from "../src/modules/ai/repositories/postgres-ai-run-repository.js";
 import type { PublicWidgetAiReplyGenerator } from "../src/modules/intake/ports/public-widget-ai-reply-generator.js";
 import { PostgresIntakeRepository } from "../src/modules/conversations/repositories/postgres-intake-repository.js";
+import type { SiteWidgetAiJobStatus } from "../src/modules/conversations/repositories/public-intake-repository.js";
 import { WidgetAiJobWorker } from "../src/modules/intake/services/widget-ai-job-worker.js";
 import { PublicWidgetIntakeService } from "../src/modules/intake/use-cases/public-widget-intake-service.js";
 import { validTelegramInbound } from "./helpers/telegram-fixtures.js";
@@ -835,10 +836,12 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
     ).rejects.toBeInstanceOf(AiRunInputInvariantError);
 
     const completion: AiRunTerminalCompletion = {
-      status: "fallback_unavailable",
+      status: "blocked",
       normalizedAction: "no_reply",
-      outcomeReason: "no_safe_answer",
-      validatorResult: "passed",
+      outcomeReason: "candidate_invalid",
+      failureCode: "invalid_candidate",
+      validatorResult: "rejected",
+      validatorFailureCode: "tone_violation",
       observedModelProvider: "none",
       sendGateResult: "not_checked",
       completedAt: new Date("2026-08-04T11:00:00.100Z"),
@@ -846,17 +849,17 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
       spans: [
         {
           spanId: "model-1",
-          kind: "model",
-          name: "model_generation",
+          kind: "validation",
+          name: "candidate_validation",
           status: "failed",
           latencyMs: 90,
-          errorCode: "model_error"
+          errorCode: "validation_failed"
         }
       ],
       qualityEvents: [
         {
-          eventType: "model_failure",
-          reasonCode: "model_error",
+          eventType: "policy_violation",
+          reasonCode: "candidate_invalid",
           severity: "error",
           managerVisible: true
         }
@@ -880,14 +883,16 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
       {
         recordingContract: "logical_recorded_v2",
         winningAttemptId: started.run.attempt.id,
-        status: "fallback_unavailable",
+        status: "blocked",
         inboundMessageId: inbound.id,
         inboundPublicMessageId: accepted.public_message_id,
         configuredModelProvider: "fake",
         configuredModelName: "pr0b-recorded-fake",
-        traceId: input.traceId
+        traceId: input.traceId,
+        metadata: { validator_failure_code: "tone_violation" }
       }
     ]);
+    expect(runRows[0]?.metadata).toEqual({ validator_failure_code: "tone_violation" });
     expect(spanRows).toMatchObject([
       {
         aiRunId: started.run.id,
@@ -901,8 +906,8 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
         aiRunId: started.run.id,
         aiRunAttemptId: started.run.attempt.id,
         messageId: inbound.id,
-        eventType: "model_failure",
-        reasonCode: "model_error",
+        eventType: "policy_violation",
+        reasonCode: "candidate_invalid",
         managerVisible: true
       }
     ]);
@@ -1339,12 +1344,10 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
       retryBackoffMs: 10
     });
 
-    await accept(
-      context.publicIntake.siteWidget,
-      widgetRequest("direct-model-turn-postgres", {
-        text: "Нужен памятник: чёрный гранит, без золота"
-      })
-    );
+    const request = widgetRequest("direct-model-turn-postgres", {
+      text: "Нужен памятник: чёрный гранит, без золота"
+    });
+    const accepted = await accept(context.publicIntake.siteWidget, request);
     const [queuedJob] = await harness.db
       .select({ availableAt: widgetAiJobs.availableAt })
       .from(widgetAiJobs);
@@ -1413,6 +1416,893 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
     });
     expect(await jobRows()).toMatchObject([
       { status: "replied", attemptCount: 1, terminalReason: "handoff" }
+    ]);
+
+    const pendingHistory = await context.publicIntake.siteWidget.getSiteWidgetHistory(
+      accepted.public_session_id,
+      "site_widget.history.v2"
+    );
+    if (!pendingHistory.body.ok || pendingHistory.body.schema_version !== "site_widget.history.v2") {
+      throw new Error("expected manager-pending handoff history");
+    }
+    expect(pendingHistory.body.conversation_state).toBe("manager_pending");
+    expect(
+      pendingHistory.body.messages.find(
+        (message) => message.public_message_id === accepted.public_message_id
+      )?.automation
+    ).toEqual({ status: "replied", reason: "handoff" });
+
+    await repository.takeoverConversationByPublicId({
+      publicConversationId: accepted.public_conversation_id,
+      changedByManagerId: randomUUID(),
+      changedByManagerEmail: "owner@example.test",
+      changedByManagerRole: "owner"
+    });
+
+    const activeHistory = await context.publicIntake.siteWidget.getSiteWidgetHistory(
+      accepted.public_session_id,
+      "site_widget.history.v2"
+    );
+    if (!activeHistory.body.ok || activeHistory.body.schema_version !== "site_widget.history.v2") {
+      throw new Error("expected manager-active handoff history");
+    }
+    expect(activeHistory.body.conversation_state).toBe("manager_active");
+    expect(
+      activeHistory.body.messages.find(
+        (message) => message.public_message_id === accepted.public_message_id
+      )?.automation
+    ).toEqual({ status: "replied", reason: "handoff" });
+    expect(activeHistory.body.poll_after_ms).toBeUndefined();
+    expect(JSON.stringify(activeHistory.body)).not.toContain("agent_reply_blocked");
+
+    const replay = await context.publicIntake.siteWidget.acceptSiteWidgetMessage(request);
+    expect(replay.statusCode).toBe(202);
+    if (!replay.body.ok) throw new Error("expected successful handoff replay");
+    expect(replay.body).toMatchObject({
+      status: "replayed",
+      public_session_id: accepted.public_session_id,
+      public_conversation_id: accepted.public_conversation_id,
+      public_message_id: accepted.public_message_id,
+      automation: {
+        status: "manager_pending",
+        next_step: "manager_review",
+        conversation_state: "manager_active",
+        reason: "handoff"
+      }
+    });
+    expect(await countMessagesByRole("ai_assistant")).toBe(1);
+    expect(await harness.db.select().from(conversationHandoffs)).toHaveLength(1);
+  });
+
+  it.each([
+    {
+      label: "invalid shape",
+      expectedCode: "invalid_shape",
+      rawCanary: "RAW_SHAPE_CANDIDATE_SHOULD_NOT_LEAK_001",
+      candidate: {
+        version: "wrong_model_turn_contract",
+        rawCanary: "RAW_SHAPE_CANDIDATE_SHOULD_NOT_LEAK_001"
+      }
+    },
+    {
+      label: "handoff and question conflict",
+      expectedCode: "invalid_question",
+      rawCanary: "RAW_HANDOFF_CANDIDATE_SHOULD_NOT_LEAK_001",
+      candidate: {
+        version: "granit_model_turn.v1",
+        message: {
+          answerText: "RAW_HANDOFF_CANDIDATE_SHOULD_NOT_LEAK_001",
+          question: { text: "Какой материал рассматриваете?", target: "material" }
+        },
+        statePatches: [],
+        recommendationIds: [],
+        handoffIntent: { reason: "customer_requested_manager" }
+      }
+    }
+  ])("keeps $label internal across PostgreSQL history", async (testCase) => {
+    const repository = new PostgresIntakeRepository(harness.db);
+    const generator: ObservedLiveV2DecisionGenerator = {
+      async generateDecision() {
+        return {
+          candidate: testCase.candidate,
+          observation: {
+            observedModelProvider: "openai",
+            observedModelName: "gpt-5.6-luna",
+            runtimeRunId: "resp_postgres_model_turn_rejected_001"
+          }
+        };
+      }
+    };
+    const context = buildAppContext({
+      repository,
+      widgetAi: {
+        enabled: true,
+        runRepository: new PostgresAiRunRepository(harness.db),
+        directLiveV2: {
+          generator,
+          modelName: "gpt-5.6-luna",
+          approvedFacts: TEST_LIVE_V2_FACTS
+        },
+        jobWorker: {
+          enabled: true,
+          pollIntervalMs: 10,
+          leaseMs: 5_000,
+          retryBackoffMs: 10,
+          maxAttempts: 3
+        }
+      }
+    });
+    const service = context.publicIntake.siteWidget;
+    const worker = new WidgetAiJobWorker(repository, service, {
+      pollIntervalMs: 10,
+      leaseMs: 5_000,
+      retryBackoffMs: 10
+    });
+    const request = widgetRequest(`validator-reject-${testCase.expectedCode}`, {
+      text: "Покажите варианты памятников"
+    });
+    const accepted = await accept(service, request);
+    const [queuedJob] = await harness.db
+      .select({ availableAt: widgetAiJobs.availableAt })
+      .from(widgetAiJobs);
+    if (!queuedJob) throw new Error("expected queued rejected model-turn job");
+
+    expect(await worker.runOnce(new Date(queuedJob.availableAt.getTime() + 1))).toBe(true);
+    expect(await jobRows()).toEqual([
+      { status: "blocked", attemptCount: 1, terminalReason: "candidate_invalid" }
+    ]);
+    expect(await countMessagesByRole("ai_assistant")).toBe(0);
+    expect(await harness.db.select().from(conversationHandoffs)).toEqual([]);
+    expect(await conversationRows()).toMatchObject([
+      { aiState: "ai_collecting_info", agentAllowedToReply: true }
+    ]);
+
+    const history = await service.getSiteWidgetHistory(
+      accepted.public_session_id,
+      "site_widget.history.v2"
+    );
+    if (!history.body.ok || history.body.schema_version !== "site_widget.history.v2") {
+      throw new Error("expected v2 public widget history");
+    }
+    expect(history.body.conversation_state).toBe("ai_active");
+    expect(history.body.messages).toMatchObject([
+      {
+        public_message_id: accepted.public_message_id,
+        sender_role: "visitor",
+        automation: { status: "blocked", reason: "unsafe_model_response" }
+      }
+    ]);
+    const publicHistory = JSON.stringify(history.body);
+    expect(publicHistory).not.toContain("candidate_invalid");
+    expect(publicHistory).not.toContain(testCase.expectedCode);
+    expect(publicHistory).not.toContain(testCase.rawCanary);
+    expect(publicHistory).not.toContain(JSON.stringify(testCase.candidate));
+
+    const replay = await service.acceptSiteWidgetMessage(request);
+    expect(replay.statusCode).toBe(202);
+    expect(replay.body).toMatchObject({
+      ok: true,
+      status: "replayed",
+      public_session_id: accepted.public_session_id,
+      public_conversation_id: accepted.public_conversation_id,
+      public_message_id: accepted.public_message_id,
+      automation: {
+        status: "degraded",
+        next_step: "retry_or_manager",
+        conversation_state: "ai_active",
+        reason: "unsafe_model_response"
+      }
+    });
+    const publicReplay = JSON.stringify(replay.body);
+    expect(publicReplay).not.toContain("candidate_invalid");
+    expect(publicReplay).not.toContain(testCase.expectedCode);
+    expect(publicReplay).not.toContain(testCase.rawCanary);
+    expect(publicReplay).not.toContain(JSON.stringify(testCase.candidate));
+
+    expect(await harness.db.select().from(aiRuns)).toMatchObject([
+      {
+        status: "blocked",
+        outcomeReason: "candidate_invalid",
+        failureCode: "invalid_candidate",
+        profileValidatorResult: "rejected",
+        metadata: { validator_failure_code: testCase.expectedCode },
+        outboundMessageId: null,
+        outboundPublicMessageId: null
+      }
+    ]);
+  });
+
+  it("keeps an unknown AI-active blocked reason degraded until a real manager takeover", async () => {
+    const { repository, service } = runtime();
+    const request = widgetRequest("execution-context-mismatch-projection", {
+      text: "Покажите варианты памятников"
+    });
+    const accepted = await accept(service, request);
+    const [queuedJob] = await harness.db
+      .select({ availableAt: widgetAiJobs.availableAt })
+      .from(widgetAiJobs);
+    if (!queuedJob) throw new Error("expected queued execution-context mismatch job");
+
+    const job = await repository.claimSiteWidgetAiJob!({
+      leaseMs: 5_000,
+      now: new Date(queuedJob.availableAt.getTime() + 1)
+    });
+    if (!job) throw new Error("expected claimed execution-context mismatch job");
+
+    await expect(
+      service.processClaimedSiteWidgetAiJob({
+        ...job,
+        aiTurnExecutionContext: {
+          ...job.aiTurnExecutionContext,
+          public: {
+            ...job.aiTurnExecutionContext.public,
+            inboundMessageId: randomUUID()
+          }
+        }
+      })
+    ).resolves.toMatchObject({ status: "blocked" });
+
+    expect(await jobRows()).toEqual([
+      {
+        status: "blocked",
+        attemptCount: 1,
+        terminalReason: "execution_context_mismatch"
+      }
+    ]);
+    expect(await countMessagesByRole("ai_assistant")).toBe(0);
+    expect(await harness.db.select().from(conversationHandoffs)).toEqual([]);
+    expect(await conversationRows()).toEqual([
+      { aiState: "ai_collecting_info", agentAllowedToReply: true }
+    ]);
+
+    const aiActiveHistory = await service.getSiteWidgetHistory(
+      accepted.public_session_id,
+      "site_widget.history.v2"
+    );
+    if (
+      !aiActiveHistory.body.ok ||
+      aiActiveHistory.body.schema_version !== "site_widget.history.v2"
+    ) {
+      throw new Error("expected AI-active v2 history");
+    }
+    expect(aiActiveHistory.body).toMatchObject({
+      public_session_id: accepted.public_session_id,
+      public_conversation_id: accepted.public_conversation_id,
+      conversation_state: "ai_active",
+      messages: [
+        {
+          public_message_id: accepted.public_message_id,
+          sender_role: "visitor",
+          automation: { status: "blocked", reason: "worker_failed" }
+        }
+      ]
+    });
+    expect(JSON.stringify(aiActiveHistory.body)).not.toContain("execution_context_mismatch");
+
+    const aiActiveReplay = await service.acceptSiteWidgetMessage(request);
+    expect(aiActiveReplay.statusCode).toBe(202);
+    if (!aiActiveReplay.body.ok) throw new Error("expected successful AI-active replay");
+    expect(aiActiveReplay.body).toMatchObject({
+      ok: true,
+      status: "replayed",
+      public_session_id: accepted.public_session_id,
+      public_conversation_id: accepted.public_conversation_id,
+      public_message_id: accepted.public_message_id,
+      automation: {
+        status: "degraded",
+        next_step: "retry_or_manager",
+        conversation_state: "ai_active",
+        reason: "worker_failed"
+      }
+    });
+    expect(aiActiveReplay.body.message_to_user).not.toContain("менеджер");
+    expect(JSON.stringify(aiActiveReplay.body)).not.toContain("execution_context_mismatch");
+
+    await repository.takeoverConversationByPublicId({
+      publicConversationId: accepted.public_conversation_id,
+      changedByManagerId: randomUUID(),
+      changedByManagerEmail: "owner@example.test",
+      changedByManagerRole: "owner"
+    });
+
+    const managerReplay = await service.acceptSiteWidgetMessage(request);
+    expect(managerReplay.statusCode).toBe(202);
+    if (!managerReplay.body.ok) throw new Error("expected successful manager-owned replay");
+    expect(managerReplay.body).toMatchObject({
+      ok: true,
+      status: "replayed",
+      public_session_id: accepted.public_session_id,
+      public_conversation_id: accepted.public_conversation_id,
+      public_message_id: accepted.public_message_id,
+      automation: {
+        status: "manager_pending",
+        next_step: "manager_review",
+        conversation_state: "manager_active",
+        reason: "agent_reply_blocked"
+      }
+    });
+    expect(managerReplay.body.message_to_user.toLowerCase()).toContain("менеджер");
+    expect(JSON.stringify(managerReplay.body)).not.toContain("execution_context_mismatch");
+    expect(await countMessagesByRole("ai_assistant")).toBe(0);
+    expect(await harness.db.select().from(conversationHandoffs)).toEqual([]);
+    expect(await conversationRows()).toEqual([
+      { aiState: "manager_active", agentAllowedToReply: false }
+    ]);
+  });
+
+  it.each([
+    "pending",
+    "processing",
+    "retrying",
+    "degraded",
+    "failed",
+    "blocked"
+  ] as const)(
+    "projects actual manager ownership ahead of an old $status job",
+    async (status) => {
+      const { repository, service } = runtime();
+      const request = widgetRequest(`ownership-first-${status}`, {
+        text: "Покажите варианты памятников"
+      });
+      const accepted = await accept(service, request);
+      await moveOnlyJobToStatus(repository, status);
+      await repository.takeoverConversationByPublicId({
+        publicConversationId: accepted.public_conversation_id,
+        changedByManagerId: randomUUID(),
+        changedByManagerEmail: "owner@example.test",
+        changedByManagerRole: "owner"
+      });
+
+      const replay = await service.acceptSiteWidgetMessage(request);
+      expect(replay.statusCode).toBe(202);
+      if (!replay.body.ok) throw new Error("expected successful manager-owned replay");
+      expect(replay.body).toMatchObject({
+        status: "replayed",
+        public_session_id: accepted.public_session_id,
+        public_conversation_id: accepted.public_conversation_id,
+        public_message_id: accepted.public_message_id,
+        automation: {
+          status: "manager_pending",
+          next_step: "manager_review",
+          conversation_state: "manager_active",
+          reason: "agent_reply_blocked"
+        }
+      });
+      expect(replay.body.message_to_user.toLowerCase()).toContain("менеджер");
+      expect(JSON.stringify(replay.body)).not.toContain("execution_context_mismatch");
+
+      const history = await service.getSiteWidgetHistory(
+        accepted.public_session_id,
+        "site_widget.history.v2"
+      );
+      if (!history.body.ok || history.body.schema_version !== "site_widget.history.v2") {
+        throw new Error("expected manager-owned v2 history");
+      }
+      expect(history.body).toMatchObject({
+        public_session_id: accepted.public_session_id,
+        public_conversation_id: accepted.public_conversation_id,
+        conversation_state: "manager_active"
+      });
+      expect(
+        history.body.messages.find(
+          (message) => message.public_message_id === accepted.public_message_id
+        )?.automation
+      ).toEqual(
+        status === "pending" || status === "processing" || status === "retrying"
+          ? { status }
+          : { status, reason: "worker_failed" }
+      );
+      expect(history.body.poll_after_ms).toBeUndefined();
+      expect(JSON.stringify(history.body)).not.toContain("execution_context_mismatch");
+      expect(JSON.stringify(history.body)).not.toContain("agent_reply_blocked");
+      expect(await countMessagesByRole("ai_assistant")).toBe(0);
+      expect(await harness.db.select().from(conversationHandoffs)).toEqual([]);
+      expect(await conversationRows()).toEqual([
+        { aiState: "manager_active", agentAllowedToReply: false }
+      ]);
+    }
+  );
+
+  it("keeps a completed reply as immutable history evidence after runtime stop and takeover", async () => {
+    const { repository, service, worker } = runtime();
+    const request = widgetRequest("replied-evidence-after-takeover", {
+      text: "Покажите варианты памятников"
+    });
+    const accepted = await accept(service, request);
+    expect(await worker.runOnce(readyNow())).toBe(true);
+    expect(await jobRows()).toEqual([
+      { status: "replied", attemptCount: 1, terminalReason: null }
+    ]);
+    expect(await countMessagesByRole("ai_assistant")).toBe(1);
+    expect(await harness.db.select().from(conversationHandoffs)).toEqual([]);
+
+    const beforeControl = await service.getSiteWidgetHistory(
+      accepted.public_session_id,
+      "site_widget.history.v2"
+    );
+    if (!beforeControl.body.ok || beforeControl.body.schema_version !== "site_widget.history.v2") {
+      throw new Error("expected replied history before manager control");
+    }
+    expect(beforeControl.body.conversation_state).toBe("ai_active");
+    expect(
+      beforeControl.body.messages.find(
+        (message) => message.public_message_id === accepted.public_message_id
+      )?.automation
+    ).toEqual({ status: "replied" });
+
+    const managerId = randomUUID();
+    await harness.db.insert(managerUsers).values({
+      id: managerId,
+      email: "owner@example.test",
+      role: "owner",
+      status: "active"
+    });
+    const control = await repository.getManagerAiControl();
+    await repository.setManagerAiControl({
+      enabled: false,
+      expectedVersion: control.version,
+      changedByManagerId: managerId,
+      changedByManagerEmail: "owner@example.test",
+      changedByManagerRole: "owner"
+    });
+
+    const runtimeStoppedHistory = await service.getSiteWidgetHistory(
+      accepted.public_session_id,
+      "site_widget.history.v2"
+    );
+    if (
+      !runtimeStoppedHistory.body.ok ||
+      runtimeStoppedHistory.body.schema_version !== "site_widget.history.v2"
+    ) {
+      throw new Error("expected replied history after runtime stop");
+    }
+    expect(
+      runtimeStoppedHistory.body.messages.find(
+        (message) => message.public_message_id === accepted.public_message_id
+      )?.automation
+    ).toEqual({ status: "replied" });
+    expect(runtimeStoppedHistory.body.poll_after_ms).toBeUndefined();
+
+    await repository.takeoverConversationByPublicId({
+      publicConversationId: accepted.public_conversation_id,
+      changedByManagerId: managerId,
+      changedByManagerEmail: "owner@example.test",
+      changedByManagerRole: "owner"
+    });
+
+    const afterTakeover = await service.getSiteWidgetHistory(
+      accepted.public_session_id,
+      "site_widget.history.v2"
+    );
+    if (!afterTakeover.body.ok || afterTakeover.body.schema_version !== "site_widget.history.v2") {
+      throw new Error("expected replied history after takeover");
+    }
+    expect(afterTakeover.body.conversation_state).toBe("manager_active");
+    expect(
+      afterTakeover.body.messages.find(
+        (message) => message.public_message_id === accepted.public_message_id
+      )?.automation
+    ).toEqual({ status: "replied" });
+    expect(afterTakeover.body.poll_after_ms).toBeUndefined();
+    expect(JSON.stringify(afterTakeover.body)).not.toContain("agent_reply_blocked");
+
+    const replay = await service.acceptSiteWidgetMessage(request);
+    expect(replay.statusCode).toBe(202);
+    if (!replay.body.ok) throw new Error("expected replied manager-owned replay");
+    expect(replay.body).toMatchObject({
+      status: "replayed",
+      public_session_id: accepted.public_session_id,
+      public_conversation_id: accepted.public_conversation_id,
+      public_message_id: accepted.public_message_id,
+      automation: {
+        status: "manager_pending",
+        next_step: "manager_review",
+        conversation_state: "manager_active",
+        reason: "agent_reply_blocked"
+      }
+    });
+    expect(await countMessagesByRole("ai_assistant")).toBe(1);
+    expect(await harness.db.select().from(conversationHandoffs)).toEqual([]);
+    expect(await jobRows()).toEqual([
+      { status: "replied", attemptCount: 1, terminalReason: null }
+    ]);
+  });
+
+  it("projects the newest pending window when an older replied inbound is replayed", async () => {
+    const { service, worker } = runtime();
+    const sessionId = randomUUID();
+    const firstRequest = widgetRequest("current-window-old-replied", {
+      sessionId,
+      text: "Первый вопрос"
+    });
+    const first = await accept(service, firstRequest);
+    expect(await worker.runOnce(readyNow())).toBe(true);
+
+    const secondRequest = widgetRequest("current-window-new-pending", {
+      sessionId,
+      text: "Актуальное уточнение"
+    });
+    const second = await accept(service, secondRequest);
+    expect(await jobRows()).toMatchObject([
+      { status: "replied", terminalReason: null },
+      { status: "pending", terminalReason: null }
+    ]);
+
+    const replay = await service.acceptSiteWidgetMessage(firstRequest);
+    expect(replay.statusCode).toBe(202);
+    if (!replay.body.ok) throw new Error("expected old replied replay");
+    expect(replay.body).toMatchObject({
+      status: "replayed",
+      public_session_id: first.public_session_id,
+      public_conversation_id: first.public_conversation_id,
+      public_message_id: first.public_message_id,
+      automation: {
+        status: "processing",
+        next_step: "poll_history",
+        conversation_state: "ai_active"
+      }
+    });
+
+    const history = await service.getSiteWidgetHistory(sessionId, "site_widget.history.v2");
+    if (!history.body.ok || history.body.schema_version !== "site_widget.history.v2") {
+      throw new Error("expected current-window history");
+    }
+    expect(history.body.poll_after_ms).toBe(700);
+    expect(
+      history.body.messages.find(
+        (message) => message.public_message_id === first.public_message_id
+      )
+    ).toMatchObject({ automation: { status: "replied" } });
+    expect(
+      history.body.messages.find(
+        (message) => message.public_message_id === second.public_message_id
+      )
+    ).toMatchObject({ automation: { status: "pending" } });
+    expect(await countMessagesByRole("visitor")).toBe(2);
+    expect(await countMessagesByRole("ai_assistant")).toBe(1);
+    expect(await harness.db.select().from(conversationHandoffs)).toEqual([]);
+  });
+
+  it("projects a newer pending window when the replayed inbound never had a job", async () => {
+    const { repository, service } = runtime();
+    const sessionId = randomUUID();
+    await setGlobalRuntimeEnabled(repository, false);
+    const firstRequest = widgetRequest("current-window-old-no-job", {
+      sessionId,
+      text: "Первый вопрос без AI job"
+    });
+    const first = await accept(service, firstRequest);
+    expect(await jobRows()).toEqual([]);
+
+    await setGlobalRuntimeEnabled(repository, true);
+    const second = await accept(
+      service,
+      widgetRequest("current-window-new-job", {
+        sessionId,
+        text: "Актуальный вопрос"
+      })
+    );
+    expect(await jobRows()).toMatchObject([{ status: "pending", terminalReason: null }]);
+
+    const replay = await service.acceptSiteWidgetMessage(firstRequest);
+    expect(replay.statusCode).toBe(202);
+    if (!replay.body.ok) throw new Error("expected old no-job replay");
+    expect(replay.body).toMatchObject({
+      status: "replayed",
+      public_session_id: first.public_session_id,
+      public_conversation_id: first.public_conversation_id,
+      public_message_id: first.public_message_id,
+      automation: {
+        status: "processing",
+        next_step: "poll_history",
+        conversation_state: "ai_active"
+      }
+    });
+
+    const history = await service.getSiteWidgetHistory(sessionId, "site_widget.history.v2");
+    if (!history.body.ok || history.body.schema_version !== "site_widget.history.v2") {
+      throw new Error("expected no-job current-window history");
+    }
+    expect(history.body.poll_after_ms).toBe(700);
+    expect(
+      history.body.messages.find(
+        (message) => message.public_message_id === first.public_message_id
+      )?.automation
+    ).toBeUndefined();
+    expect(
+      history.body.messages.find(
+        (message) => message.public_message_id === second.public_message_id
+      )?.automation
+    ).toEqual({ status: "pending" });
+    expect(await countMessagesByRole("ai_assistant")).toBe(0);
+    expect(await harness.db.select().from(conversationHandoffs)).toEqual([]);
+  });
+
+  it("does not let an older reply mask a newer visitor window without a job", async () => {
+    const { repository, service, worker } = runtime();
+    const sessionId = randomUUID();
+    const firstRequest = widgetRequest("current-window-replied-before-no-job", {
+      sessionId,
+      text: "Первый вопрос"
+    });
+    const first = await accept(service, firstRequest);
+    expect(await worker.runOnce(readyNow())).toBe(true);
+
+    await setGlobalRuntimeEnabled(repository, false);
+    const secondRequest = widgetRequest("current-window-latest-no-job", {
+      sessionId,
+      text: "Новое сообщение без AI job"
+    });
+    const second = await accept(service, secondRequest);
+    await setGlobalRuntimeEnabled(repository, true);
+
+    const currentReplay = await service.acceptSiteWidgetMessage(secondRequest);
+    expect(currentReplay.statusCode).toBe(202);
+    if (!currentReplay.body.ok) throw new Error("expected current no-job replay");
+    expect(currentReplay.body).toMatchObject({
+      status: "replayed",
+      public_message_id: second.public_message_id,
+      automation: {
+        status: "degraded",
+        next_step: "retry_or_manager",
+        conversation_state: "ai_active",
+        reason: "ai_persistence_unconfirmed"
+      }
+    });
+
+    const oldReplay = await service.acceptSiteWidgetMessage(firstRequest);
+    expect(oldReplay.statusCode).toBe(202);
+    if (!oldReplay.body.ok) throw new Error("expected old replied replay after no-job inbound");
+    expect(oldReplay.body).toMatchObject({
+      status: "replayed",
+      public_session_id: first.public_session_id,
+      public_conversation_id: first.public_conversation_id,
+      public_message_id: first.public_message_id,
+      automation: {
+        status: "degraded",
+        next_step: "retry_or_manager",
+        conversation_state: "ai_active",
+        reason: "ai_persistence_unconfirmed"
+      }
+    });
+
+    const history = await service.getSiteWidgetHistory(sessionId, "site_widget.history.v2");
+    if (!history.body.ok || history.body.schema_version !== "site_widget.history.v2") {
+      throw new Error("expected latest no-job history");
+    }
+    expect(history.body.poll_after_ms).toBeUndefined();
+    expect(
+      history.body.messages.find(
+        (message) => message.public_message_id === first.public_message_id
+      )?.automation
+    ).toEqual({ status: "replied" });
+    expect(
+      history.body.messages.find(
+        (message) => message.public_message_id === second.public_message_id
+      )?.automation
+    ).toBeUndefined();
+    expect(await countMessagesByRole("ai_assistant")).toBe(1);
+    expect(await harness.db.select().from(conversationHandoffs)).toEqual([]);
+  });
+
+  it("does not poll a current active job after its generation epoch became stale", async () => {
+    const { repository, service } = runtime();
+    const request = widgetRequest("current-window-stale-epoch", {
+      text: "Покажите актуальные варианты"
+    });
+    const accepted = await accept(service, request);
+    await setGlobalRuntimeEnabled(repository, false);
+    await setGlobalRuntimeEnabled(repository, true);
+
+    const replay = await service.acceptSiteWidgetMessage(request);
+    expect(replay.statusCode).toBe(202);
+    if (!replay.body.ok) throw new Error("expected stale-epoch replay");
+    expect(replay.body).toMatchObject({
+      status: "replayed",
+      public_session_id: accepted.public_session_id,
+      public_conversation_id: accepted.public_conversation_id,
+      public_message_id: accepted.public_message_id,
+      automation: {
+        status: "degraded",
+        next_step: "retry_or_manager",
+        conversation_state: "ai_active",
+        reason: "worker_failed"
+      }
+    });
+
+    const history = await service.getSiteWidgetHistory(
+      accepted.public_session_id,
+      "site_widget.history.v2"
+    );
+    if (!history.body.ok || history.body.schema_version !== "site_widget.history.v2") {
+      throw new Error("expected stale-epoch history");
+    }
+    expect(
+      history.body.messages.find(
+        (message) => message.public_message_id === accepted.public_message_id
+      )?.automation
+    ).toEqual({ status: "pending" });
+    expect(history.body.poll_after_ms).toBeUndefined();
+    expect(await jobRows()).toMatchObject([{ status: "pending", terminalReason: null }]);
+    expect(await countMessagesByRole("ai_assistant")).toBe(0);
+    expect(await harness.db.select().from(conversationHandoffs)).toEqual([]);
+  });
+
+  it("projects an old superseded replay from the current AI-active response window", async () => {
+    const { service } = runtime();
+    const sessionId = randomUUID();
+    const firstRequest = widgetRequest("ownership-first-superseded-1", {
+      sessionId,
+      text: "Первый вопрос"
+    });
+    const first = await accept(service, firstRequest);
+    const second = await accept(
+      service,
+      widgetRequest("ownership-first-superseded-2", {
+        sessionId,
+        text: "Актуальное уточнение"
+      })
+    );
+
+    expect(await jobRows()).toMatchObject([
+      { status: "superseded", terminalReason: "newer_inbound" },
+      { status: "pending", terminalReason: null }
+    ]);
+
+    const replay = await service.acceptSiteWidgetMessage(firstRequest);
+    expect(replay.statusCode).toBe(202);
+    if (!replay.body.ok) throw new Error("expected successful superseded replay");
+    expect(replay.body).toMatchObject({
+      status: "replayed",
+      public_session_id: first.public_session_id,
+      public_conversation_id: first.public_conversation_id,
+      public_message_id: first.public_message_id,
+      automation: {
+        status: "processing",
+        next_step: "poll_history",
+        conversation_state: "ai_active"
+      }
+    });
+    expect(replay.body.message_to_user.toLowerCase()).not.toContain("менеджер");
+    expect(JSON.stringify(replay.body)).not.toContain("newer_inbound");
+
+    const history = await service.getSiteWidgetHistory(sessionId, "site_widget.history.v2");
+    if (!history.body.ok || history.body.schema_version !== "site_widget.history.v2") {
+      throw new Error("expected AI-active superseded v2 history");
+    }
+    expect(history.body).toMatchObject({
+      public_session_id: first.public_session_id,
+      public_conversation_id: first.public_conversation_id,
+      conversation_state: "ai_active",
+      poll_after_ms: 700,
+      messages: [
+        {
+          public_message_id: first.public_message_id,
+          automation: { status: "superseded" }
+        },
+        {
+          public_message_id: second.public_message_id,
+          automation: { status: "pending" }
+        }
+      ]
+    });
+    expect(JSON.stringify(history.body)).not.toContain("newer_inbound");
+    expect(await countMessagesByRole("visitor")).toBe(2);
+    expect(await countMessagesByRole("ai_assistant")).toBe(0);
+    expect(await harness.db.select().from(conversationHandoffs)).toEqual([]);
+
+    const repository = new PostgresIntakeRepository(harness.db);
+    await repository.takeoverConversationByPublicId({
+      publicConversationId: first.public_conversation_id,
+      changedByManagerId: randomUUID(),
+      changedByManagerEmail: "owner@example.test",
+      changedByManagerRole: "owner"
+    });
+
+    const managerReplay = await service.acceptSiteWidgetMessage(firstRequest);
+    expect(managerReplay.statusCode).toBe(202);
+    if (!managerReplay.body.ok) throw new Error("expected manager-owned superseded replay");
+    expect(managerReplay.body).toMatchObject({
+      status: "replayed",
+      public_session_id: first.public_session_id,
+      public_conversation_id: first.public_conversation_id,
+      public_message_id: first.public_message_id,
+      automation: {
+        status: "manager_pending",
+        next_step: "manager_review",
+        conversation_state: "manager_active",
+        reason: "agent_reply_blocked"
+      }
+    });
+
+    const managerHistory = await service.getSiteWidgetHistory(
+      sessionId,
+      "site_widget.history.v2"
+    );
+    if (!managerHistory.body.ok || managerHistory.body.schema_version !== "site_widget.history.v2") {
+      throw new Error("expected manager-owned superseded history");
+    }
+    expect(managerHistory.body.conversation_state).toBe("manager_active");
+    expect(
+      managerHistory.body.messages.find(
+        (message) => message.public_message_id === first.public_message_id
+      )?.automation
+    ).toEqual({ status: "superseded" });
+    expect(
+      managerHistory.body.messages.find(
+        (message) => message.public_message_id === second.public_message_id
+      )?.automation
+    ).toEqual({ status: "pending" });
+    expect(managerHistory.body.poll_after_ms).toBeUndefined();
+    expect(JSON.stringify(managerHistory.body)).not.toContain("agent_reply_blocked");
+    expect(JSON.stringify(managerHistory.body)).not.toContain("newer_inbound");
+    expect(await countMessagesByRole("visitor")).toBe(2);
+    expect(await countMessagesByRole("ai_assistant")).toBe(0);
+    expect(await harness.db.select().from(conversationHandoffs)).toEqual([]);
+  });
+
+  it("degrades an AI-active replay honestly when the runtime was disabled", async () => {
+    const { repository, service } = runtime();
+    const request = widgetRequest("ownership-first-runtime-disabled", {
+      text: "Покажите варианты памятников"
+    });
+    const accepted = await accept(service, request);
+    const managerId = randomUUID();
+    await harness.db.insert(managerUsers).values({
+      id: managerId,
+      email: "owner@example.test",
+      role: "owner",
+      status: "active"
+    });
+    const control = await repository.getManagerAiControl();
+    await repository.setManagerAiControl({
+      enabled: false,
+      expectedVersion: control.version,
+      changedByManagerId: managerId,
+      changedByManagerEmail: "owner@example.test",
+      changedByManagerRole: "owner"
+    });
+
+    const replay = await service.acceptSiteWidgetMessage(request);
+    expect(replay.statusCode).toBe(202);
+    if (!replay.body.ok) throw new Error("expected successful runtime-disabled replay");
+    expect(replay.body).toMatchObject({
+      status: "replayed",
+      public_session_id: accepted.public_session_id,
+      public_conversation_id: accepted.public_conversation_id,
+      public_message_id: accepted.public_message_id,
+      automation: {
+        status: "degraded",
+        next_step: "retry_or_manager",
+        conversation_state: "ai_active",
+        reason: "worker_failed"
+      }
+    });
+    expect(replay.body.message_to_user.toLowerCase()).not.toContain("менеджер");
+
+    const history = await service.getSiteWidgetHistory(
+      accepted.public_session_id,
+      "site_widget.history.v2"
+    );
+    if (!history.body.ok || history.body.schema_version !== "site_widget.history.v2") {
+      throw new Error("expected runtime-disabled v2 history");
+    }
+    expect(history.body).toMatchObject({
+      public_session_id: accepted.public_session_id,
+      public_conversation_id: accepted.public_conversation_id,
+      conversation_state: "ai_active"
+    });
+    expect(
+      history.body.messages.find(
+        (message) => message.public_message_id === accepted.public_message_id
+      )?.automation
+    ).toEqual({ status: "pending" });
+    expect(history.body.poll_after_ms).toBeUndefined();
+    expect(await jobRows()).toMatchObject([{ status: "pending", terminalReason: null }]);
+    expect(await countMessagesByRole("ai_assistant")).toBe(0);
+    expect(await harness.db.select().from(conversationHandoffs)).toEqual([]);
+    expect(await conversationRows()).toEqual([
+      { aiState: "ai_collecting_info", agentAllowedToReply: true }
     ]);
   });
 
@@ -2082,6 +2972,50 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
       })
       .from(widgetAiJobs)
       .orderBy(asc(widgetAiJobs.createdAt));
+  }
+
+  async function moveOnlyJobToStatus(
+    repository: PostgresIntakeRepository,
+    status: SiteWidgetAiJobStatus
+  ): Promise<void> {
+    if (status === "pending") return;
+
+    const claimTime = readyNow();
+    const job = await repository.claimSiteWidgetAiJob!({ leaseMs: 5_000, now: claimTime });
+    if (!job) throw new Error(`expected claimed job before ${status}`);
+    if (status === "processing") return;
+
+    const completedAt = new Date(claimTime.getTime() + 100);
+    await repository.finishSiteWidgetAiJob!({
+      jobId: job.id,
+      attemptCount: job.attemptCount,
+      status,
+      terminalReason: "execution_context_mismatch",
+      retryAt: status === "retrying" ? new Date(completedAt.getTime() + 1_000) : undefined,
+      completedAt
+    });
+  }
+
+  async function setGlobalRuntimeEnabled(
+    repository: PostgresIntakeRepository,
+    enabled: boolean
+  ): Promise<void> {
+    const managerId = randomUUID();
+    const managerEmail = `owner-${managerId}@example.test`;
+    await harness.db.insert(managerUsers).values({
+      id: managerId,
+      email: managerEmail,
+      role: "owner",
+      status: "active"
+    });
+    const control = await repository.getManagerAiControl();
+    await repository.setManagerAiControl({
+      enabled,
+      expectedVersion: control.version,
+      changedByManagerId: managerId,
+      changedByManagerEmail: managerEmail,
+      changedByManagerRole: "owner"
+    });
   }
 
   async function conversationRows() {

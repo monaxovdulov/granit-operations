@@ -10,13 +10,13 @@ const ACTIVE_AI_DOCUMENTS = [
   "docs/source-of-truth.md",
   "docs/AGENT_WORKFLOW.md",
   "docs/AI_AGENT_REFACTOR_PLAYBOOK_RU.md",
+  "docs/AI_POLICY.md",
   "docs/adr/ADR-011-CUSTOMER_FACING_LANDING_SOURCE_RU.md",
   "docs/adr/ADR-010-AI_OBSERVABILITY_RUNTIME_BOUNDARY_RU.md",
   "docs/adr/ADR-012-REPO_LOCAL_AI_SOURCE_OF_TRUTH_RU.md",
   "docs/architecture/AI_LIVE_AGENT_REFACTOR_FINAL_OWNER_REVIEW_RU.md",
   "docs/architecture/AI_LIVE_AGENT_REFACTOR_OWNER_SPEC_RU.md",
   "docs/architecture/AI_REFACTOR_MINIMAL_GOAL_GOVERNANCE_RU.md",
-  "docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md",
   "docs/tasks/README.md"
 ];
 
@@ -83,7 +83,7 @@ export const REQUIRED_EVIDENCE = [
   },
   {
     path: "apps/api/test/widget-ai-postgres-runtime-invariants.test.ts",
-    sha256: "b09914ffb6edb473c81ead47894c99a98d04eed7aca5f67fec286c0093347d96",
+    sha256: "7140640b82acca3d2e4fd20cac64fdcd2da179aa9943d8641402dd67d228f1f7",
     minimumTests: 30,
     sentinels: [
       "allows only one concurrent lease owner for one pending job",
@@ -103,6 +103,7 @@ export function evaluateArchitectureGuardrails(snapshot) {
 
   const guardedStatuses = snapshot.taskDocumentPaths.filter((documentPath) => {
     const source = files.get(documentPath) ?? "";
+    if (documentPath === contract?.documents.active_goal) return false;
     if (!isAiTaskDocument(documentPath, source)) return false;
     const status = readCardStatus(source);
     return status === "implementing" || status === "independent_review";
@@ -129,6 +130,16 @@ export function evaluateArchitectureGuardrails(snapshot) {
       fail("ACTIVE_CARD_ROUTE", `indexed active card does not exist: ${cardPath}`);
     }
   }
+  if (
+    contract &&
+    indexedCards.length === 1 &&
+    indexedCards[0] !== contract.documents.active_card
+  ) {
+    fail(
+      "ACTIVE_CARD_ROUTE",
+      `indexed active card differs from architecture contract: ${indexedCards[0]}`
+    );
+  }
 
   const unroutedGuardedStatuses = guardedStatuses.filter(
     (documentPath) => !indexedCards.includes(documentPath)
@@ -144,7 +155,7 @@ export function evaluateArchitectureGuardrails(snapshot) {
   const expectedActiveRouteReferences = [
     "docs/source-of-truth.md",
     "docs/tasks/AI_REFACTOR_SLICE_TEMPLATE_RU.md",
-    "docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md",
+    contract?.documents.active_goal ?? "docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md",
     ...indexedCards
   ].sort();
   if (!arraysEqual(activeRouteReferences, expectedActiveRouteReferences)) {
@@ -594,7 +605,6 @@ function readCardStatus(source = "") {
 }
 
 function isAiTaskDocument(documentPath, source) {
-  if (documentPath === "docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md") return false;
   const filename = path.basename(documentPath);
   const firstHeading = source.match(/^#\s+([^\n]+)/m)?.[1] ?? "";
   return (
@@ -658,26 +668,31 @@ function extractAllDocumentReferences(source) {
 }
 
 function extractIndexedAiCards(source) {
+  const activeRoute = extractActiveRouteSection(source);
   return unique(
-    [...source.matchAll(/`(AI_REF_[A-Z0-9_]+\.md)`/g)].map(
+    [...activeRoute.matchAll(/`(AI_REF_[A-Z0-9_]+\.md)`/g)].map(
       (match) => `docs/tasks/${match[1]}`
     )
   );
 }
 
 function extractActiveRouteTaskReferences(source) {
-  const headingIndex = source.search(/^## Active AI route\s*$/m);
-  if (headingIndex < 0) return [];
-  const remainder = source.slice(headingIndex).split("\n");
-  const nextHeadingIndex = remainder.findIndex(
-    (line, index) => index > 0 && /^##\s/.test(line)
-  );
-  const section = remainder.slice(1, nextHeadingIndex < 0 ? undefined : nextHeadingIndex).join("\n");
+  const section = extractActiveRouteSection(source);
   return unique(
     [...section.matchAll(/(?:\.\.\/)?[A-Za-z0-9_./-]+\.md/g)].map((match) =>
       normalizePath(path.normalize(path.join("docs/tasks", match[0])))
     )
   );
+}
+
+function extractActiveRouteSection(source) {
+  const headingIndex = source.search(/^## Active AI route\s*$/m);
+  if (headingIndex < 0) return "";
+  const remainder = source.slice(headingIndex).split("\n");
+  const nextHeadingIndex = remainder.findIndex(
+    (line, index) => index > 0 && /^##\s/.test(line)
+  );
+  return remainder.slice(1, nextHeadingIndex < 0 ? undefined : nextHeadingIndex).join("\n");
 }
 
 function hasAcceptedRuntimeAdr(source, snapshot, files) {
