@@ -7,6 +7,7 @@ import {
 } from "../ai-turn.js";
 import {
   LiveV2GenerationError,
+  toSafeLiveV2RuntimeRunId,
   type RejectedLiveV2RuntimeObservation,
   type ObservedLiveV2DecisionGenerator,
   type TrustedLiveV2RuntimeObservation
@@ -24,6 +25,10 @@ import {
 } from "../profiles/live-v2/model-turn-orchestrator.js";
 import type { ValidatedTurnPlan } from "../profiles/live-v2/model-turn-contract.js";
 import type { AiRequirementUpdate, AiSlotUpdate } from "../ai-dialog-contract.js";
+import {
+  buildCatalogReferences,
+  type CatalogIndexSnapshot
+} from "../catalog/catalog-index.js";
 import { isAiValidatorFailureCode } from "../observability/ai-validator-failure-code.js";
 import type {
   RecordedAiPersistReplyInput,
@@ -54,6 +59,7 @@ export type RecordedLiveV2TurnServiceOptions = {
   gateRepository: RecordedSiteWidgetAiGateRepository;
   generator: ObservedLiveV2DecisionGenerator;
   approvedFacts: LiveV2FactsSnapshot;
+  catalogSnapshot?: CatalogIndexSnapshot;
   versions: AiRunVersions;
   model: AiRunModelConfig;
   runtimeMode?: AiRunRuntimeMode;
@@ -219,6 +225,9 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
       const liveOutcome: RecordedPipelineOutcome = await executeTurn({
         turnInput: input.turnInput,
         approvedFacts: this.options.approvedFacts,
+        ...(this.options.turnContract === "model_turn_v1" && this.options.catalogSnapshot
+          ? { catalogSnapshot: this.options.catalogSnapshot }
+          : {}),
         generator: {
           generateDecision: async (generatorInput) => {
             generatorStartedAt = this.clock();
@@ -278,6 +287,13 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
         const handoff = validatedPlan
           ? buildRecordedHandoff(input.turnInput, validatedPlan, appliedPatches)
           : undefined;
+        const catalogReferences =
+          validatedPlan && this.options.catalogSnapshot
+            ? buildCatalogReferences(
+                this.options.catalogSnapshot,
+                validatedPlan.recommendationIds
+              )
+            : [];
         const result = await input.replyApplier.persistReplyAndCompleteRun({
           run,
           reply: {
@@ -285,7 +301,12 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
             action,
             replyDraft: liveOutcome.plan.replyDraft,
             ...(validatedPlan ? { finalTextHash: validatedPlan.finalTextHash } : {}),
-            metadata: decisionMetadata(decision, validatedPlan),
+            metadata: decisionMetadata(
+              decision,
+              validatedPlan,
+              catalogReferences,
+              this.options.catalogSnapshot
+            ),
             ...(appliedPatches?.slotUpdates.length
               ? { slotUpdates: appliedPatches.slotUpdates }
               : {}),
@@ -571,6 +592,9 @@ function throwIfRecordedTurnAborted(signal: AbortSignal | undefined): void {
 function toTrustedObservation(
   observation: TrustedLiveV2RuntimeObservation | RejectedLiveV2RuntimeObservation
 ): TrustedObservation {
+  const runtimeRunId = observation.runtimeRunId
+    ? toSafeLiveV2RuntimeRunId(observation.runtimeRunId)
+    : undefined;
   const usage = observation.usage
     ? {
         ...(observation.usage.inputTokens === undefined
@@ -588,7 +612,7 @@ function toTrustedObservation(
   return {
     observedModelProvider: observation.observedModelProvider,
     ...(observation.observedModelName ? { observedModelName: observation.observedModelName } : {}),
-    ...(observation.runtimeRunId ? { runtimeRunId: observation.runtimeRunId } : {}),
+    ...(runtimeRunId ? { runtimeRunId } : {}),
     ...(usage && Object.keys(usage).length > 0 ? { usage } : {})
   };
 }
@@ -746,7 +770,12 @@ function event(
   return { eventType, reasonCode, severity, managerVisible: true };
 }
 
-function decisionMetadata(decision: RecordedReplyDecision, plan?: ValidatedTurnPlan) {
+function decisionMetadata(
+  decision: RecordedReplyDecision,
+  plan?: ValidatedTurnPlan,
+  catalogReferences: ReturnType<typeof buildCatalogReferences> = [],
+  catalogSnapshot?: CatalogIndexSnapshot
+) {
   return {
     normalized_action: decision.action,
     ...(plan
@@ -756,7 +785,17 @@ function decisionMetadata(decision: RecordedReplyDecision, plan?: ValidatedTurnP
           applied_patch_count: plan.appliedPatches.length,
           dropped_patch_count: plan.droppedPatches.length,
           dropped_recommendation_count: plan.droppedRecommendationIds.length,
-          validation_results: plan.validationResults
+          validation_results: plan.validationResults,
+          ...(catalogSnapshot
+            ? {
+                catalog_schema_version: catalogSnapshot.schemaVersion,
+                catalog_version: catalogSnapshot.catalogVersion,
+                catalog_content_hash: catalogSnapshot.contentHash
+              }
+            : {}),
+          ...(catalogReferences.length > 0
+            ? { catalog_references: catalogReferences }
+            : {})
         }
       : {}),
     ...(decision.action === "handoff_to_manager"

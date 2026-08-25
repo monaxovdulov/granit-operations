@@ -135,7 +135,7 @@ describe("CONV-2 granit_model_turn.v1 validation", () => {
     const result = validateModelTurnOutput({
       value: output({
         statePatches: [patch, patch],
-        recommendationIds: ["catalog.item.1"]
+        recommendationIds: ["ent_9999999999999999"]
       }),
       turnInput
     });
@@ -150,7 +150,7 @@ describe("CONV-2 granit_model_turn.v1 validation", () => {
           { reason: "duplicate_patch" }
         ],
         recommendationIds: [],
-        droppedRecommendationIds: ["catalog.item.1"],
+        droppedRecommendationIds: ["ent_9999999999999999"],
         validationResults: [
           "invalid_patch_evidence",
           "duplicate_patch",

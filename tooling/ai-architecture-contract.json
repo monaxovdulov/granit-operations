@@ -9,13 +9,13 @@
       "apps/api/src/widget-ai-runtime-assembly.ts"
     ],
     "provider_boundary": "apps/api/src/modules/ai/adapters/openai-live-v2-decision-generator.ts",
-    "source_count": 142,
-    "source_paths_sha256": "6cb1521df7da32b26657c18fc54136ab132ff3bf6cd75ef376d146e7e46e4b46",
-    "source_contents_sha256": "a1f8640a53d57d226a7e1749b8a3081b4525737e446e648ad9e6cc9ff85bc60c"
+    "source_count": 144,
+    "source_paths_sha256": "5cc8d582f40d07e99c7861a348e2192aa3bb73c2c4743bd20243a892ff55450c",
+    "source_contents_sha256": "633025c1408c71a8d4aa2df95371318ca615a1262a14acd99032b101ff2ad735"
   },
   "documents": {
     "active_goal": "docs/tasks/AI_LAYER_SIMPLIFICATION_GOAL_RU.md",
-    "active_card": "docs/tasks/AI_REF_AILR_02_VALIDATOR_POLICY_RU.md",
+    "active_card": "docs/tasks/AI_REF_AILR_03_CATALOG_SHOW_ONE_SHOT_RU.md",
     "active_authority_paths": [
       "AGENTS.md",
       "README.md",
@@ -30,17 +30,17 @@
       "docs/architecture/AI_REFACTOR_MINIMAL_GOAL_GOVERNANCE_RU.md",
       "docs/source-of-truth.md",
       "docs/tasks/AI_LAYER_SIMPLIFICATION_GOAL_RU.md",
-      "docs/tasks/AI_REF_AILR_02_VALIDATOR_POLICY_RU.md",
+      "docs/tasks/AI_REF_AILR_03_CATALOG_SHOW_ONE_SHOT_RU.md",
       "docs/tasks/README.md"
     ],
     "allowed_provenance_paths": [
       "docs/tasks/ARCHIVE_RU.md"
     ],
-    "task_count": 26,
-    "task_paths_sha256": "3cbdf0ebcf8521cad137d31621bf51dd70aa58a2492c042f76790473858c56cd",
+    "task_count": 27,
+    "task_paths_sha256": "c5582abb3ea2fd68ff6d6ef6ad760b746414e3d79b6e7554c908794d8f1c425e",
     "routing_surface_hashes": {
-      "docs/source-of-truth.md": "b99a2742bf9d48b5e76903d959530348b3586afc3788f9b88861a898dd955c5f",
-      "docs/tasks/README.md": "95702e5ac6f4ab730833ff45ca872b27587174fc69f9fd751451b6080485e01d"
+      "docs/source-of-truth.md": "2d65a17e51a68dc07f8b8daee5e398beca067331de8d0633617510edb2cd47a5",
+      "docs/tasks/README.md": "441b27d6716d9dea233a1956234c5726286a2836284d815b3a2a59831fb31ff4"
     }
   },
   "compatibility": {

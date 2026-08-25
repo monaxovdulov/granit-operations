@@ -2,11 +2,12 @@ import type { PublicWidgetAiReplyGenerator } from "../../intake/ports/public-wid
 import {
   WIDGET_AI_DISCLOSURE_VERSION
 } from "../../intake/ports/public-widget-ai-reply-generator.js";
-import type {
-  AiReplyCandidateDecision,
-  AiTurnInput,
-  AiUnavailableReason,
-  WidgetCatalogReference
+import {
+  PUBLIC_WIDGET_CATALOG_ACTION_LIMIT,
+  type AiReplyCandidateDecision,
+  type AiTurnInput,
+  type AiUnavailableReason,
+  type WidgetCatalogReference
 } from "../ai-turn.js";
 import type {
   CatalogKnowledgePort,
@@ -704,7 +705,7 @@ function buildVerifiedCatalogReferences(
     });
   }
 
-  return references.slice(0, 8);
+  return references.slice(0, PUBLIC_WIDGET_CATALOG_ACTION_LIMIT);
 }
 
 function readCatalogTitle(record: CatalogRecord | undefined): string | null {

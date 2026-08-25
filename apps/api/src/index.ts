@@ -25,6 +25,11 @@ const widgetAi = await buildConfiguredWidgetAiAssembly({
     process.stderr.write(
       `${JSON.stringify({ event: "widget_ai_runtime_failure", category })}\n`
     );
+  },
+  onSanitizedDiagnostic(diagnostic) {
+    process.stderr.write(
+      `${JSON.stringify({ event: "widget_ai_observability_diagnostic", ...diagnostic })}\n`
+    );
   }
 });
 const app = buildApi({

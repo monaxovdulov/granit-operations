@@ -16,7 +16,7 @@ docs/architecture/AI_LIVE_AGENT_REFACTOR_OWNER_SPEC_RU.md
 docs/architecture/AI_REFACTOR_MINIMAL_GOAL_GOVERNANCE_RU.md
 docs/source-of-truth.md
 docs/tasks/AI_LAYER_SIMPLIFICATION_GOAL_RU.md
-docs/tasks/AI_REF_AILR_02_VALIDATOR_POLICY_RU.md
+docs/tasks/AI_REF_AILR_03_CATALOG_SHOW_ONE_SHOT_RU.md
 docs/tasks/README.md
 -->
 
@@ -40,8 +40,8 @@ The active decision hierarchy is:
 3. `docs/architecture/AI_LIVE_AGENT_REFACTOR_OWNER_SPEC_RU.md`;
 4. `docs/architecture/AI_REFACTOR_MINIMAL_GOAL_GOVERNANCE_RU.md`;
 5. `docs/AI_AGENT_REFACTOR_PLAYBOOK_RU.md`;
-6. `docs/tasks/AI_REF_AILR_02_VALIDATOR_POLICY_RU.md`, единственная active
-   AI-card, и exact-SHA evidence;
+6. `docs/tasks/AI_REF_AILR_03_CATALOG_SHOW_ONE_SHOT_RU.md`, единственная active
+   AI-card, и exact-SHA evidence трёх repo;
 7. current code, contracts, migrations and tests for factual implementation
    details not decided above.
 
@@ -72,10 +72,12 @@ CONV-3. Единственный production assembly использует app-ow
 boundary; возвращение второго runtime требует нового accepted ADR/owner gate.
 
 Goal `AI-RUNTIME-CONVERGENCE` закрыта как `understanding_verified`. Активный
-порядок определяется Goal `AI-LAYER-SIMPLIFICATION`: AILR-00 и AILR-01 приняты,
-сейчас AILR-02 сужает terminal validator policy и убирает semantic regex из
-live path. Следующие срезы берутся только из этой Goal после independent
-`accept`. PR0a—PR9, CONV-1—CONV-5,
+порядок определяется Goal `AI-LAYER-SIMPLIFICATION`: AILR-00, AILR-01 и AILR-02
+приняты. Текущий AILR-03 OneShot объединяет прежние catalog-срезы 03—06: от
+versioned authority и server-validated recommendation IDs до `history.v2`
+кнопки, focus в актуальном каталоге и deterministic transcript eval. Он не
+получает право на commit/push/deploy без отдельной команды владельца.
+PR0a—PR9, CONV-1—CONV-5,
 AI_DIALOG/Mastra и S01—S15 — исторические этапы, не active routing.
 
 ## Active AI Route

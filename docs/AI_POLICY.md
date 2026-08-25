@@ -35,9 +35,10 @@ repetition. Those expressions produced false terminal turns and are not a
 reliable semantic verifier. The prompt still forbids unsupported commercial
 claims, but a prompt is not independent factual evidence.
 
-Therefore the current unpublished AILR-02 state is not production approval:
-structured published catalog/evidence validation in AILR-03/04 and final
-cross-slice acceptance are required before any deployment of this Goal.
+AILR-02 by itself is not production approval. Structured published
+catalog/evidence validation and final cross-repo acceptance are combined in the
+active AILR-03 OneShot; any new staging publication and any production rollout
+remain separate owner gates.
 
 ## Knowledge and recommendations
 
@@ -45,7 +46,7 @@ cross-slice acceptance are required before any deployment of this Goal.
 - Production catalog retrieval is not connected yet.
 - Any non-empty `recommendationIds` list is currently dropped; no model-supplied
   identifier becomes a public catalog action.
-- The next catalog slices add server-side published retrieval before the same
+- The active catalog OneShot adds server-side published retrieval before the same
   single model call. The server will validate candidate membership, stable IDs,
   revisions and published status, then build URLs/actions itself.
 - Missing or invalid retrieval must leave a safe text-only turn; it must not

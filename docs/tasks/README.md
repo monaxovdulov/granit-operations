@@ -8,9 +8,9 @@
 
 1. `../source-of-truth.md` — карта полномочий и фактического состояния.
 2. `AI_LAYER_SIMPLIFICATION_GOAL_RU.md` — текущая долгоживущая Goal.
-3. `AI_REF_AILR_02_VALIDATOR_POLICY_RU.md` — единственная active AI-card:
-   AILR-02 оставляет terminal reject только для структурно непригодного ответа,
-   выполняет безопасный component repair и удаляет semantic regex из live path.
+3. `AI_REF_AILR_03_CATALOG_SHOW_ONE_SHOT_RU.md` — единственная active AI-card:
+   OneShot от актуального versioned catalog retrieval и validated IDs до
+   `history.v2`-кнопки, deep-link/focus в новом каталоге и transcript eval.
 
 Шаблон новой карточки: `AI_REFACTOR_SLICE_TEMPLATE_RU.md`.
 
@@ -23,6 +23,10 @@ fingerprint `5ab09846f682dfe618dbd973b29a4e8b0b3736e7319233c8b37c60f9a8974cbb`;
 `AI_REF_AILR_01_VALIDATOR_OBSERVABILITY_RU.md` принят свежим Reviewer на
 fingerprint `d72aa14603fb500b7a6cac4848863880bf71f2b75a7783e97cdd8a18cd47624e`;
 это predecessor evidence, а не active policy.
+
+`AI_REF_AILR_02_VALIDATOR_POLICY_RU.md` принят восьмым свежим Reviewer на exact
+41-entry payload с critical/high/medium/low `0/0/0/0`; это predecessor evidence,
+а не active catalog route.
 
 `ARCHIVE_RU.md` перечисляет retired AI/S01—S04 task records, их canonical
 replacement и published commits. Archive index и Git history сохраняют

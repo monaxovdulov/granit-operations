@@ -12,6 +12,7 @@ import {
   parseApprovedAiAssetManifest,
   selectLiveV2ApprovedAssets
 } from "../src/modules/ai/assets/approved-ai-assets.js";
+import { MODEL_TURN_PROMPT_ASSET } from "../src/modules/ai/profiles/live-v2/assets/model-turn-prompt.v1.js";
 import { TEST_LIVE_V2_FACTS } from "./fixtures/live-v2-synthetic.v1.js";
 import { MemoryIntakeRepository } from "./helpers/memory-intake-repository.js";
 
@@ -35,6 +36,17 @@ describe("P3 approved AI assets", () => {
     });
     expect(manifest.liveV2Prompt.instructions.length).toBeGreaterThan(0);
     expect(manifest.liveV2Tone.desired.length).toBeGreaterThan(0);
+  });
+
+  it("pins distinct catalog-show policies for generic and known-type requests", () => {
+    const instructions = MODEL_TURN_PROMPT_ASSET.instructions;
+
+    expect(instructions).toContain(
+      "Для общего «покажи» выбери от одной до трёх разнообразных позиций из разных групп; можно задать один короткий вопрос о направлении."
+    );
+    expect(instructions).toContain(
+      "Если тип уже известен в knownSlots, выбери от одной до трёх релевантных позиций и не задавай повторный вопрос."
+    );
   });
 
   it("rejects unknown, unversioned and cross-profile asset values", () => {
@@ -112,7 +124,7 @@ describe("P3 approved AI assets", () => {
       {
         versions: {
           policyVersion: manifest.liveV2.policyVersion,
-          promptVersion: "granit_model_turn_prompt.v1",
+          promptVersion: "granit_model_turn_prompt.v3",
           disclosureVersion: manifest.liveV2.disclosureVersion,
           assetVersion: manifest.liveV2.assetVersion
         }

@@ -11,6 +11,11 @@ Goal ID: `AI-LAYER-SIMPLIFICATION`.
 `agent/ai-layer-refactor`; единственный исходный path в worktree этого repo —
 пользовательский untracked `output/`, он не изменяется.
 
+Текущий publication checkpoint: `7bbf68eff23afa88ca756c2bc1ac280c8463fb7e`;
+staging runtime был опубликован из production code SHA
+`b7542d3e0b59b746332f69f81b08a60f30be9599`. Пользовательские untracked
+`context.md` и `output/` сохраняются и не читаются.
+
 ## 1. Цель
 
 Вернуть понятный и наблюдаемый AI-консультантский ход без второго runtime:
@@ -80,30 +85,34 @@ fresh app-owned context + минимальный published catalog retrieval
    исправлены. Восьмой свежий Reviewer принял exact 41-entry payload с
    critical/high/medium/low 0/0/0/0. Нового owner stop-gate нет.
    Factual verification возвращается только через structured published
-   evidence AILR-03/04 до любого deploy Goal.
-4. `AILR-03` — versioned catalog authority и воспроизводимый offline retrieval
-   baseline для текущего `landing-granit-static`.
-5. `AILR-04` — server-side retrieval до одного model call и server validation
-   возвращённых recommendation IDs.
-6. `AILR-05` — точный public history/widget/catalog navigation contract:
-   category и item actions, deep-link, focus/highlight и сохранение разговора.
-7. `AILR-06` — cross-repo deterministic acceptance, false-green проверки и
-   удаление только доказанно мёртвых compatibility paths этого результата.
+   evidence активного AILR-03 OneShot до следующего deploy Goal.
+4. `AILR-03 OneShot` — active `planned`; по явному решению владельца от
+   2026-08-24 объединяет прежние AILR-03—AILR-06 в один вертикальный результат:
+   versioned authority, offline bounded retrieval до одного model call,
+   server-validated recommendation IDs, существующие `history.v2` actions,
+   deep-link/focus в актуальном `landing-granit-static`, сохранение widget
+   session/history и deterministic eval присланного реального transcript.
+   Внутренние checkpoints карточки выполняются последовательно, но не считаются
+   отдельными принятыми срезами и не разрешают partial Done.
 
-После `accept` каждого среза автоматически начинается preflight следующего.
-Один diff не смешивает соседние пункты.
+После independent `accept` OneShot Goal останавливается на owner gate для
+commit/push и staging deploy. Один отделимый multi-repo payload не расширяется
+соседней полировкой после достижения критериев.
 
 ## 4. Стоп-гейты и разрешения
 
 Владелец явно разрешил активировать AILR-00 и реализовать описанный validator,
-observability, catalog RAG и навигацию с необходимой работой в
+observability, catalog retrieval и навигацию с необходимой работой в
 `granit-operations`, `business-ai-web-widget` и `landing-granit-static`.
+2026-08-24 владелец отдельно поручил сформулировать следующую OneShot-задачу и
+объединить прежние AILR-03—06. Точная разрешённая форма prompt/context,
+read-only retrieval, catalog index, ID validation, существующего public
+`history.v2` action и cross-repo acceptance записана в active AILR-03 card.
 
-Перед рабочим кодом соответствующей карточке всё равно нужен точный контракт.
-Новая schema/migration, точная public DTO, prompt/tool policy или изменение
-другого repo считаются разрешёнными только если точная форма уже записана в
-карточке и подтверждена владельцем. Общее поручение не разрешает произвольное
-расширение контракта.
+Перед рабочим кодом соответствующей карточке всё равно нужен exact-SHA preflight.
+Новая schema/migration, другая public DTO/href grammar, второй model/tool loop
+или изменение за пределами трёх названных repo требуют нового решения. Общее
+поручение не разрешает произвольное расширение контракта.
 
 Не разрешены:
 

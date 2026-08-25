@@ -32,11 +32,11 @@ const ASSEMBLY_DOCUMENTS = [
 
 const REVIEWED_ASSEMBLY_HASHES = {
   "apps/api/src/app.ts": "713ae56f89733ad031951618abc3a1bd3a1495867b8920b9c6f0ed8c45e57af4",
-  "apps/api/src/app-context.ts": "4b8b9d4391457997af291cfe2b515390d821c201f97aa70e2a25f0ab74731539",
+  "apps/api/src/app-context.ts": "b52ad0f8b346b75e1a187018370655b9510bfcee839f855ee1292b5b91b95b07",
   "apps/api/src/config.ts": "9ede71614da02235cae39cf23c66eaca68fb079a5ea18046128d6c5417fce193",
-  "apps/api/src/index.ts": "a6c75a16adb96899a862e5c4d8195a5cd82f41bd53444387bea744610dfdd462",
+  "apps/api/src/index.ts": "deda3d5da2df31178a40736666bf43fdabeac1160424325f59ea4f8f1bceaba6",
   "apps/api/src/widget-ai-runtime-assembly.ts":
-    "e00819fe4926069a0214fe1c002f61d114c8b80d9c126068f3b9ef3ef753c9a2"
+    "a546c2bf9fe689c8d917adfeb84a541518db6a8b59ab1b079b28cf6ecc2f3ff9"
 };
 
 const RETIRED_EXTERNAL_AUTHORITIES = [

@@ -1,107 +1,182 @@
-# Agent Workflow - granit-operations
+# Рабочий процесс агента в `granit-operations`
 
-Status: active source map updated on 2026-07-20
-Repo role: intake API, manager workflow, Postgres operational state, app-owned website widget AI runtime, Telegram manager delivery path, observability/evals
+Статус: действует с 2026-08-25
 
-## Before Editing
+Этот документ раскрывает корневой `AGENTS.md`. Он задаёт порядок работы, но не
+меняет продуктовую архитектуру, публичные контракты и принятые ADR.
 
-1. Read `docs/source-of-truth.md`.
-2. Follow the active route in `docs/source-of-truth.md` and
-   `docs/tasks/README.md` for boundaries and slice order.
-3. Check `git status --short`.
-4. Read `.agents/state/granit-dev-workflow.json` if it exists.
-5. Do not overwrite unrelated dirty work.
+## Основной маршрут
 
-## Current External Repo Map
+```text
+запрос владельца
+  -> один вертикальный результат
+  -> evidence-first анализ и brief
+  -> test-first, когда он оправдан риском
+  -> реализация
+  -> ограниченный refactoring-pass
+  -> проверки по blast radius
+  -> self-review
+  -> свежий read-only Reviewer, если изменение нетривиальное
+  -> передача результата и stop
+```
 
-Read the authoritative map in `docs/source-of-truth.md`. For public audit or
-website widget staging, also read `docs/ARCHITECTURE.md`, then record the exact
-widget source, landing and backend commits. The cross-repo step is complete only
-when manifest hashes match the vendored runtime and the paired smoke identifies
-the deployed backend commit.
+Один запрос может содержать несколько внутренних шагов, если они необходимы
+для одного видимого результата. После его достижения агент не выбирает
+следующий пункт roadmap самостоятельно.
 
-## Where To Write
+## 1. Вход и preflight
 
-| Record | Path |
-|---|---|
-| Human-readable status | `docs/PROJECT_STATUS_RU.md` |
-| Repo-local ADRs | `docs/adr/` |
-| Task docs | `docs/tasks/` |
-| Smoke/review/release evidence | `docs/release/evidence/` |
-| Machine-readable state | `.agents/state/granit-dev-workflow.json` |
+1. Зафиксировать текущий SHA, branch и `git status --short`.
+2. Отделить пользовательский dirty work от файлов текущей задачи.
+3. Прочитать минимальный обязательный контекст из `AGENTS.md`.
+4. Найти текущий исполняемый путь, callers/consumers, failure paths и тесты.
+5. Сверить установленную версию затронутого стека и официальную документацию,
+   если решение зависит от поведения библиотеки или инструмента.
+6. Проверить legacy и альтернативные старые пути в затронутой области.
 
-## ADR Rules
+Не надо читать весь архив задач, все evidence и все архитектурные документы.
+Исторический материал открывается только когда он нужен для происхождения
+конкретного решения.
 
-Use repo-local ADRs only for meaningful operations decisions that do not change cross-project architecture.
+## 2. Краткий brief
 
-Examples:
+До рабочего кода должны быть понятны:
 
-- implementation details for intake persistence;
-- manager panel local structure;
-- operations-only observability storage detail;
-- operations-only backup procedure detail.
+```text
+Результат: <одно наблюдаемое изменение>
+Base SHA: <sha>
+Источник истины: <код/контракт/ADR/current task>
+В scope: <модули и поведение>
+Вне scope: <явные исключения>
+Done when: <проверяемые критерии>
+Риски: <только существенные и непроверенные>
+Rollback: <как безопасно отказаться от diff>
+```
 
-Architecture, repo boundaries, release/deploy policy, AI gates and implementation
-order for this repository are decided in repo-local owner docs and ADRs. The
-active AI order is the current `AI-LAYER-SIMPLIFICATION` Goal/card;
-`AI-RUNTIME-CONVERGENCE`, PR0a—PR9 and historical external planning links are
-provenance only.
+Для простой односессионной правки brief может остаться в рабочем отчёте. Для
+нетривиальной, высокорисковой, долгой или cross-session работы создаётся
+компактный task-документ. Точный file allowlist и жёсткий diff budget нужны
+только когда сами границы изменения создают риск.
 
-## Task Rules
+## 3. Реализация
 
-Every agent task should create or update a file in `docs/tasks/`. Use `docs/tasks/TEMPLATE_RU.md`.
+Для дефекта или изменения поведения:
 
-For S01, tasks must explicitly say whether the work touches:
+1. создать воспроизводящее доказательство или тест;
+2. подтвердить, что он падает по ожидаемой причине;
+3. внести минимальное законченное изменение;
+4. добиться прохождения целевого теста;
+5. не ослаблять тест ради зелёного результата.
 
-- public intake API;
-- provider contract;
-- database schema/migration;
-- manager visibility;
-- idempotency;
-- validation/failure behavior;
-- release smoke/evidence.
+Для документации, косметики, простой конфигурации и механической чистки
+искусственная красная стадия не нужна. Достаточна минимальная проверка, которая
+реально доказывает правку.
 
-Database schema, migrations, auth, AI policy, notification destinations, deploy, and backup/restore are review-required.
+Если во время реализации обнаружен неизвестный legacy-путь или новая развилка,
+не удаляй его и не добавляй compatibility behavior «на всякий случай».
+Останови затронутую часть, если выбор меняет scope, данные, архитектуру или
+публичное поведение.
 
-## Evidence Rules
+## 4. Ограниченный refactoring-pass
 
-Use `docs/release/evidence/` for smoke/review/release proof. Do not store secrets, DB URLs, tokens, raw lead data, private notification destinations, deployment credentials, or full private logs.
+После рабочего решения один раз проверь непосредственно изменённый модуль:
 
-For S01 provider evidence, record:
+- не осталось ли дублирования и dead code;
+- явны ли зависимости и ownership;
+- не спрятана ли бизнес-логика в инфраструктурной обвязке;
+- корректны ли failure paths, cleanup, retries и logging boundary;
+- не вырос ли файл к пределу 800 строк;
+- защищают ли тесты продуктовый результат, а не случайную реализацию.
 
-- contract version `site_form.v1`;
-- request accepted only after persistence;
-- lead visible in manager read surface;
-- failure path result;
-- idempotency behavior;
-- public response does not leak internal ids/traces;
-- paired smoke link to active `landing-granit-static` evidence.
+Исправляй только связанное с текущим результатом. Найденную соседнюю работу
+сообщай отдельно и не выполняй без следующего запроса.
 
-## State Updates
+Skills применяются адресно. Стилевой skill используется при изменении кода
+соответствующего языка; skill паттерна или структуры данных — только когда в
+решении действительно появляется такой паттерн или структура. Набор skills не
+является CI-командой и не запускается целиком после каждого модуля.
 
-Update `.agents/state/granit-dev-workflow.json` after meaningful steps:
+## 5. Проверки по риску
 
-- mode/state;
-- current git HEAD;
-- dirty summary;
-- task summary;
-- checks run;
-- next safe action.
+Минимальный уровень:
 
-State points to docs. It does not replace task/evidence docs.
+- документация или очевидная локальная правка: inspect/diff/check для файла;
+- изолированная логика: затронутый test file или package test;
+- изменение типов: targeted tests и typecheck затронутого package;
+- общий контракт, persistence, concurrency, auth/security или runtime wiring:
+  связанные integration/DB/architecture checks и более широкий regression;
+- UI flow или browser/backend integration: целевой browser smoke;
+- migration: штатный isolated database workflow и проверка upgrade/rollback.
 
-## Owner Confirmation Required
+Общерепозиторные `test`, `typecheck`, `lint`, `build`, Docker rebuild и
+browser checks не запускаются по инерции. Они нужны, когда blast radius
+действительно охватывает репозиторий или когда это release gate текущей задачи.
 
-Ask before:
+Красный старый baseline не разрешает false-green. Зафиксируй исходную ошибку,
+докажи результат целевыми проверками и явно перечисли непроверенное.
 
-- staging or production deploy;
-- changing deploy scripts, Docker, proxy, runtime env, or server routing;
-- changing DB schema/migrations after review has started;
-- changing auth, permissions, secrets, env files, backup/restore, or notification destinations;
-- changing public intake contract behavior;
-- enabling AI, Telegram, urgent notifications, or widget AI;
-- changing takeover, handoff, `agent_allowed_to_reply`, prompts, tools, model settings, or eval gates.
+## 6. Self-review и независимая проверка
 
-## GitHub Issues Note
+Self-review обязателен всегда. Сначала просмотри весь diff текущей сессии,
+отделив его от существующих изменений. Приоритет:
 
-GitHub Issues can later become the external board for assignments and discussion. This repo still keeps task and evidence docs because they are the durable implementation record.
+- баги и behavioral regressions;
+- auth/security/privacy и утечки PII/секретов;
+- API/data-contract и persisted state;
+- concurrency, idempotency, stale state и retries;
+- отсутствующие или false-green tests;
+- лишнее расширение scope.
+
+Свежий независимый Reviewer нужен для нетривиального или высокорискового diff.
+Он запускается после self-review, работает только на чтение и получает:
+
+```text
+Требования и исключения
+Base SHA и точный diff/files
+Callers/consumers, которые надо проверить
+Выполненные проверки и их результаты
+Непроверенные области
+Особый фокус: failure paths / concurrency / migrations / privacy / false-green
+```
+
+Reviewer самостоятельно читает код и возвращает findings с файлом/строкой,
+доказательством, последствием и способом проверки. Допустимые итоги:
+
+- `accept`;
+- `needs_fix`;
+- `needs_evidence`;
+- `needs_human_decision`.
+
+Reviewer не изменяет файлы, не запускает других агентов и не требует
+переписывания из-за вкусового предпочтения. После исправления значимого finding
+нужна повторная проверка изменившегося exact diff. Тривиальная локальная правка
+завершается self-review без отдельного агента.
+
+## 7. Стоп-гейты и внешние действия
+
+Четыре стоп-гейта перечислены в `AGENTS.md`. Они применяются только к новому,
+ещё не одобренному решению. Точная авторизация в текущем task-документе снимает
+повторный вопрос, но не разрешает несвязанные действия.
+
+Commit, push, PR, merge, deploy, секреты, платные запросы и другой репозиторий
+никогда не следуют автоматически из технической готовности или `accept`.
+
+## 8. Завершение
+
+Финальная передача содержит:
+
+```text
+Результат
+Base/final SHA
+Изменённые файлы и git diff --stat
+Прямая и косвенная область влияния
+Проверки и результаты
+Непроверено / известные ограничения
+Rollback
+Reviewer verdict, если требовался
+```
+
+После передачи агент останавливается. Следующий срез начинается только по
+новому запросу владельца. `.agents/state` можно обновлять как необязательную
+заметку совместимости, но он не является обязательным шагом или источником
+истины.

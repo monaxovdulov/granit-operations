@@ -11,7 +11,11 @@ import {
   type AiSlotName,
   type AiSlotUpdate
 } from "../../ai-dialog-contract.js";
-import type { AiTurnInput } from "../../ai-turn.js";
+import {
+  PUBLIC_WIDGET_CATALOG_ACTION_LIMIT,
+  type AiTurnInput
+} from "../../ai-turn.js";
+import type { LiveV2CatalogCandidate } from "./live-v2-contract.js";
 import {
   isRequirementValueSupportedByEvidence,
   isSlotValueSupportedByEvidence
@@ -68,7 +72,7 @@ export const modelTurnOutputSchema = z
     statePatches: z
       .array(z.discriminatedUnion("operation", [slotPatchSchema, requirementPatchSchema]))
       .max(32),
-    recommendationIds: z.array(z.string().regex(/^[A-Za-z0-9._:/@+-]{1,160}$/)).max(6),
+    recommendationIds: z.array(z.string().regex(/^ent_[a-f0-9]{16}$/)).max(8),
     handoffIntent: z
       .object({ reason: z.enum(MODEL_TURN_HANDOFF_REASONS) })
       .strict()
@@ -160,8 +164,8 @@ export const MODEL_TURN_OUTPUT_JSON_SCHEMA = {
     },
     recommendationIds: {
       type: "array",
-      maxItems: 6,
-      items: { type: "string", pattern: "^[A-Za-z0-9._:/@+-]{1,160}$" }
+      maxItems: 8,
+      items: { type: "string", pattern: "^ent_[a-f0-9]{16}$" }
     },
     handoffIntent: {
       anyOf: [
@@ -180,6 +184,7 @@ export const MODEL_TURN_OUTPUT_JSON_SCHEMA = {
 export function validateModelTurnOutput(input: {
   value: unknown;
   turnInput: AiTurnInput;
+  catalogCandidates?: readonly LiveV2CatalogCandidate[];
 }): ModelTurnValidationResult {
   const parsed = modelTurnOutputSchema.safeParse(input.value);
 
@@ -213,7 +218,11 @@ export function validateModelTurnOutput(input: {
     ...patchResult.dropped.map((item) => item.reason)
   ];
 
-  if (output.recommendationIds.length > 0) {
+  const recommendationResult = validateRecommendations(
+    output.recommendationIds,
+    input.catalogCandidates ?? []
+  );
+  if (recommendationResult.dropped.length > 0) {
     validationResults.push("unsupported_recommendation");
   }
 
@@ -233,8 +242,8 @@ export function validateModelTurnOutput(input: {
     finalTextHash: sha256Hex(composed.finalText),
     appliedPatches: patchResult.applied,
     droppedPatches: patchResult.dropped,
-    recommendationIds: [],
-    droppedRecommendationIds: [...output.recommendationIds],
+    recommendationIds: recommendationResult.accepted,
+    droppedRecommendationIds: recommendationResult.dropped,
     riskAssessment: {
       flags: riskFlags,
       requiresSemanticVerifier: false
@@ -244,6 +253,24 @@ export function validateModelTurnOutput(input: {
   };
 
   return { ok: true, output, plan: Object.freeze(plan) };
+}
+
+function validateRecommendations(
+  recommendationIds: readonly string[],
+  candidates: readonly LiveV2CatalogCandidate[]
+): { accepted: string[]; dropped: string[] } {
+  const allowed = new Set(candidates.map((candidate) => candidate.id));
+  const unique = new Set(recommendationIds);
+  const isValidSubset =
+    unique.size === recommendationIds.length &&
+    recommendationIds.every((id) => allowed.has(id));
+
+  return isValidSubset
+    ? {
+        accepted: recommendationIds.slice(0, PUBLIC_WIDGET_CATALOG_ACTION_LIMIT),
+        dropped: recommendationIds.slice(PUBLIC_WIDGET_CATALOG_ACTION_LIMIT)
+      }
+    : { accepted: [], dropped: [...recommendationIds] };
 }
 
 function composeCanonicalText(

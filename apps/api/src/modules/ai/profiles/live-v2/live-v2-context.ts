@@ -137,6 +137,7 @@ function findLastAiQuestion(messages: AiTurnContextMessage[]): string | null {
 
 function buildKnownSlots(input: AiTurnInput): LiveV2KnownSlots {
   const city = toModelSafeCity(input.knownSlots.city);
+  const values = input.knownSlots.values;
 
   return {
     customerNameProvided: input.knownSlots.customerNameProvided,
@@ -145,8 +146,35 @@ function buildKnownSlots(input: AiTurnInput): LiveV2KnownSlots {
     ...(input.knownSlots.preferredContact
       ? { preferredContact: input.knownSlots.preferredContact }
       : {}),
-    ...(city ? { city } : {})
+    ...modelSafeBusinessSlot("monumentType", values.monumentType?.value),
+    ...modelSafeBusinessSlot("material", values.material?.value),
+    ...modelSafeBusinessSlot("size", values.size?.value),
+    ...(city ? { city } : modelSafeBusinessSlot("city", values.city?.value)),
+    ...modelSafeBusinessSlot("cemetery", values.cemetery?.value),
+    ...modelSafeBusinessSlot("installation", values.installation?.value),
+    ...modelSafeBusinessSlot("desiredTiming", values.desiredTiming?.value)
   };
+}
+
+function modelSafeBusinessSlot<
+  Name extends
+    | "monumentType"
+    | "material"
+    | "size"
+    | "city"
+    | "cemetery"
+    | "installation"
+    | "desiredTiming"
+>(name: Name, value: string | undefined): Partial<Record<Name, string>> {
+  const normalized = value?.normalize("NFKC").trim().replace(/\s+/gu, " ");
+  if (
+    !normalized ||
+    normalized.length > 240 ||
+    /(?:@|https?:\/\/|\+?\d[\d\s()\-]{6,}\d)/iu.test(normalized)
+  ) {
+    return {};
+  }
+  return { [name]: normalized } as Partial<Record<Name, string>>;
 }
 
 function toModelSafeCity(value: string | undefined): string | undefined {

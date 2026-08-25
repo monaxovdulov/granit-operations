@@ -17,6 +17,18 @@ export type LiveV2RuntimeFailureCategory =
   | "runtime_error"
   | "timeout_or_abort";
 
+export type LiveV2ObservabilityDiagnostic =
+  | {
+      code: "optional_evidence_dropped";
+      stage: "provider_response";
+      fieldClass: "runtime_identifier";
+    }
+  | {
+      code: "catalog_snapshot_unavailable";
+      stage: "startup";
+      fieldClass: "catalog_snapshot";
+    };
+
 export type LiveV2RuntimeUsage = {
   inputTokens?: number;
   outputTokens?: number;
@@ -73,6 +85,7 @@ export function buildLiveV2ModelRequest(input: LiveV2GeneratorInput): {
   const serializedInput = JSON.stringify({
     decisionProfile: "live_v2",
     turn: input.turn,
+    catalogCandidates: input.catalogCandidates ?? [],
     tone: input.assets.tone,
     facts: input.assets.facts
   });
@@ -120,6 +133,17 @@ export function reportLiveV2SanitizedFailure(
   }
 }
 
+export function reportLiveV2ObservabilityDiagnostic(
+  callback: ((diagnostic: LiveV2ObservabilityDiagnostic) => void) | undefined,
+  diagnostic: LiveV2ObservabilityDiagnostic
+): void {
+  try {
+    callback?.(diagnostic);
+  } catch {
+    // Optional diagnostics cannot change the runtime outcome.
+  }
+}
+
 export function toRejectedLiveV2RuntimeObservation(input: {
   modelProvider: unknown;
   providerModelName: unknown;
@@ -159,7 +183,12 @@ export function toSafeLiveV2RuntimeRunId(value: unknown): string | undefined {
 }
 
 export function isSafeLiveV2RuntimeRunId(value: string): boolean {
-  return /^[A-Za-z0-9._:-]{1,120}$/.test(value);
+  return (
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      value
+    ) ||
+    (/^[A-Za-z0-9._:-]{1,120}$/.test(value) && !/\d{7,}/.test(value))
+  );
 }
 
 export function toLiveV2RuntimeUsage(value: unknown): LiveV2RuntimeUsage | undefined {

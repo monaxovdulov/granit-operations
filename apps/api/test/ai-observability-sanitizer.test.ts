@@ -6,6 +6,23 @@ import {
 } from "../src/modules/ai/observability/ai-observability-sanitizer.js";
 
 describe("AI observability metadata sanitizer", () => {
+  it("keeps at most three valid catalog references", () => {
+    const catalogReferences = Array.from({ length: 4 }, (_, index) => {
+      const entityId = `ent_${String(index + 1).repeat(16)}`;
+      return {
+        kind: "catalog_item",
+        label: `Показать ${index + 1}`,
+        title: `Позиция ${index + 1}`,
+        href: `/catalog.html?section=monuments&entity=${entityId}#block-vertical`,
+        entityId
+      };
+    });
+
+    expect(
+      sanitizeAiObservabilityMetadata({ catalog_references: catalogReferences })
+    ).toEqual({ catalog_references: catalogReferences.slice(0, 3) });
+  });
+
   it("keeps approved operational metadata and drops raw sensitive fields", () => {
     const sanitized = sanitizeAiObservabilityMetadata({
       model_name: "p3-manager-fake",

@@ -1,4 +1,8 @@
 import type { AiTurnInput } from "../../ai-turn.js";
+import {
+  retrieveCatalogCandidates,
+  type CatalogIndexSnapshot
+} from "../../catalog/catalog-index.js";
 import type { LiveV2FactsSnapshot } from "./live-v2-assets.js";
 import {
   parseLiveV2FactsSnapshot,
@@ -59,6 +63,7 @@ export type ModelTurnOutcome = {
 export async function executeModelTurn(input: {
   turnInput: AiTurnInput;
   approvedFacts: LiveV2FactsSnapshot;
+  catalogSnapshot?: CatalogIndexSnapshot;
   generator: LiveV2DecisionGenerator;
   gateReader: LiveV2GateReader;
 }): Promise<ModelTurnOutcome> {
@@ -86,9 +91,13 @@ export async function executeModelTurn(input: {
   }
 
   let rawOutput: unknown;
+  const catalogCandidates = input.catalogSnapshot
+    ? retrieveCatalogCandidates(input.catalogSnapshot, turnView)
+    : [];
   try {
     const generatorInput: LiveV2GeneratorInput = {
       turn: turnView,
+      catalogCandidates,
       assets: {
         prompt: MODEL_TURN_PROMPT_ASSET,
         tone: LIVE_V2_TONE_ASSET,
@@ -100,7 +109,11 @@ export async function executeModelTurn(input: {
     return terminalNoReply("generator_failed", turnView);
   }
 
-  const validation = validateModelTurnOutput({ value: rawOutput, turnInput: input.turnInput });
+  const validation = validateModelTurnOutput({
+    value: rawOutput,
+    turnInput: input.turnInput,
+    catalogCandidates
+  });
 
   if (!validation.ok) {
     return {

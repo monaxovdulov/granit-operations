@@ -22,6 +22,7 @@ export const AI_TURN_EXECUTION_CONTEXT_VERSION = "granit_ai_turn_execution_conte
 export const AI_TURN_CONTEXT_CURSOR_VERSION = "conversation_updated_at.v1";
 export const AI_TURN_CONTEXT_MAX_MESSAGES = 8;
 export const AI_TURN_CONTEXT_MAX_CHARACTERS = 8_000;
+export const PUBLIC_WIDGET_CATALOG_ACTION_LIMIT = 3;
 
 export type AiReplyCapableChannel = "site_widget";
 

@@ -10,7 +10,7 @@ import type {
 import type { AiValidatorFailureCode } from "../../observability/ai-validator-failure-code.js";
 
 export const MODEL_TURN_OUTPUT_VERSION = "granit_model_turn.v1" as const;
-export const MODEL_TURN_PROMPT_VERSION = "granit_model_turn_prompt.v1" as const;
+export const MODEL_TURN_PROMPT_VERSION = "granit_model_turn_prompt.v3" as const;
 export const MODEL_TURN_MODEL_PROFILE_VERSION =
   "granit_model_turn_openai_luna.v1" as const;
 

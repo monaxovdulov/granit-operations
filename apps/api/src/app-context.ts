@@ -20,6 +20,7 @@ import {
   parseLiveV2FactsSnapshot,
   type LiveV2FactsSnapshot
 } from "./modules/ai/profiles/live-v2/live-v2-assets.js";
+import type { CatalogIndexSnapshot } from "./modules/ai/catalog/catalog-index.js";
 import { RecordedLiveV2TurnService } from "./modules/ai/services/recorded-live-v2-turn-service.js";
 import { RecordedPublicWidgetAiTurnExecutor } from "./modules/ai/services/recorded-public-widget-ai-turn-executor.js";
 import type { IntakeRepository } from "./modules/conversations/repositories/intake-repository.js";
@@ -58,6 +59,7 @@ export type WidgetAiAssemblyOptions = {
     generator?: ObservedLiveV2DecisionGenerator;
     modelName: string;
     approvedFacts: LiveV2FactsSnapshot;
+    catalogSnapshot?: CatalogIndexSnapshot;
   };
 };
 
@@ -151,6 +153,7 @@ function buildDirectWidgetAiTurnExecutor(
     gateRepository: repository,
     generator,
     approvedFacts: parseLiveV2FactsSnapshot(options.directLiveV2.approvedFacts),
+    catalogSnapshot: options.directLiveV2.catalogSnapshot,
     turnContract: "model_turn_v1",
     versions: {
       policyVersion: liveAssets.policyVersion,

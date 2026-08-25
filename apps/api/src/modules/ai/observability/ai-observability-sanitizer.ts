@@ -1,3 +1,4 @@
+import { PUBLIC_WIDGET_CATALOG_ACTION_LIMIT } from "../ai-turn.js";
 import {
   AI_QUALITY_EVENT_TYPES,
   AI_QUALITY_REASON_CODES,
@@ -117,6 +118,26 @@ export function sanitizeAiObservabilityMetadata(
       continue;
     }
 
+    if (key === "catalog_references") {
+      const references = sanitizeCatalogReferences(value);
+      if (references.length > 0) sanitized[key] = references;
+      continue;
+    }
+    if (key === "catalog_content_hash") {
+      if (typeof value === "string" && HEX_FINGERPRINT.test(value)) {
+        sanitized[key] = value;
+      }
+      continue;
+    }
+    if (key === "catalog_schema_version" || key === "catalog_version") {
+      try {
+        sanitized[key] = version(value);
+      } catch {
+        // Optional catalog metadata cannot make an otherwise valid reply unsendable.
+      }
+      continue;
+    }
+
     const minimumInteger = BOUNDED_OPERATIONAL_INTEGER_METADATA.get(
       key as
         | "applied_patch_count"
@@ -146,6 +167,48 @@ export function sanitizeAiObservabilityMetadata(
   }
 
   return sanitized;
+}
+
+function sanitizeCatalogReferences(value: unknown): Record<string, string>[] {
+  if (!Array.isArray(value)) return [];
+  const references: Record<string, string>[] = [];
+
+  for (const candidate of value.slice(0, PUBLIC_WIDGET_CATALOG_ACTION_LIMIT)) {
+    if (typeof candidate !== "object" || candidate === null || Array.isArray(candidate)) {
+      continue;
+    }
+    const record = candidate as Record<string, unknown>;
+    const entityId = record.entityId;
+    const href = record.href;
+    const label = record.label;
+    const title = record.title;
+    if (
+      record.kind !== "catalog_item" ||
+      typeof entityId !== "string" ||
+      !/^ent_[a-f0-9]{16}$/.test(entityId) ||
+      typeof href !== "string" ||
+      !new RegExp(
+        `^/catalog\\.html\\?section=[a-z0-9-]+&entity=${entityId}#block-[a-z0-9-]+$`
+      ).test(href) ||
+      typeof label !== "string" ||
+      !label.trim() ||
+      label.length > 240 ||
+      typeof title !== "string" ||
+      !title.trim() ||
+      title.length > 160
+    ) {
+      continue;
+    }
+    references.push({
+      kind: "catalog_item",
+      label: label.trim(),
+      title: title.trim(),
+      href,
+      entityId
+    });
+  }
+
+  return references;
 }
 
 /**

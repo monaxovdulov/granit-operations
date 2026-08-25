@@ -308,6 +308,47 @@ describe("CONV-2 direct OpenAI model-turn adapter", () => {
     expect(JSON.stringify(thrown)).not.toContain(rawCanary);
   });
 
+  it("drops an optional provider id with a long digit run and reports only a safe field class", async () => {
+    const rawProviderId = "resp_123456789_customer_canary";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async () =>
+        response({
+          id: rawProviderId,
+          model: "gpt-5.6-luna",
+          output: [
+            {
+              content: [
+                {
+                  type: "output_text",
+                  text: JSON.stringify(modelTurnOutput())
+                }
+              ]
+            }
+          ]
+        })
+      )
+    );
+    const diagnostics: unknown[] = [];
+    const generation = await createGenerator({
+      onSanitizedDiagnostic(diagnostic) {
+        diagnostics.push(diagnostic);
+      }
+    }).generateDecision(generatorInput(), {
+      appTraceId: "00000000-0000-4000-8000-000000000208"
+    });
+
+    expect(generation.observation.runtimeRunId).toBeUndefined();
+    expect(diagnostics).toEqual([
+      {
+        code: "optional_evidence_dropped",
+        stage: "provider_response",
+        fieldClass: "runtime_identifier"
+      }
+    ]);
+    expect(JSON.stringify({ generation, diagnostics })).not.toContain(rawProviderId);
+  });
+
   it("rejects unsafe config or trace identity before any provider call", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);

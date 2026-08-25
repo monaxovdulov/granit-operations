@@ -12,6 +12,7 @@ import {
 } from "./live-v2-apply-plan.js";
 import { buildLiveV2TurnView } from "./live-v2-context.js";
 import type {
+  LiveV2CatalogCandidate,
   LiveV2Gate,
   LiveV2TurnView,
   LiveV2ValidationResult
@@ -22,6 +23,7 @@ import { LIVE_V2_TONE_ASSET } from "./assets/tone.v1.js";
 
 export type LiveV2GeneratorInput = {
   turn: LiveV2TurnView;
+  catalogCandidates?: LiveV2CatalogCandidate[];
   assets: {
     prompt: {
       version: string;

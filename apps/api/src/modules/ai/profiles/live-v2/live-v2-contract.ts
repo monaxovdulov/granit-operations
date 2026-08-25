@@ -90,7 +90,22 @@ export type LiveV2KnownSlots = {
   phoneProvided: boolean;
   emailProvided: boolean;
   preferredContact?: "phone" | "whatsapp" | "telegram" | "email";
+  monumentType?: string;
+  material?: string;
+  size?: string;
   city?: string;
+  cemetery?: string;
+  installation?: string;
+  desiredTiming?: string;
+};
+
+export type LiveV2CatalogCandidate = {
+  id: string;
+  title: string;
+  categorySlug: string;
+  groupSlug: string;
+  searchTerms: string[];
+  material: string[];
 };
 
 export type LiveV2Gate = {

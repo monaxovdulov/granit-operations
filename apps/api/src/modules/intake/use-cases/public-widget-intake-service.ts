@@ -10,7 +10,11 @@ import {
 import { sha256Hex, stableStringify } from "@granit/shared";
 import { z } from "zod";
 
-import type { AiReplyCandidateEvidence, AiTurnInput } from "../../ai/ai-turn.js";
+import {
+  PUBLIC_WIDGET_CATALOG_ACTION_LIMIT,
+  type AiReplyCandidateEvidence,
+  type AiTurnInput
+} from "../../ai/ai-turn.js";
 import {
   AI_SLOT_NAMES,
   AI_HANDOFF_REASONS,
@@ -244,13 +248,15 @@ export class PublicWidgetIntakeService {
             text: message.text,
             submitted_at: message.submittedAt,
             delivery_state: "accepted",
-            catalog_references: message.catalogReferences?.map((reference) => ({
-              kind: reference.kind,
-              label: reference.label,
-              title: reference.title,
-              href: reference.href,
-              entity_id: reference.entityId
-            })),
+            catalog_references: message.catalogReferences
+              ?.slice(0, PUBLIC_WIDGET_CATALOG_ACTION_LIMIT)
+              .map((reference) => ({
+                kind: reference.kind,
+                label: reference.label,
+                title: reference.title,
+                href: reference.href,
+                entity_id: reference.entityId
+              })),
             automation: message.automation
               ? projectPublicWidgetHistoryAutomation({
                   status: message.automation.status,

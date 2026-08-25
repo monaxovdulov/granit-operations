@@ -88,4 +88,46 @@ describe("single direct widget AI runtime assembly", () => {
     ).rejects.toThrow("outside their review window");
     expect(createDirectGenerator).not.toHaveBeenCalled();
   });
+
+  it("degrades an invalid catalog snapshot to an empty candidate source with a safe diagnostic", async () => {
+    const repository = new MemoryIntakeRepository();
+    const diagnostics: unknown[] = [];
+    const selectLiveV2Assets = vi.fn(async () => ({
+      manifest: loadApprovedAiAssetManifest().liveV2,
+      prompt: LIVE_V2_PROMPT_ASSET,
+      tone: LIVE_V2_TONE_ASSET,
+      factsSnapshot: TEST_LIVE_V2_FACTS,
+      facts: toLiveV2ModelFactsAsset(TEST_LIVE_V2_FACTS)
+    }));
+    const config = loadConfig({
+      DATABASE_URL: "postgres://runtime.invalid/granit",
+      AI_WIDGET_ENABLED: "true"
+    });
+    const assembly = await buildConfiguredWidgetAiAssembly({
+      config,
+      runRepository: repository,
+      onSanitizedDiagnostic(diagnostic) {
+        diagnostics.push(diagnostic);
+        throw new Error("OPTIONAL_DIAGNOSTIC_CALLBACK_FAILED");
+      },
+      dependencies: {
+        selectLiveV2Assets,
+        async loadCatalogIndex() {
+          throw new Error("RAW_INVALID_CATALOG_MUST_NOT_ESCAPE");
+        }
+      }
+    });
+
+    expect(assembly.directLiveV2).not.toHaveProperty("catalogSnapshot");
+    expect(diagnostics).toEqual([
+      {
+        code: "catalog_snapshot_unavailable",
+        stage: "startup",
+        fieldClass: "catalog_snapshot"
+      }
+    ]);
+    expect(JSON.stringify({ assembly, diagnostics })).not.toContain(
+      "RAW_INVALID_CATALOG_MUST_NOT_ESCAPE"
+    );
+  });
 });

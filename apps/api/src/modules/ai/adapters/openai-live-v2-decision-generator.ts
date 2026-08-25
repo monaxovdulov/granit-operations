@@ -13,11 +13,13 @@ import {
   buildLiveV2ModelRequest,
   classifyLiveV2RuntimeFailure,
   isSafeLiveV2RuntimeRunId,
+  reportLiveV2ObservabilityDiagnostic,
   reportLiveV2SanitizedFailure,
   toLiveV2RuntimeUsage,
   toRejectedLiveV2RuntimeObservation,
   toSafeLiveV2RuntimeRunId,
   type LiveV2RuntimeFailureCategory,
+  type LiveV2ObservabilityDiagnostic,
   type LiveV2RuntimeGeneration,
   type LiveV2RuntimeInvocation,
   type ObservedLiveV2DecisionGenerator
@@ -34,6 +36,7 @@ export type OpenAiLiveV2DecisionGeneratorOptions = {
   model: string;
   timeoutMs?: number;
   onSanitizedFailure?: (category: LiveV2RuntimeFailureCategory) => void;
+  onSanitizedDiagnostic?: (diagnostic: LiveV2ObservabilityDiagnostic) => void;
 };
 
 export type OpenAiLiveV2ResponseClient = (
@@ -104,6 +107,13 @@ export class OpenAiLiveV2DecisionGenerator implements ObservedLiveV2DecisionGene
       }
 
       const runtimeRunId = toSafeLiveV2RuntimeRunId(response.id);
+      if (response.id !== undefined && !runtimeRunId) {
+        reportLiveV2ObservabilityDiagnostic(this.options.onSanitizedDiagnostic, {
+          code: "optional_evidence_dropped",
+          stage: "provider_response",
+          fieldClass: "runtime_identifier"
+        });
+      }
       const usage = toLiveV2RuntimeUsage(response.usage);
 
       return {

@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { SITE_WIDGET_MESSAGE_EVENT_TYPE, SITE_WIDGET_V2_CONTRACT_VERSION } from "@granit/contracts";
 
 import {
+  PUBLIC_WIDGET_CATALOG_ACTION_LIMIT,
   buildSiteWidgetAiTurnExecutionContext,
   buildStageASiteWidgetAiTurnInput,
   type AiTurnInput,
@@ -3062,22 +3063,24 @@ function readMemoryCatalogReferences(metadata: Record<string, unknown>): WidgetC
     return [];
   }
 
-  return metadata.catalog_references.flatMap((reference) => {
-    if (
-      !reference ||
-      typeof reference !== "object" ||
-      Array.isArray(reference) ||
-      (reference as { kind?: unknown }).kind !== "catalog_item" ||
-      typeof (reference as { label?: unknown }).label !== "string" ||
-      typeof (reference as { title?: unknown }).title !== "string" ||
-      typeof (reference as { href?: unknown }).href !== "string" ||
-      typeof (reference as { entityId?: unknown }).entityId !== "string"
-    ) {
-      return [];
-    }
+  return metadata.catalog_references
+    .slice(0, PUBLIC_WIDGET_CATALOG_ACTION_LIMIT)
+    .flatMap((reference) => {
+      if (
+        !reference ||
+        typeof reference !== "object" ||
+        Array.isArray(reference) ||
+        (reference as { kind?: unknown }).kind !== "catalog_item" ||
+        typeof (reference as { label?: unknown }).label !== "string" ||
+        typeof (reference as { title?: unknown }).title !== "string" ||
+        typeof (reference as { href?: unknown }).href !== "string" ||
+        typeof (reference as { entityId?: unknown }).entityId !== "string"
+      ) {
+        return [];
+      }
 
-    return [structuredClone(reference) as WidgetCatalogReference];
-  });
+      return [structuredClone(reference) as WidgetCatalogReference];
+    });
 }
 
 function buildMemorySiteWidgetAiTurnInput(

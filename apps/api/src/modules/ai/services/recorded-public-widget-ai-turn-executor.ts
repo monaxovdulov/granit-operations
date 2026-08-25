@@ -155,6 +155,10 @@ function recordedReplyMetadata(input: {
   const appliedPatchCount = input.candidateMetadata.applied_patch_count;
   const droppedPatchCount = input.candidateMetadata.dropped_patch_count;
   const droppedRecommendationCount = input.candidateMetadata.dropped_recommendation_count;
+  const catalogSchemaVersion = input.candidateMetadata.catalog_schema_version;
+  const catalogVersion = input.candidateMetadata.catalog_version;
+  const catalogContentHash = input.candidateMetadata.catalog_content_hash;
+  const catalogReferences = input.candidateMetadata.catalog_references;
   const usage = input.completion.usage;
 
   return {
@@ -194,6 +198,16 @@ function recordedReplyMetadata(input: {
     ...(isNonNegativeInteger(droppedPatchCount) ? { dropped_patch_count: droppedPatchCount } : {}),
     ...(isNonNegativeInteger(droppedRecommendationCount)
       ? { dropped_recommendation_count: droppedRecommendationCount }
+      : {}),
+    ...(catalogSchemaVersion === "catalog-index.v1"
+      ? { catalog_schema_version: catalogSchemaVersion }
+      : {}),
+    ...(typeof catalogVersion === "string" ? { catalog_version: catalogVersion } : {}),
+    ...(typeof catalogContentHash === "string"
+      ? { catalog_content_hash: catalogContentHash }
+      : {}),
+    ...(Array.isArray(catalogReferences)
+      ? { catalog_references: catalogReferences }
       : {}),
     ...(usage?.inputTokens === undefined ? {} : { input_tokens: usage.inputTokens }),
     ...(usage?.outputTokens === undefined ? {} : { output_tokens: usage.outputTokens }),

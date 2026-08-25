@@ -48,6 +48,7 @@ import {
 } from "@granit/contracts";
 
 import {
+  PUBLIC_WIDGET_CATALOG_ACTION_LIMIT,
   buildSiteWidgetAiTurnExecutionContext,
   buildStageASiteWidgetAiTurnInput,
   type AiTurnInput,
@@ -3661,7 +3662,7 @@ function readWidgetCatalogReferences(metadata: Record<string, unknown>): WidgetC
     return [];
   }
 
-  return raw.slice(0, 8).flatMap((entry) => {
+  return raw.slice(0, PUBLIC_WIDGET_CATALOG_ACTION_LIMIT).flatMap((entry) => {
     if (!isRecord(entry)) {
       return [];
     }
