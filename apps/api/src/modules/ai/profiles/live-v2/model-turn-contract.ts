@@ -8,17 +8,28 @@ import type {
   AiSlotUpdate
 } from "../../ai-dialog-contract.js";
 import type { AiValidatorFailureCode } from "../../observability/ai-validator-failure-code.js";
+import type { CatalogSearchInput } from "../../catalog/catalog-search-tool.js";
 
-export const MODEL_TURN_OUTPUT_VERSION = "granit_model_turn.v1" as const;
-export const MODEL_TURN_PROMPT_VERSION = "granit_model_turn_prompt.v3" as const;
+export const MODEL_TURN_OUTPUT_VERSION = "granit_model_turn.v2" as const;
+export const MODEL_TURN_PROMPT_VERSION = "granit_model_turn_prompt.v4" as const;
 export const MODEL_TURN_MODEL_PROFILE_VERSION =
   "granit_model_turn_openai_luna.v1" as const;
 
 export const MODEL_TURN_TERMINAL_VALIDATION_CODES = [
   "invalid_shape",
   "invalid_answer",
-  "invalid_question"
+  "invalid_question",
+  "invalid_action"
 ] as const;
+
+export const FINAL_TURN_ACTIONS = [
+  "answer",
+  "clarify",
+  "recommend",
+  "recommend_and_clarify"
+] as const;
+
+export type FinalTurnAction = (typeof FINAL_TURN_ACTIONS)[number];
 
 export type ModelTurnTerminalValidationCode =
   (typeof MODEL_TURN_TERMINAL_VALIDATION_CODES)[number];
@@ -56,15 +67,14 @@ export type ProposedStatePatch =
   | ModelTurnSetSlotPatch
   | ModelTurnUpsertRequirementPatch;
 
-export type ModelTurnOutput = {
+export type FinalTurnResult = {
   version: typeof MODEL_TURN_OUTPUT_VERSION;
-  message: {
-    answerText: string;
-    question: {
-      text: string;
-      target: AiSlotName;
-    } | null;
-  };
+  action: FinalTurnAction;
+  message: string;
+  clarifyingQuestion: {
+    text: string;
+    target: AiSlotName;
+  } | null;
   statePatches: ProposedStatePatch[];
   recommendationIds: string[];
   handoffIntent: {
@@ -72,12 +82,28 @@ export type ModelTurnOutput = {
   } | null;
 };
 
+export type ModelTurnAction =
+  | {
+      version: typeof MODEL_TURN_OUTPUT_VERSION;
+      type: "final";
+      result: FinalTurnResult;
+    }
+  | {
+      version: typeof MODEL_TURN_OUTPUT_VERSION;
+      type: "search_catalog";
+      input: CatalogSearchInput;
+    };
+
 export type ModelTurnValidationIssue =
   | AiValidatorFailureCode
   | "unsupported_recommendation"
   | "invalid_patch_evidence"
   | "duplicate_patch"
-  | "question_dropped_for_length";
+  | "question_dropped_for_length"
+  | "action_repaired"
+  | "tool_arguments_invalid"
+  | "tool_loop_blocked"
+  | "final_output_invalid";
 
 export type RejectedStatePatch = {
   patch: ProposedStatePatch;
@@ -91,6 +117,7 @@ export type ModelTurnRiskAssessment = {
 
 export type ValidatedTurnPlan = {
   action: "answer" | "ask_clarifying_question" | "handoff_to_manager";
+  responseAction: FinalTurnAction;
   reason: "answer_ready" | "question_ready" | ModelTurnHandoffReason;
   finalText: string;
   finalTextHash: string;
@@ -115,5 +142,5 @@ export type CommittedTurn = {
 };
 
 export type ModelTurnValidationResult =
-  | { ok: true; output: ModelTurnOutput; plan: ValidatedTurnPlan }
+  | { ok: true; output: FinalTurnResult; plan: ValidatedTurnPlan }
   | { ok: false; code: ModelTurnTerminalValidationCode };

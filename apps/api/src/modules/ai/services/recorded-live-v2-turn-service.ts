@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 
+import { sha256Hex } from "@granit/shared";
+
 import {
   aiTurnExecutionContextMatchesInput,
   type AiTurnExecutionContext,
@@ -21,7 +23,8 @@ import type { LiveV2Candidate } from "../profiles/live-v2/live-v2-contract.js";
 import {
   executeModelTurn,
   type ModelTurnApplyPlan,
-  type ModelTurnOutcome
+  type ModelTurnOutcome,
+  type ModelTurnTrace
 } from "../profiles/live-v2/model-turn-orchestrator.js";
 import type { ValidatedTurnPlan } from "../profiles/live-v2/model-turn-contract.js";
 import type { AiRequirementUpdate, AiSlotUpdate } from "../ai-dialog-contract.js";
@@ -73,6 +76,12 @@ type TrustedObservation = {
   observedModelName?: string;
   runtimeRunId?: string;
   usage?: AiRunUsage;
+};
+
+type ModelCallObservation = {
+  startedAt: Date;
+  completedAt?: Date;
+  succeeded: boolean;
 };
 
 type TerminalState = Pick<
@@ -212,9 +221,7 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
     }
 
     let observation: TrustedObservation = { observedModelProvider: "none" };
-    let generatorStartedAt: Date | undefined;
-    let generatorCompletedAt: Date | undefined;
-    let generatorSucceeded = false;
+    const modelCalls: ModelCallObservation[] = [];
     let gateStartedAt: Date | undefined;
     let gateCompletedAt: Date | undefined;
     let atomicCompletion: TerminalAiRunRecord | undefined;
@@ -230,7 +237,11 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
           : {}),
         generator: {
           generateDecision: async (generatorInput) => {
-            generatorStartedAt = this.clock();
+            const call: ModelCallObservation = {
+              startedAt: this.clock(),
+              succeeded: false
+            };
+            modelCalls.push(call);
             try {
               throwIfRecordedTurnAborted(input.signal);
               const generation = await this.options.generator.generateDecision(generatorInput, {
@@ -238,17 +249,23 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
                 signal: input.signal
               });
               throwIfRecordedTurnAborted(input.signal);
-              observation = toTrustedObservation(generation.observation);
-              generatorSucceeded = true;
+              observation = mergeTrustedObservations(
+                observation,
+                toTrustedObservation(generation.observation)
+              );
+              call.succeeded = true;
               return generation.candidate;
             } catch (error) {
               if (error instanceof LiveV2GenerationError && error.observation) {
-                observation = toTrustedObservation(error.observation);
+                observation = mergeTrustedObservations(
+                  observation,
+                  toTrustedObservation(error.observation)
+                );
               }
 
               throw error;
             } finally {
-              generatorCompletedAt = this.clock();
+              call.completedAt = this.clock();
             }
           }
         },
@@ -269,9 +286,7 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
       const baseSpans = this.outcomeSpans({
         startedAt,
         liveOutcome,
-        generatorStartedAt,
-        generatorCompletedAt,
-        generatorSucceeded,
+        modelCalls,
         gateStartedAt,
         gateCompletedAt
       });
@@ -305,7 +320,8 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
               decision,
               validatedPlan,
               catalogReferences,
-              this.options.catalogSnapshot
+              this.options.catalogSnapshot,
+              "trace" in liveOutcome ? liveOutcome.trace : undefined
             ),
             ...(appliedPatches?.slotUpdates.length
               ? { slotUpdates: appliedPatches.slotUpdates }
@@ -319,7 +335,13 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
               : {})
           },
           completionPlan: {
-            allowed: this.completion(run, allowedReplyState(action), baseSpans, observation, true),
+            allowed: this.completion(
+              run,
+              allowedReplyState(action, fallbackQualityEvents(liveOutcome)),
+              baseSpans,
+              observation,
+              true
+            ),
             agentReplyBlocked: this.completion(
               run,
               agentReplyBlockedState(action),
@@ -417,26 +439,45 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
   private outcomeSpans(input: {
     startedAt: Date;
     liveOutcome: RecordedPipelineOutcome;
-    generatorStartedAt?: Date;
-    generatorCompletedAt?: Date;
-    generatorSucceeded: boolean;
+    modelCalls: ModelCallObservation[];
     gateStartedAt?: Date;
     gateCompletedAt?: Date;
   }): AiRunSpanWrite[] {
     const now = this.clock();
     const spans: AiRunSpanWrite[] = [];
 
-    if (input.generatorStartedAt) {
+    for (const call of input.modelCalls) {
       spans.push(
         this.span(
           "model",
           "model_generation",
-          input.generatorSucceeded ? "succeeded" : "failed",
-          elapsedMs(input.generatorStartedAt, input.generatorCompletedAt ?? now),
-          input.generatorSucceeded ? undefined : "model_error"
+          call.succeeded ? "succeeded" : "failed",
+          elapsedMs(call.startedAt, call.completedAt ?? now),
+          call.succeeded ? undefined : "model_error"
         )
       );
     }
+
+    const modelTrace = "trace" in input.liveOutcome ? input.liveOutcome.trace : undefined;
+    if (modelTrace?.catalogSearch) {
+      const search = modelTrace.catalogSearch;
+      const succeeded = search.status === "succeeded" || search.status === "empty";
+      spans.push({
+        ...this.span(
+          "tool",
+          "tool_execution",
+          succeeded ? "succeeded" : "failed",
+          search.latencyMs,
+          succeeded ? undefined : "tool_failed"
+        ),
+        toolVersion: this.options.versions.toolVersion,
+        usedInFinalAnswer: search.candidateIds.some((id) =>
+          modelTrace.finalRecommendationIds.includes(id)
+        )
+      });
+    }
+
+    const lastModelCompletedAt = input.modelCalls.at(-1)?.completedAt;
 
     if (input.liveOutcome.validation) {
       spans.push(
@@ -444,7 +485,7 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
           "validation",
           "candidate_validation",
           input.liveOutcome.validation.ok ? "succeeded" : "failed",
-          elapsedMs(input.generatorCompletedAt ?? input.startedAt, input.gateStartedAt ?? now),
+          elapsedMs(lastModelCompletedAt ?? input.startedAt, input.gateStartedAt ?? now),
           input.liveOutcome.validation.ok ? undefined : "validation_failed"
         )
       );
@@ -457,7 +498,7 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
           "validation",
           "candidate_validation",
           "failed",
-          elapsedMs(input.generatorCompletedAt ?? input.startedAt, now),
+          elapsedMs(lastModelCompletedAt ?? input.startedAt, now),
           "validation_failed"
         )
       );
@@ -617,7 +658,54 @@ function toTrustedObservation(
   };
 }
 
-function allowedReplyState(action: Exclude<LiveV2Candidate["action"], "no_reply">): TerminalState {
+function mergeTrustedObservations(
+  current: TrustedObservation,
+  next: TrustedObservation
+): TrustedObservation {
+  const usage = mergeUsage(current.usage, next.usage);
+  const observedModelProvider =
+    next.observedModelProvider === "none" && current.observedModelProvider !== "none"
+      ? current.observedModelProvider
+      : next.observedModelProvider;
+  const observedModelName =
+    observedModelProvider === "none"
+      ? undefined
+      : next.observedModelName ?? current.observedModelName;
+
+  return {
+    observedModelProvider,
+    ...(observedModelName ? { observedModelName } : {}),
+    ...(next.runtimeRunId ?? current.runtimeRunId
+      ? { runtimeRunId: next.runtimeRunId ?? current.runtimeRunId }
+      : {}),
+    ...(usage ? { usage } : {})
+  };
+}
+
+function mergeUsage(current: AiRunUsage | undefined, next: AiRunUsage | undefined) {
+  if (!current && !next) return undefined;
+  return {
+    ...sumUsageField("inputTokens", current, next),
+    ...sumUsageField("outputTokens", current, next),
+    ...sumUsageField("totalTokens", current, next)
+  };
+}
+
+function sumUsageField(
+  field: keyof AiRunUsage,
+  current: AiRunUsage | undefined,
+  next: AiRunUsage | undefined
+) {
+  const values = [current?.[field], next?.[field]].filter(
+    (value): value is number => value !== undefined
+  );
+  return values.length > 0 ? { [field]: values.reduce((sum, value) => sum + value, 0) } : {};
+}
+
+function allowedReplyState(
+  action: Exclude<LiveV2Candidate["action"], "no_reply">,
+  qualityEvents: AiQualityEventWrite[] = []
+): TerminalState {
   if (action === "handoff_to_manager") {
     return {
       status: "handed_off",
@@ -635,8 +723,24 @@ function allowedReplyState(action: Exclude<LiveV2Candidate["action"], "no_reply"
     outcomeReason: "reply_persisted",
     validatorResult: "passed",
     sendGateResult: "allowed",
-    qualityEvents: []
+    qualityEvents
   };
+}
+
+function fallbackQualityEvents(outcome: RecordedPipelineOutcome): AiQualityEventWrite[] {
+  if (!("trace" in outcome)) return [];
+
+  const events: AiQualityEventWrite[] = [];
+  if (outcome.trace.modelCalls.some((call) => call.status === "failed")) {
+    events.push(event("runtime_failure", "runtime_failed", "critical"));
+  }
+  if (
+    outcome.trace.catalogSearch?.status === "failed" ||
+    outcome.trace.catalogSearch?.status === "timed_out"
+  ) {
+    events.push(event("tool_failure", "tool_failed", "error"));
+  }
+  return events;
 }
 
 function agentReplyBlockedState(
@@ -774,18 +878,20 @@ function decisionMetadata(
   decision: RecordedReplyDecision,
   plan?: ValidatedTurnPlan,
   catalogReferences: ReturnType<typeof buildCatalogReferences> = [],
-  catalogSnapshot?: CatalogIndexSnapshot
+  catalogSnapshot?: CatalogIndexSnapshot,
+  trace?: ModelTurnTrace
 ) {
   return {
     normalized_action: decision.action,
     ...(plan
       ? {
-          turn_contract: "granit_model_turn.v1",
+          turn_contract: "granit_model_turn.v2",
           final_text_hash: plan.finalTextHash,
           applied_patch_count: plan.appliedPatches.length,
           dropped_patch_count: plan.droppedPatches.length,
           dropped_recommendation_count: plan.droppedRecommendationIds.length,
           validation_results: plan.validationResults,
+          ...(trace ? modelTurnTraceMetadata(trace) : {}),
           ...(catalogSnapshot
             ? {
                 catalog_schema_version: catalogSnapshot.schemaVersion,
@@ -801,6 +907,27 @@ function decisionMetadata(
     ...(decision.action === "handoff_to_manager"
       ? {
           handoff_reason: plan?.handoffAction?.reason ?? "manager_requested"
+        }
+      : {})
+  };
+}
+
+function modelTurnTraceMetadata(trace: ModelTurnTrace) {
+  const search = trace.catalogSearch;
+  return {
+    model_call_count: trace.modelCallCount,
+    selected_response_action: trace.selectedAction,
+    catalog_search_called: trace.searchCatalogCalled,
+    final_recommendation_ids: trace.finalRecommendationIds,
+    ...(search
+      ? {
+          catalog_search_status: search.status,
+          catalog_search_query_hash: sha256Hex(search.input.query),
+          catalog_search_categories: search.input.categories ?? [],
+          catalog_search_limit: search.input.limit,
+          catalog_search_has_material: Boolean(search.input.material),
+          catalog_search_has_monument_type: Boolean(search.input.monumentType),
+          catalog_candidate_ids: search.candidateIds
         }
       : {})
   };

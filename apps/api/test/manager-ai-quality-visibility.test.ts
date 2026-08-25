@@ -62,6 +62,9 @@ describe("manager AI quality visibility", () => {
       }
     });
     await waitForTerminalHistory(app, response.json().public_session_id);
+    expect(repository.lastAiSaveInput?.body).toContain(
+      "не удалось подготовить точный подбор"
+    );
 
     const leadId = repository.onlyLead().leadId;
     const unauthenticated = await app.inject({
@@ -80,7 +83,7 @@ describe("manager AI quality visibility", () => {
       eventType: "runtime_failure",
       reasonCode: "runtime_failed",
       severity: "critical",
-      runStatus: "fallback_unavailable"
+      runStatus: "persisted"
     });
     expect(
       Date.parse(detail.json().lead.conversations[0].latestUnresolvedAiQuality.createdAt)

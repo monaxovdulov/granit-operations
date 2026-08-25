@@ -24,7 +24,7 @@ export const APPROVED_AI_ASSET_MANIFEST_VERSION =
   "granit_ai_approved_assets_manifest.v1" as const;
 export const LIVE_V2_ASSET_VERSION = "granit_live_v2_assets.v1" as const;
 export const LIVE_V2_POLICY_VERSION = "granit_live_v2_policy.v1" as const;
-export const LIVE_V2_TOOL_VERSION = "granit_ai_tools.none.v1" as const;
+export const LIVE_V2_TOOL_VERSION = "granit_ai_tools.search_catalog.v1" as const;
 export const LIVE_V2_MODEL_PROFILE_VERSION = "granit_live_v2_model_profile.v1" as const;
 
 const versionSchema = z

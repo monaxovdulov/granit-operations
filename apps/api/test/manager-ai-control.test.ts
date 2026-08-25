@@ -225,11 +225,17 @@ function track<T extends ReturnType<typeof buildApi>>(app: T): T {
 function modelTurnResult() {
   return {
     candidate: {
-      version: "granit_model_turn.v1" as const,
-      message: { answerText: "Могу помочь собрать детали заявки.", question: null },
-      statePatches: [],
-      recommendationIds: [],
-      handoffIntent: null
+      version: "granit_model_turn.v2" as const,
+      type: "final" as const,
+      result: {
+        version: "granit_model_turn.v2" as const,
+        action: "answer" as const,
+        message: "Могу помочь собрать детали заявки.",
+        clarifyingQuestion: null,
+        statePatches: [],
+        recommendationIds: [],
+        handoffIntent: null
+      }
     },
     observation: {
       observedModelProvider: "openai" as const,

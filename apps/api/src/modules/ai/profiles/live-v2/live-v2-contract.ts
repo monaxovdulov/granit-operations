@@ -1,3 +1,8 @@
+import type {
+  AiRequirementCategory,
+  AiRequirementMode
+} from "../../ai-dialog-contract.js";
+
 export const LIVE_V2_DECISION_PROFILE = "live_v2" as const;
 export const LIVE_V2_CANDIDATE_VERSION = "granit_live_v2_candidate.v1" as const;
 export const LIVE_V2_TURN_VIEW_VERSION = "granit_live_v2_turn_view.v1" as const;
@@ -5,6 +10,7 @@ export const LIVE_V2_TURN_VIEW_VERSION = "granit_live_v2_turn_view.v1" as const;
 export const LIVE_V2_CONTEXT_MAX_MESSAGES = 8;
 export const LIVE_V2_CONTEXT_MAX_CHARACTERS = 6_000;
 export const LIVE_V2_LAST_AI_QUESTION_MAX_CHARACTERS = 320;
+export const LIVE_V2_KNOWN_REQUIREMENTS_MAX_ITEMS = 24;
 
 export type LiveV2Action =
   | "answer"
@@ -99,13 +105,24 @@ export type LiveV2KnownSlots = {
   desiredTiming?: string;
 };
 
-export type LiveV2CatalogCandidate = {
-  id: string;
-  title: string;
-  categorySlug: string;
-  groupSlug: string;
-  searchTerms: string[];
-  material: string[];
+export type LiveV2KnownSlotProvenance = Partial<
+  Record<
+    "monumentType" | "material" | "size" | "city" | "cemetery" | "installation" | "desiredTiming",
+    {
+      origin: "saved_field";
+      source: "contact" | "visitor_message" | "ai_extraction" | "manager";
+    }
+  >
+>;
+
+export type LiveV2KnownRequirement = {
+  category: AiRequirementCategory;
+  mode: AiRequirementMode;
+  value: string;
+  provenance: {
+    origin: "saved_requirement";
+    source: "ai_extraction" | "manager";
+  };
 };
 
 export type LiveV2Gate = {
@@ -123,6 +140,8 @@ export type LiveV2TurnView = {
   messages: LiveV2TurnViewMessage[];
   lastAiQuestion: string | null;
   knownSlots: LiveV2KnownSlots;
+  knownSlotProvenance: LiveV2KnownSlotProvenance;
+  knownRequirements: LiveV2KnownRequirement[];
   gate: LiveV2Gate;
 };
 

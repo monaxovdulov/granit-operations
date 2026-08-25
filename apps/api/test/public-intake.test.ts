@@ -497,15 +497,18 @@ describe("public site_widget intake", () => {
         await generationGate;
         return {
           candidate: {
-            version: "granit_model_turn.v1" as const,
-            message: {
-              answerText:
+            version: "granit_model_turn.v2" as const,
+            type: "final" as const,
+            result: {
+              version: "granit_model_turn.v2" as const,
+              action: "answer" as const,
+              message:
                 "Подойдёт модель «Арфа». Откройте карточку, чтобы посмотреть детали.",
-              question: null
+              clarifyingQuestion: null,
+              statePatches: [],
+              recommendationIds: [],
+              handoffIntent: null
             },
-            statePatches: [],
-            recommendationIds: [],
-            handoffIntent: null
           },
           observation: {
             observedModelProvider: "openai" as const,
@@ -1088,14 +1091,17 @@ describe("public site_widget intake", () => {
               async generateDecision() {
                 return {
                   candidate: {
-                    version: "granit_model_turn.v1",
-                    message: {
-                      answerText: "Могу помочь с общими вариантами памятника.",
-                      question: { text: "Какие детали важны?", target: "material" }
+                    version: "granit_model_turn.v2",
+                    type: "final",
+                    result: {
+                      version: "granit_model_turn.v2",
+                      action: "clarify",
+                      message: "Могу помочь с общими вариантами памятника.",
+                      clarifyingQuestion: { text: "Какие детали важны?", target: "material" },
+                      statePatches: [],
+                      recommendationIds: [],
+                      handoffIntent: null
                     },
-                    statePatches: [],
-                    recommendationIds: [],
-                    handoffIntent: null
                   },
                   observation: {
                     observedModelProvider: "openai",

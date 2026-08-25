@@ -604,29 +604,7 @@ export class MemoryIntakeRepository implements IntakeRepository {
         });
       }
 
-      const managerQuality = input.completion.qualityEvents[0];
-      const qualityLead = this.leads.get(input.run.leadId);
-      if (managerQuality && qualityLead) {
-        const createdAt = input.completion.completedAt.toISOString();
-        this.leads.set(input.run.leadId, {
-          ...qualityLead,
-          conversations: qualityLead.conversations.map((conversation) =>
-            conversation.publicConversationId === input.publicConversationId
-              ? {
-                  ...conversation,
-                  latestUnresolvedAiQuality: {
-                    eventType: managerQuality.eventType,
-                    reasonCode: managerQuality.reasonCode,
-                    severity: managerQuality.severity,
-                    runStatus: input.completion.status,
-                    createdAt
-                  },
-                  updatedAt: createdAt
-                }
-              : conversation
-          )
-        });
-      }
+      this.recordManagerQuality(input.run, input.completion);
 
       if (job) {
         job.status = input.completion.sendGateResult === "blocked" ? "superseded" : "blocked";
@@ -764,6 +742,7 @@ export class MemoryIntakeRepository implements IntakeRepository {
       if (index >= 0) {
         this.recordedAiRuns[index] = completedWithOutbound;
       }
+      this.recordManagerQuality(input.run, input.completionPlan.allowed);
 
       return {
         status: "persisted" as const,
@@ -821,6 +800,36 @@ export class MemoryIntakeRepository implements IntakeRepository {
         completedRun
       };
     }
+  }
+
+  private recordManagerQuality(
+    run: RunningAiRunRecord,
+    completion: AiRunTerminalCompletion
+  ): void {
+    const managerQuality = completion.qualityEvents[0];
+    const qualityLead = this.leads.get(run.leadId);
+    const publicSessionId = this.conversationSessions.get(run.conversationId);
+    if (!managerQuality || !qualityLead || !publicSessionId) return;
+
+    const createdAt = completion.completedAt.toISOString();
+    this.leads.set(run.leadId, {
+      ...qualityLead,
+      conversations: qualityLead.conversations.map((conversation) =>
+        conversation.channelIdentity.widgetPublicSessionId === publicSessionId
+          ? {
+              ...conversation,
+              latestUnresolvedAiQuality: {
+                eventType: managerQuality.eventType,
+                reasonCode: managerQuality.reasonCode,
+                severity: managerQuality.severity,
+                runStatus: completion.status,
+                createdAt
+              },
+              updatedAt: createdAt
+            }
+          : conversation
+      )
+    });
   }
 
   private rollbackRecordedSiteWidgetAiReply(input: {

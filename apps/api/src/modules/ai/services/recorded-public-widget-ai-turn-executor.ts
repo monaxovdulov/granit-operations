@@ -136,6 +136,32 @@ const ALLOWED_HANDOFF_REASONS = new Set([
   "deadline_requires_manager_confirmation",
   "binding_terms_require_manager_confirmation"
 ]);
+const ALLOWED_RESPONSE_ACTIONS = new Set([
+  "answer",
+  "clarify",
+  "recommend",
+  "recommend_and_clarify",
+  "safe_fallback",
+  "blocked"
+]);
+const ALLOWED_CATALOG_SEARCH_STATUSES = new Set([
+  "succeeded",
+  "empty",
+  "failed",
+  "timed_out"
+]);
+const ALLOWED_MODEL_TURN_VALIDATION_RESULTS = new Set([
+  "duplicate_question",
+  "known_slot_requested",
+  "unsupported_recommendation",
+  "invalid_patch_evidence",
+  "duplicate_patch",
+  "question_dropped_for_length",
+  "action_repaired",
+  "tool_arguments_invalid",
+  "tool_loop_blocked",
+  "final_output_invalid"
+]);
 
 function recordedReplyMetadata(input: {
   run: RunningAiRunRecord;
@@ -159,6 +185,7 @@ function recordedReplyMetadata(input: {
   const catalogVersion = input.candidateMetadata.catalog_version;
   const catalogContentHash = input.candidateMetadata.catalog_content_hash;
   const catalogReferences = input.candidateMetadata.catalog_references;
+  const modelTurnDiagnostics = safeModelTurnDiagnostics(input.candidateMetadata);
   const usage = input.completion.usage;
 
   return {
@@ -190,7 +217,7 @@ function recordedReplyMetadata(input: {
     ...(typeof handoffReason === "string" && ALLOWED_HANDOFF_REASONS.has(handoffReason)
       ? { handoff_reason: handoffReason }
       : {}),
-    ...(turnContract === "granit_model_turn.v1" ? { turn_contract: turnContract } : {}),
+    ...(turnContract === "granit_model_turn.v2" ? { turn_contract: turnContract } : {}),
     ...(typeof finalTextHash === "string" && /^[a-f0-9]{64}$/.test(finalTextHash)
       ? { final_text_hash: finalTextHash }
       : {}),
@@ -209,6 +236,7 @@ function recordedReplyMetadata(input: {
     ...(Array.isArray(catalogReferences)
       ? { catalog_references: catalogReferences }
       : {}),
+    ...modelTurnDiagnostics,
     ...(usage?.inputTokens === undefined ? {} : { input_tokens: usage.inputTokens }),
     ...(usage?.outputTokens === undefined ? {} : { output_tokens: usage.outputTokens }),
     ...(usage?.totalTokens === undefined ? {} : { total_tokens: usage.totalTokens }),
@@ -216,6 +244,79 @@ function recordedReplyMetadata(input: {
     ...(input.run.versions.toneVersion ? { tone_version: input.run.versions.toneVersion } : {}),
     ...(input.run.versions.factsVersion ? { facts_version: input.run.versions.factsVersion } : {})
   };
+}
+
+function safeModelTurnDiagnostics(metadata: Record<string, unknown>) {
+  const action = metadata.selected_response_action;
+  const status = metadata.catalog_search_status;
+  const queryHash = metadata.catalog_search_query_hash;
+  const categories = safeStringArray(metadata.catalog_search_categories, /^[a-z0-9-]+$/, 10);
+  const candidateIds = safeStringArray(
+    metadata.catalog_candidate_ids,
+    /^ent_[a-f0-9]{16}$/,
+    8
+  );
+  const finalIds = safeStringArray(
+    metadata.final_recommendation_ids,
+    /^ent_[a-f0-9]{16}$/,
+    3
+  );
+  const validationResults = safeAllowedStringArray(
+    metadata.validation_results,
+    ALLOWED_MODEL_TURN_VALIDATION_RESULTS,
+    32
+  );
+
+  return {
+    ...(isNonNegativeInteger(metadata.model_call_count)
+      ? { model_call_count: metadata.model_call_count }
+      : {}),
+    ...(typeof action === "string" && ALLOWED_RESPONSE_ACTIONS.has(action)
+      ? { selected_response_action: action }
+      : {}),
+    ...(typeof metadata.catalog_search_called === "boolean"
+      ? { catalog_search_called: metadata.catalog_search_called }
+      : {}),
+    ...(typeof status === "string" && ALLOWED_CATALOG_SEARCH_STATUSES.has(status)
+      ? { catalog_search_status: status }
+      : {}),
+    ...(typeof queryHash === "string" && /^[a-f0-9]{64}$/.test(queryHash)
+      ? { catalog_search_query_hash: queryHash }
+      : {}),
+    ...(categories ? { catalog_search_categories: categories } : {}),
+    ...(isNonNegativeInteger(metadata.catalog_search_limit) && metadata.catalog_search_limit <= 8
+      ? { catalog_search_limit: metadata.catalog_search_limit }
+      : {}),
+    ...(typeof metadata.catalog_search_has_material === "boolean"
+      ? { catalog_search_has_material: metadata.catalog_search_has_material }
+      : {}),
+    ...(typeof metadata.catalog_search_has_monument_type === "boolean"
+      ? { catalog_search_has_monument_type: metadata.catalog_search_has_monument_type }
+      : {}),
+    ...(candidateIds ? { catalog_candidate_ids: candidateIds } : {}),
+    ...(finalIds ? { final_recommendation_ids: finalIds } : {}),
+    ...(validationResults ? { validation_results: validationResults } : {})
+  };
+}
+
+function safeStringArray(value: unknown, pattern: RegExp, limit: number): string[] | undefined {
+  if (!Array.isArray(value) || value.length > limit) return undefined;
+  const strings = value.filter(
+    (entry): entry is string => typeof entry === "string" && pattern.test(entry)
+  );
+  return strings.length === value.length ? strings : undefined;
+}
+
+function safeAllowedStringArray(
+  value: unknown,
+  allowed: ReadonlySet<string>,
+  limit: number
+): string[] | undefined {
+  if (!Array.isArray(value) || value.length > limit) return undefined;
+  const strings = value.filter(
+    (entry): entry is string => typeof entry === "string" && allowed.has(entry)
+  );
+  return strings.length === value.length ? strings : undefined;
 }
 
 function isNonNegativeInteger(value: unknown): value is number {

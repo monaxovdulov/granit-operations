@@ -7,7 +7,10 @@ import { sha256Hex } from "@granit/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { buildApi } from "../src/app.js";
-import type { ObservedLiveV2DecisionGenerator } from "../src/modules/ai/ports/live-v2-runtime.js";
+import {
+  LiveV2GenerationError,
+  type ObservedLiveV2DecisionGenerator
+} from "../src/modules/ai/ports/live-v2-runtime.js";
 import { loadPinnedCatalogIndex } from "../src/modules/ai/catalog/pinned-catalog-index.js";
 import { TEST_LIVE_V2_FACTS } from "./fixtures/live-v2-synthetic.v1.js";
 import { MemoryIntakeRepository } from "./helpers/memory-intake-repository.js";
@@ -27,12 +30,27 @@ describe("M2 app-owned direct live_v2 runtime", () => {
     const rawProviderId = "resp_123456789_customer_canary";
     const generateDecision = vi.fn<ObservedLiveV2DecisionGenerator["generateDecision"]>(
       async (input) => {
-        const recommendationId = input.catalogCandidates?.[0]?.id;
+        if (input.responseMode === "turn_action") {
+          return observed({
+            version: "granit_model_turn.v2",
+            type: "search_catalog",
+            input: {
+              query: "чёрный гранит памятник без золота",
+              categories: ["monuments"],
+              material: null,
+              monumentType: null,
+              limit: 8
+            }
+          }, rawProviderId);
+        }
+
+        const recommendationId = input.catalogSearch?.candidates[0]?.id;
         if (!recommendationId) throw new Error("Test catalog candidate is missing");
-        return {
-          candidate: {
-          version: "granit_model_turn.v1",
-          message: { answerText: finalText, question: null },
+        return observed({
+          version: "granit_model_turn.v2",
+          action: "recommend",
+          message: finalText,
+          clarifyingQuestion: null,
           statePatches: [
             {
               operation: "set_slot",
@@ -52,14 +70,7 @@ describe("M2 app-owned direct live_v2 runtime", () => {
           ],
           recommendationIds: [recommendationId],
           handoffIntent: null
-        },
-          observation: {
-          observedModelProvider: "openai",
-          observedModelName: "gpt-5.6-luna",
-          runtimeRunId: rawProviderId,
-          usage: { inputTokens: 80, outputTokens: 20, totalTokens: 100 }
-          }
-        };
+        }, rawProviderId);
       }
     );
     const app = track(
@@ -105,9 +116,9 @@ describe("M2 app-owned direct live_v2 runtime", () => {
         })
       ])
     );
-    expect(generateDecision).toHaveBeenCalledTimes(1);
+    expect(generateDecision).toHaveBeenCalledTimes(2);
     expect(generateDecision.mock.calls[0]?.[0].assets.prompt.version).toBe(
-      "granit_model_turn_prompt.v3"
+      "granit_model_turn_prompt.v4"
     );
     expect(repository.lastAiSaveInput).toMatchObject({
       body: finalText,
@@ -123,12 +134,21 @@ describe("M2 app-owned direct live_v2 runtime", () => {
         })
       ],
       metadata: {
-        turn_contract: "granit_model_turn.v1",
+        turn_contract: "granit_model_turn.v2",
         final_text_hash: sha256Hex(finalText),
         applied_patch_count: 2,
         catalog_schema_version: "catalog-index.v1",
         catalog_version: "landing-catalog.e76ee8be770a",
         catalog_content_hash: catalogSnapshot.contentHash,
+        model_call_count: 2,
+        selected_response_action: "recommend",
+        catalog_search_called: true,
+        catalog_search_status: "succeeded",
+        catalog_search_query_hash: expect.stringMatching(/^[a-f0-9]{64}$/),
+        catalog_search_categories: ["monuments"],
+        catalog_search_limit: 8,
+        catalog_candidate_ids: expect.arrayContaining([recommendationIdPattern()]),
+        final_recommendation_ids: [recommendationIdPattern()],
         catalog_references: [expect.objectContaining({ kind: "catalog_item" })]
       }
     });
@@ -142,14 +162,97 @@ describe("M2 app-owned direct live_v2 runtime", () => {
         reasoningEffort: "medium"
       },
       versions: {
-        promptVersion: "granit_model_turn_prompt.v3",
+        promptVersion: "granit_model_turn_prompt.v4",
         modelProfileVersion: "granit_model_turn_openai_luna.v1"
       },
+      usage: { inputTokens: 160, outputTokens: 40, totalTokens: 200 },
+      spans: expect.arrayContaining([
+        expect.objectContaining({ kind: "model", status: "succeeded" }),
+        expect.objectContaining({
+          kind: "tool",
+          status: "succeeded",
+          toolVersion: "granit_ai_tools.search_catalog.v1",
+          usedInFinalAnswer: true
+        })
+      ]),
       outboundMessageId: expect.any(String)
     });
     expect(repository.listAiRuns()[0]).not.toHaveProperty("validatorFailureCode");
     expect(repository.listAiRuns()[0]).not.toHaveProperty("runtimeRunId");
     expect(JSON.stringify(repository)).not.toContain(rawProviderId);
+  });
+
+  it("keeps provider evidence coherent when the final model call has no trusted identity", async () => {
+    const repository = new MemoryIntakeRepository();
+    const catalogSnapshot = await loadPinnedCatalogIndex();
+    const generateDecision = vi.fn<ObservedLiveV2DecisionGenerator["generateDecision"]>(
+      async (input) => {
+        if (input.responseMode === "turn_action") {
+          return observed({
+            version: "granit_model_turn.v2",
+            type: "search_catalog",
+            input: {
+              query: "памятники",
+              categories: ["monuments"],
+              material: null,
+              monumentType: null,
+              limit: 8
+            }
+          });
+        }
+
+        throw new LiveV2GenerationError(
+          {
+            observedModelProvider: "none",
+            usage: { inputTokens: 5, outputTokens: 2, totalTokens: 7 }
+          },
+          "identity_mismatch"
+        );
+      }
+    );
+    const app = track(
+      buildApi({
+        repository,
+        widgetAi: {
+          enabled: true,
+          directLiveV2: {
+            generator: { generateDecision },
+            modelName: "gpt-5.6-luna",
+            approvedFacts: TEST_LIVE_V2_FACTS,
+            catalogSnapshot
+          },
+          jobWorker: { ...testJobWorkerOptions(), maxAttempts: 1 }
+        }
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/public/intake/site-widget/messages",
+      payload: widgetRequest("coherent-provider-evidence-0001", "Покажите памятники")
+    });
+    const history = await waitForTerminalHistory(app, response.json().public_session_id);
+
+    expect(history.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sender_role: "ai_assistant",
+          text: expect.stringContaining("не удалось подготовить точный подбор")
+        })
+      ])
+    );
+    expect(repository.listAiRuns()[0]).toMatchObject({
+      status: "persisted",
+      observedModelProvider: "openai",
+      observedModelName: "gpt-5.6-luna",
+      usage: { inputTokens: 85, outputTokens: 22, totalTokens: 107 },
+      qualityEvents: [
+        expect.objectContaining({
+          eventType: "runtime_failure",
+          reasonCode: "runtime_failed"
+        })
+      ]
+    });
   });
 
   it.each([
@@ -162,19 +265,22 @@ describe("M2 app-owned direct live_v2 runtime", () => {
     {
       label: "handoff and question conflict",
       candidate: {
-        version: "granit_model_turn.v1",
-        message: {
-          answerText: "Передам запрос менеджеру.",
-          question: { text: "Какой материал рассматриваете?", target: "material" }
-        },
-        statePatches: [],
-        recommendationIds: [],
-        handoffIntent: { reason: "customer_requested_manager" }
+        version: "granit_model_turn.v2",
+        type: "final",
+        result: {
+          version: "granit_model_turn.v2",
+          action: "clarify",
+          message: "Передам запрос менеджеру.",
+          clarifyingQuestion: { text: "Какой материал рассматриваете?", target: "material" },
+          statePatches: [],
+          recommendationIds: [],
+          handoffIntent: { reason: "customer_requested_manager" }
+        }
       },
       expectedCode: "invalid_question",
       requestId: "ailr-02-handoff-question-reject-0001"
     }
-  ])("records $label without an outbound or public leak", async (testCase) => {
+  ])("uses a safe public fallback for $label without leaking internals", async (testCase) => {
     const repository = new MemoryIntakeRepository();
     const generateDecision = vi.fn<ObservedLiveV2DecisionGenerator["generateDecision"]>(
       async () => ({
@@ -209,19 +315,26 @@ describe("M2 app-owned direct live_v2 runtime", () => {
     const history = await waitForTerminalHistory(app, response.json().public_session_id);
 
     expect(generateDecision).toHaveBeenCalledTimes(1);
-    expect(history.messages).not.toEqual(
-      expect.arrayContaining([expect.objectContaining({ sender_role: "ai_assistant" })])
+    expect(history.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sender_role: "ai_assistant",
+          text: expect.stringContaining("не удалось подготовить точный подбор")
+        })
+      ])
     );
     expect(JSON.stringify(history)).not.toContain(testCase.expectedCode);
     expect(JSON.stringify(history)).not.toContain(JSON.stringify(testCase.candidate));
     expect(repository.listAiRuns()[0]).toMatchObject({
-      status: "blocked",
-      outcomeReason: "candidate_invalid",
-      failureCode: "invalid_candidate",
-      validatorResult: "rejected",
-      validatorFailureCode: testCase.expectedCode
+      status: "persisted",
+      validatorResult: "passed",
+      outboundMessageId: expect.any(String)
     });
-    expect(repository.listAiRuns()[0]).not.toHaveProperty("outboundMessageId");
+    expect(repository.lastAiSaveInput?.metadata).toMatchObject({
+      selected_response_action: "safe_fallback",
+      validation_results: ["final_output_invalid"]
+    });
+    expect(repository.listAiRuns()[0]).not.toHaveProperty("validatorFailureCode");
   });
 
   it("does not turn a tone regex match into a silent terminal turn", async () => {
@@ -230,11 +343,17 @@ describe("M2 app-owned direct live_v2 runtime", () => {
     const generateDecision = vi.fn<ObservedLiveV2DecisionGenerator["generateDecision"]>(
       async () => ({
         candidate: {
-          version: "granit_model_turn.v1",
-          message: { answerText: finalText, question: null },
+          version: "granit_model_turn.v2",
+          type: "final",
+          result: {
+          version: "granit_model_turn.v2",
+          action: "answer",
+          message: finalText,
+          clarifyingQuestion: null,
           statePatches: [],
           recommendationIds: [],
           handoffIntent: null
+          }
         },
         observation: {
           observedModelProvider: "openai",
@@ -284,8 +403,22 @@ describe("M2 app-owned direct live_v2 runtime", () => {
     const finalText = "Показываю пять найденных вариантов.";
     const generateDecision = vi.fn<ObservedLiveV2DecisionGenerator["generateDecision"]>(
       async (input) => {
-        const recommendationIds = input.catalogCandidates
-          ?.slice(0, 5)
+        if (input.responseMode === "turn_action") {
+          return observed({
+            version: "granit_model_turn.v2",
+            type: "search_catalog",
+            input: {
+              query: "памятники",
+              categories: ["monuments"],
+              material: null,
+              monumentType: null,
+              limit: 8
+            }
+          });
+        }
+
+        const recommendationIds = input.catalogSearch?.candidates
+          .slice(0, 5)
           .map((candidate) => candidate.id);
         if (recommendationIds?.length !== 5) {
           throw new Error("Test catalog candidates are missing");
@@ -293,8 +426,10 @@ describe("M2 app-owned direct live_v2 runtime", () => {
 
         return {
           candidate: {
-            version: "granit_model_turn.v1",
-            message: { answerText: finalText, question: null },
+            version: "granit_model_turn.v2",
+            action: "recommend",
+            message: finalText,
+            clarifyingQuestion: null,
             statePatches: [],
             recommendationIds,
             handoffIntent: null
@@ -345,6 +480,22 @@ describe("M2 app-owned direct live_v2 runtime", () => {
     expect(repository.lastAiSaveInput?.metadata.catalog_references).toHaveLength(3);
   });
 });
+
+function observed(candidate: unknown, runtimeRunId?: string) {
+  return {
+    candidate,
+    observation: {
+      observedModelProvider: "openai" as const,
+      observedModelName: "gpt-5.6-luna",
+      ...(runtimeRunId ? { runtimeRunId } : {}),
+      usage: { inputTokens: 80, outputTokens: 20, totalTokens: 100 }
+    }
+  };
+}
+
+function recommendationIdPattern() {
+  return expect.stringMatching(/^ent_[a-f0-9]{16}$/);
+}
 
 function testJobWorkerOptions() {
   return {

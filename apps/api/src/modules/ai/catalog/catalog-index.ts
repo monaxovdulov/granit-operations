@@ -6,30 +6,8 @@ import {
   PUBLIC_WIDGET_CATALOG_ACTION_LIMIT,
   type WidgetCatalogReference
 } from "../ai-turn.js";
-import type {
-  LiveV2CatalogCandidate,
-  LiveV2TurnView
-} from "../profiles/live-v2/live-v2-contract.js";
 
 export const CATALOG_INDEX_SCHEMA_VERSION = "catalog-index.v1" as const;
-export const CATALOG_CANDIDATE_LIMIT = 8;
-
-const CATEGORY_DOMINANCE_MIN_SHARE = 0.8;
-const CATEGORY_DOMINANCE_MIN_RATIO = 3;
-const RETRIEVAL_QUERY_NOISE_TERMS = new Set([
-  "вариант",
-  "варианты",
-  "есть",
-  "какие",
-  "какой",
-  "нужен",
-  "нужны",
-  "покажи",
-  "показать",
-  "посмотреть",
-  "сравнить",
-  "хочу"
-]);
 
 const slug = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
 const catalogItemSchema = z
@@ -74,6 +52,8 @@ export type CatalogIndexSnapshot = {
     groupSlug: string;
     assetPath: string;
     assetRevision: string;
+    subcategory: string;
+    itemType: string;
     searchTerms: string[];
     material: string[];
   }>;
@@ -116,6 +96,8 @@ export function parseCatalogIndexSnapshot(input: {
       groupSlug: item.group_slug,
       assetPath: item.asset_path,
       assetRevision: item.asset_revision,
+      subcategory: item.subcategory,
+      itemType: item.item_type,
       searchTerms: [...item.search_terms],
       material: [...item.material]
     };
@@ -129,50 +111,6 @@ export function parseCatalogIndexSnapshot(input: {
     contentHash: actualHash,
     items: Object.freeze(items)
   });
-}
-
-export function retrieveCatalogCandidates(
-  snapshot: CatalogIndexSnapshot,
-  turn: LiveV2TurnView
-): LiveV2CatalogCandidate[] {
-  const query = catalogQuery(turn);
-  const productCategory = selectRelevantCategory(snapshot, query.categoryTerms);
-  const materialCategory = selectMaterialCategory(snapshot, query.materialTerms);
-  const category = mergeCategorySelections(productCategory, materialCategory);
-  const categoryItems =
-    category.kind === "selected"
-      ? snapshot.items.filter((item) => item.categorySlug === category.categorySlug)
-      : snapshot.items;
-  const rankingTerms = category.kind === "selected" ? query.combinedTerms : [];
-  const ranked = categoryItems
-    .map((item) => ({ item, score: scoreCatalogItem(item, rankingTerms) }))
-    .sort(
-      (left, right) =>
-        right.score - left.score ||
-        left.item.groupSlug.localeCompare(right.item.groupSlug, "en") ||
-        left.item.id.localeCompare(right.item.id, "en")
-    );
-  const bestScore = ranked[0]?.score ?? 0;
-  const scored = ranked.filter(
-    (entry) => rankingTerms.length === 0 || (bestScore > 0 && entry.score === bestScore)
-  );
-  const source = scored.length
-    ? scored
-    : categoryItems.map((item) => ({ item, score: 0 }));
-  const selected: LiveV2CatalogCandidate[] = [];
-  const representedGroups = new Set<string>();
-  const shouldDiversifyGroups = new Set(source.map((entry) => entry.item.groupSlug)).size > 1;
-
-  for (const entry of source) {
-    if (selected.length >= CATALOG_CANDIDATE_LIMIT) break;
-    if (shouldDiversifyGroups && representedGroups.has(entry.item.groupSlug)) {
-      continue;
-    }
-    representedGroups.add(entry.item.groupSlug);
-    selected.push(toCandidate(entry.item));
-  }
-
-  return selected;
 }
 
 export function buildCatalogReferences(
@@ -197,205 +135,4 @@ export function buildCatalogReferences(
           `#block-${item.groupSlug}`
       };
     });
-}
-
-function catalogQuery(turn: LiveV2TurnView): {
-  categoryTerms: string[];
-  materialTerms: string[];
-  combinedTerms: string[];
-} {
-  const currentMessage = turn.messages.at(-1);
-  const currentTerms = normalizeTerms(
-    currentMessage?.role === "visitor" ? currentMessage.text : ""
-  );
-  const monumentTypeTerms = normalizeTerms(turn.knownSlots.monumentType ?? "");
-  const materialTerms = normalizeTerms(turn.knownSlots.material ?? "");
-  const durableTerms = [...new Set([...monumentTypeTerms, ...materialTerms])];
-
-  return {
-    categoryTerms: [...new Set([...currentTerms, ...monumentTypeTerms])],
-    materialTerms,
-    combinedTerms: [...new Set([...currentTerms, ...durableTerms])].filter(
-      (term) => !RETRIEVAL_QUERY_NOISE_TERMS.has(term)
-    )
-  };
-}
-
-type CategorySelection =
-  | { kind: "selected"; categorySlug: string }
-  | { kind: "mixed"; categorySlugs: string[] }
-  | { kind: "unrecognized" };
-
-function mergeCategorySelections(
-  product: CategorySelection,
-  material: CategorySelection
-): CategorySelection {
-  if (product.kind === "mixed") return product;
-  if (product.kind === "unrecognized") return material;
-  if (material.kind === "unrecognized") return product;
-  if (material.kind === "selected") {
-    return material.categorySlug === product.categorySlug
-      ? product
-      : mixedCategories([product.categorySlug, material.categorySlug]);
-  }
-  return material.categorySlugs.includes(product.categorySlug)
-    ? product
-    : mixedCategories([product.categorySlug, ...material.categorySlugs]);
-}
-
-function selectMaterialCategory(
-  snapshot: CatalogIndexSnapshot,
-  queryTerms: readonly string[]
-): CategorySelection {
-  const categories = new Set<string>();
-
-  for (const item of snapshot.items) {
-    const materialTerms = catalogItemMaterialTerms(item);
-    if (
-      queryTerms.some((query) =>
-        materialTerms.some((candidate) => termsMatch(candidate, query))
-      )
-    ) {
-      categories.add(item.categorySlug);
-    }
-  }
-
-  if (categories.size === 0) return { kind: "unrecognized" };
-  const categorySlugs = [...categories].sort((left, right) =>
-    left.localeCompare(right, "en")
-  );
-  return categorySlugs.length === 1
-    ? { kind: "selected", categorySlug: categorySlugs[0]! }
-    : { kind: "mixed", categorySlugs };
-}
-
-function selectRelevantCategory(
-  snapshot: CatalogIndexSnapshot,
-  queryTerms: readonly string[],
-  itemTerms: (
-    item: CatalogIndexSnapshot["items"][number]
-  ) => string[] = catalogItemTerms
-): CategorySelection {
-  const categoryWinners = new Set<string>();
-  const tiedCategorySets: string[][] = [];
-
-  for (const term of queryTerms) {
-    if (RETRIEVAL_QUERY_NOISE_TERMS.has(term)) continue;
-    const scores = new Map<string, number>();
-
-    for (const item of snapshot.items) {
-      if (!itemTerms(item).some((candidate) => termsMatch(candidate, term))) {
-        continue;
-      }
-      scores.set(item.categorySlug, (scores.get(item.categorySlug) ?? 0) + 1);
-    }
-
-    const ranked = [...scores.entries()].sort(
-      (left, right) => right[1] - left[1] || left[0].localeCompare(right[0], "en")
-    );
-    const bestScore = ranked[0]?.[1];
-    if (!bestScore) continue;
-    const matchedCategories = ranked.map((entry) => entry[0]);
-    const totalScore = ranked.reduce((total, entry) => total + entry[1], 0);
-    const nextScore = ranked[1]?.[1] ?? 0;
-    const isDominantCategory =
-      matchedCategories.length === 1 ||
-      (bestScore / totalScore >= CATEGORY_DOMINANCE_MIN_SHARE &&
-        bestScore >= nextScore * CATEGORY_DOMINANCE_MIN_RATIO);
-
-    if (isDominantCategory) {
-      categoryWinners.add(matchedCategories[0]!);
-    } else {
-      tiedCategorySets.push(matchedCategories);
-    }
-  }
-
-  if (categoryWinners.size > 1) return mixedCategories([...categoryWinners]);
-  const selectedCategory = [...categoryWinners][0];
-  if (!selectedCategory) {
-    return tiedCategorySets.length > 0
-      ? mixedCategories(tiedCategorySets.flat())
-      : { kind: "unrecognized" };
-  }
-  if (tiedCategorySets.some((categories) => !categories.includes(selectedCategory))) {
-    return mixedCategories([selectedCategory, ...tiedCategorySets.flat()]);
-  }
-  return { kind: "selected", categorySlug: selectedCategory };
-}
-
-function mixedCategories(categorySlugs: readonly string[]): CategorySelection {
-  return {
-    kind: "mixed",
-    categorySlugs: [...new Set(categorySlugs)].sort((left, right) =>
-      left.localeCompare(right, "en")
-    )
-  };
-}
-
-function scoreCatalogItem(
-  item: CatalogIndexSnapshot["items"][number],
-  queryTerms: readonly string[]
-): number {
-  const candidateTerms = catalogItemTerms(item);
-  return queryTerms.reduce(
-    (score, term) =>
-      score +
-      (candidateTerms.some((candidate) => termsMatch(candidate, term))
-        ? 1
-        : 0),
-    0
-  );
-}
-
-function catalogItemTerms(
-  item: CatalogIndexSnapshot["items"][number]
-): string[] {
-  return normalizeTerms(
-    [
-      item.title,
-      item.categorySlug,
-      item.groupSlug,
-      ...item.searchTerms,
-      ...item.material
-    ].join(" ")
-  );
-}
-
-function catalogItemMaterialTerms(
-  item: CatalogIndexSnapshot["items"][number]
-): string[] {
-  return normalizeTerms(item.material.join(" "));
-}
-
-function termsMatch(candidate: string, query: string): boolean {
-  return (
-    candidate === query ||
-    (candidate.length >= 5 && query.length >= 5 &&
-      candidate.slice(0, 5) === query.slice(0, 5))
-  );
-}
-
-function normalizeTerms(value: string): string[] {
-  return [
-    ...new Set(
-      value
-        .normalize("NFKC")
-        .toLowerCase()
-        .split(/[^\p{L}\p{N}]+/u)
-        .filter((term) => term.length >= 2 && !["не", "знаю", "пока"].includes(term))
-    )
-  ];
-}
-
-function toCandidate(
-  item: CatalogIndexSnapshot["items"][number]
-): LiveV2CatalogCandidate {
-  return {
-    id: item.id,
-    title: item.title,
-    categorySlug: item.categorySlug,
-    groupSlug: item.groupSlug,
-    searchTerms: [...item.searchTerms],
-    material: [...item.material]
-  };
 }

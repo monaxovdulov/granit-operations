@@ -98,6 +98,9 @@ describe("live_v2 model-safe context", () => {
       emailProvided: false,
       city: "Москва"
     });
+    expect(view.knownSlotProvenance).toEqual({
+      city: { origin: "saved_field", source: "contact" }
+    });
     expect(view.gate).toEqual({
       aiState: "ai_collecting_info",
       agentAllowedToReply: true
@@ -106,6 +109,41 @@ describe("live_v2 model-safe context", () => {
     expect(serialized).not.toContain("https://");
     expect(serialized).not.toContain("Анна");
     expect(serialized).not.toContain("2026-07-14T");
+  });
+
+  it("keeps saved requirements model-safe with source provenance", () => {
+    const turn = buildLiveV2TestTurn();
+    turn.knownRequirements = [
+      {
+        category: "decoration",
+        mode: "avoidance",
+        value: "  без золота  ",
+        source: "manager",
+        sourceMessageId: "00000000-0000-4000-8000-000000000777",
+        evidence: {
+          messageId: "00000000-0000-4000-8000-000000000777",
+          quote: "без золота",
+          start: 0,
+          end: 10
+        },
+        confidence: 1,
+        updatedAt: "2026-07-14T10:00:00.000Z"
+      }
+    ];
+
+    const view = buildLiveV2TurnView(turn);
+    const serialized = JSON.stringify(view);
+
+    expect(view.knownRequirements).toEqual([
+      {
+        category: "decoration",
+        mode: "avoidance",
+        value: "без золота",
+        provenance: { origin: "saved_requirement", source: "manager" }
+      }
+    ]);
+    expect(serialized).not.toContain("00000000-0000-4000-8000-000000000777");
+    expect(serialized).not.toContain("2026-07-14T10:00:00.000Z");
   });
 
   it.each([

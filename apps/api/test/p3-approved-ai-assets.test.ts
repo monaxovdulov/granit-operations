@@ -38,14 +38,14 @@ describe("P3 approved AI assets", () => {
     expect(manifest.liveV2Tone.desired.length).toBeGreaterThan(0);
   });
 
-  it("pins distinct catalog-show policies for generic and known-type requests", () => {
+  it("pins the model-owned bounded catalog-search policy", () => {
     const instructions = MODEL_TURN_PROMPT_ASSET.instructions;
 
     expect(instructions).toContain(
-      "Для общего «покажи» выбери от одной до трёх разнообразных позиций из разных групп; можно задать один короткий вопрос о направлении."
+      "На первом вызове выбери ровно одно: final или search_catalog. На втором вызове после поиска верни только FinalTurnResult."
     );
     expect(instructions).toContain(
-      "Если тип уже известен в knownSlots, выбери от одной до трёх релевантных позиций и не задавай повторный вопрос."
+      "Текущая visitor-реплика имеет приоритет над сохранённым фактом при конфликте. knownSlotProvenance помечает сохранённые поля и их источник. Сам реши, какие явно заданные фильтры передать search_catalog; backend не добавит скрытые фильтры."
     );
   });
 
@@ -88,14 +88,17 @@ describe("P3 approved AI assets", () => {
             async generateDecision() {
               return {
                 candidate: {
-                  version: "granit_model_turn.v1",
-                  message: {
-                    answerText: "Подберу варианты.",
-                    question: { text: "Какой материал вам ближе?", target: "material" }
+                  version: "granit_model_turn.v2",
+                  type: "final",
+                  result: {
+                    version: "granit_model_turn.v2",
+                    action: "clarify",
+                    message: "Подберу варианты.",
+                    clarifyingQuestion: { text: "Какой материал вам ближе?", target: "material" },
+                    statePatches: [],
+                    recommendationIds: [],
+                    handoffIntent: null
                   },
-                  statePatches: [],
-                  recommendationIds: [],
-                  handoffIntent: null
                 },
                 observation: {
                   observedModelProvider: "openai",
@@ -124,7 +127,7 @@ describe("P3 approved AI assets", () => {
       {
         versions: {
           policyVersion: manifest.liveV2.policyVersion,
-          promptVersion: "granit_model_turn_prompt.v3",
+          promptVersion: "granit_model_turn_prompt.v4",
           disclosureVersion: manifest.liveV2.disclosureVersion,
           assetVersion: manifest.liveV2.assetVersion
         }

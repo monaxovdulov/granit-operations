@@ -9,9 +9,9 @@
       "apps/api/src/widget-ai-runtime-assembly.ts"
     ],
     "provider_boundary": "apps/api/src/modules/ai/adapters/openai-live-v2-decision-generator.ts",
-    "source_count": 144,
-    "source_paths_sha256": "5cc8d582f40d07e99c7861a348e2192aa3bb73c2c4743bd20243a892ff55450c",
-    "source_contents_sha256": "633025c1408c71a8d4aa2df95371318ca615a1262a14acd99032b101ff2ad735"
+    "source_count": 145,
+    "source_paths_sha256": "2920e0d785124ba77393c8ceba6b9108aac2d386a005874cf722538367e66ec7",
+    "source_contents_sha256": "f63121248ee679b330c24c3dd4157f27560b46ff2f0a94a5256efd3e83655d3d"
   },
   "documents": {
     "active_goal": "docs/tasks/AI_LAYER_SIMPLIFICATION_GOAL_RU.md",

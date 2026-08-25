@@ -85,7 +85,9 @@ export function buildLiveV2ModelRequest(input: LiveV2GeneratorInput): {
   const serializedInput = JSON.stringify({
     decisionProfile: "live_v2",
     turn: input.turn,
-    catalogCandidates: input.catalogCandidates ?? [],
+    responseMode: input.responseMode ?? "legacy_candidate",
+    ...(input.catalogTool ? { catalogTool: input.catalogTool } : {}),
+    ...(input.catalogSearch ? { catalogSearch: input.catalogSearch } : {}),
     tone: input.assets.tone,
     facts: input.assets.facts
   });

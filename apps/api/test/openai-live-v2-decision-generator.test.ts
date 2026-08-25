@@ -12,7 +12,7 @@ import { MODEL_TURN_PROMPT_ASSET } from "../src/modules/ai/profiles/live-v2/asse
 import { LIVE_V2_TONE_ASSET } from "../src/modules/ai/profiles/live-v2/assets/tone.v1.js";
 import { toLiveV2ModelFactsAsset } from "../src/modules/ai/profiles/live-v2/live-v2-assets.js";
 import { buildLiveV2TurnView } from "../src/modules/ai/profiles/live-v2/live-v2-context.js";
-import { MODEL_TURN_OUTPUT_JSON_SCHEMA } from "../src/modules/ai/profiles/live-v2/model-turn-validator.js";
+import { MODEL_TURN_ACTION_JSON_SCHEMA } from "../src/modules/ai/profiles/live-v2/model-turn-validator.js";
 import {
   TEST_LIVE_V2_FACTS,
   buildLiveV2TestTurn
@@ -95,15 +95,16 @@ describe("CONV-2 direct OpenAI model-turn adapter", () => {
       metadata: {
         channel: "site_widget",
         decision_profile: "live_v2",
-        turn_contract: "granit_model_turn.v1"
+        turn_contract: "granit_model_turn.v2",
+        call_phase: "decision"
       },
       text: {
         verbosity: "low",
         format: {
           type: "json_schema",
-          name: "granit_model_turn",
+          name: "granit_model_turn_action",
           strict: true,
-          schema: MODEL_TURN_OUTPUT_JSON_SCHEMA
+          schema: MODEL_TURN_ACTION_JSON_SCHEMA
         }
       }
     });
@@ -115,8 +116,8 @@ describe("CONV-2 direct OpenAI model-turn adapter", () => {
     expect(serializedInput).not.toContain("00000000-0000-4000-8000-000000000201");
     expect(serializedInput).not.toContain("publicMessageId");
     expect(serializedInput).not.toContain("blobSha");
-    expect(MODEL_TURN_OUTPUT_JSON_SCHEMA.type).toBe("object");
-    expect(MODEL_TURN_OUTPUT_JSON_SCHEMA).not.toHaveProperty("anyOf");
+    expect(MODEL_TURN_ACTION_JSON_SCHEMA.type).toBe("object");
+    expect(MODEL_TURN_ACTION_JSON_SCHEMA).not.toHaveProperty("anyOf");
     expect(LIVE_V2_PROVIDER_TIMEOUT_MS).toBe(15_000);
     expect(result).toEqual({
       candidate,
@@ -385,6 +386,7 @@ function generatorInput() {
         city: "Москва"
       })
     ),
+    responseMode: "turn_action" as const,
     assets: {
       prompt: MODEL_TURN_PROMPT_ASSET,
       tone: LIVE_V2_TONE_ASSET,
@@ -395,14 +397,17 @@ function generatorInput() {
 
 function modelTurnOutput() {
   return {
-    version: "granit_model_turn.v1" as const,
-    message: {
-      answerText: "В каталоге представлены вертикальные памятники.",
-      question: null
-    },
-    statePatches: [],
-    recommendationIds: [],
-    handoffIntent: null
+    version: "granit_model_turn.v2" as const,
+    type: "final" as const,
+    result: {
+      version: "granit_model_turn.v2" as const,
+      action: "answer" as const,
+      message: "В каталоге представлены вертикальные памятники.",
+      clarifyingQuestion: null,
+      statePatches: [],
+      recommendationIds: [],
+      handoffIntent: null
+    }
   };
 }
 

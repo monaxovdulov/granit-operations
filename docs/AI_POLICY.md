@@ -16,18 +16,27 @@ Production enablement still requires separate manual owner approval.
 3. Authoritative conversation state is read after claim. The model receives a
    bounded view with the current inbound, recent safe messages, known slots and
    approved static facts.
-4. One structured model call returns `granit_model_turn.v1`: answer text, an
-   optional separate question, evidence-backed state patches, recommendation
-   IDs and an optional bounded handoff intent.
-5. App-owned validation checks strict shape, patch evidence and action
-   consistency. It may remove an exact duplicated or already answered question
-   without another model call. A current turn is rejected only when the output
-   shape is invalid, no text remains after allowed repair, or handoff and a
-   question conflict.
-6. After canonical text and SHA-256 are fixed, the repository rechecks the
+4. The main model returns a typed `granit_model_turn.v2` action. It either
+   finishes the turn or requests the single read-only `search_catalog` tool.
+   The backend does not infer a category from visitor keywords.
+5. A catalog request is bounded to eight published candidates without URLs. The
+   same model receives those candidates in one final call. A turn therefore has
+   at most one catalog search and two model calls, with no autonomous tool loop.
+6. App-owned validation checks strict shape, patch evidence, final-action
+   consistency and recommendation membership. It may remove an exact duplicated
+   or already answered question without another model call. Unknown, duplicate,
+   unpublished or non-current candidate IDs cannot become public actions.
+7. The server caps the final result at three recommendations and builds every
+   catalog URL/button from the pinned snapshot; the model never receives or
+   creates a URL.
+8. After canonical text and SHA-256 are fixed, the repository rechecks the
    send gate, epoch, latest sequence and lease, then atomically commits the
    reply, state updates, handoff, winning attempt, run and job.
-7. Only a committed outbound message can appear in `site_widget.history.v2`.
+9. Only a committed outbound message can appear in `site_widget.history.v2`.
+
+Malformed model actions, a repeated tool request, an unavailable catalog or a
+tool timeout end the current bounded trajectory through a safe text-only answer.
+They do not start another search or fabricate a catalog card.
 
 The live validator does not use keyword or semantic regex to decide whether
 free Russian prose is a price promise, deadline, legal statement, bad tone or
@@ -43,12 +52,15 @@ remain separate owner gates.
 ## Knowledge and recommendations
 
 - The current production model receives the small approved static facts asset.
-- Production catalog retrieval is not connected yet.
-- Any non-empty `recommendationIds` list is currently dropped; no model-supplied
-  identifier becomes a public catalog action.
-- The active catalog OneShot adds server-side published retrieval before the same
-  single model call. The server will validate candidate membership, stable IDs,
-  revisions and published status, then build URLs/actions itself.
+- The pinned catalog snapshot is searched by a typed, deterministic, read-only
+  tool after the main model requests it.
+- Search applies only explicit model-provided structured filters and one generic
+  lexical ranking over catalog fields/search terms. There is no keyword router,
+  forced single category, prefix stemmer or category-dominance threshold.
+- Candidate data sent to the model is limited to verified selection fields and
+  excludes URLs, paths, unpublished records and unrestricted metadata.
+- The server validates current-result membership, stable IDs and published
+  snapshot ownership before building URLs/actions itself.
 - Missing or invalid retrieval must leave a safe text-only turn; it must not
   create a fabricated link or automatic manager handoff.
 
@@ -58,6 +70,10 @@ remain separate owner gates.
   requirements and memory after a job is claimed.
 - The model-safe view is bounded and excludes internal IDs, timestamps, URLs,
   contact values and unrestricted metadata.
+- Important saved business slots include model-safe provenance, while the
+  current visitor message remains visible and has prompt-level priority over a
+  conflicting saved value. The backend does not silently add saved values as
+  hard search filters.
 - Slot and requirement patches apply only when their value is supported by a
   unique exact quote from the current visitor message.
 - Manager-authored values cannot be silently overwritten.
@@ -81,6 +97,10 @@ remain separate owner gates.
 
 - App-owned logical runs, physical attempts, spans and quality events are the
   operational source of truth.
+- Model-call and catalog-tool spans record bounded latency and failure status.
+  Safe message metadata records call count, selected action, search status,
+  typed filter presence/categories/limit, a query hash, candidate IDs and final
+  recommendation IDs. Raw search text and hidden reasoning are not persisted.
 - Terminal validator evidence may retain only an allowlisted historical code;
   raw prompts, model output, customer traces, provider errors and PII are not
   added to manager/public observability.

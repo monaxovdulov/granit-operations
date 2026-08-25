@@ -3,8 +3,10 @@ import {
   DIRECT_LIVE_V2_OPENAI_REASONING_EFFORT
 } from "../../../config.js";
 import {
-  MODEL_TURN_OUTPUT_JSON_SCHEMA
+  FINAL_TURN_RESULT_JSON_SCHEMA,
+  MODEL_TURN_ACTION_JSON_SCHEMA
 } from "../profiles/live-v2/model-turn-validator.js";
+import { LIVE_V2_PROVIDER_CANDIDATE_JSON_SCHEMA } from "../profiles/live-v2/live-v2-validator.js";
 import type { LiveV2GeneratorInput } from "../profiles/live-v2/live-v2-orchestrator.js";
 import {
   LIVE_V2_MAX_OUTPUT_TOKENS,
@@ -67,18 +69,20 @@ export class OpenAiLiveV2DecisionGenerator implements ObservedLiveV2DecisionGene
       }
 
       const modelRequest = buildLiveV2ModelRequest(input);
+      const responseContract = selectResponseContract(input.responseMode);
       const response = await this.requestClient({
         apiKey: this.options.apiKey,
         model: this.options.model,
         timeoutMs: this.options.timeoutMs ?? LIVE_V2_PROVIDER_TIMEOUT_MS,
         instructions: modelRequest.instructions,
         input: modelRequest.serializedInput,
-        formatName: "granit_model_turn",
-        schema: MODEL_TURN_OUTPUT_JSON_SCHEMA,
+        formatName: responseContract.formatName,
+        schema: responseContract.schema,
         metadata: {
           channel: "site_widget",
           decision_profile: "live_v2",
-          turn_contract: "granit_model_turn.v1"
+          turn_contract: "granit_model_turn.v2",
+          call_phase: responseContract.callPhase
         },
         maxOutputTokens: LIVE_V2_MAX_OUTPUT_TOKENS,
         reasoningEffort: DIRECT_LIVE_V2_OPENAI_REASONING_EFFORT,
@@ -139,4 +143,32 @@ export class OpenAiLiveV2DecisionGenerator implements ObservedLiveV2DecisionGene
       throw new LiveV2GenerationError(undefined, category);
     }
   }
+}
+
+function selectResponseContract(
+  responseMode: LiveV2GeneratorInput["responseMode"]
+): {
+  formatName: string;
+  schema: Record<string, unknown>;
+  callPhase: string;
+} {
+  if (responseMode === "legacy_candidate") {
+    return {
+      formatName: "granit_live_v2_candidate",
+      schema: LIVE_V2_PROVIDER_CANDIDATE_JSON_SCHEMA,
+      callPhase: "legacy_candidate"
+    };
+  }
+  if (responseMode === "final_result") {
+    return {
+      formatName: "granit_final_turn_result",
+      schema: FINAL_TURN_RESULT_JSON_SCHEMA,
+      callPhase: "final"
+    };
+  }
+  return {
+    formatName: "granit_model_turn_action",
+    schema: MODEL_TURN_ACTION_JSON_SCHEMA,
+    callPhase: "decision"
+  };
 }

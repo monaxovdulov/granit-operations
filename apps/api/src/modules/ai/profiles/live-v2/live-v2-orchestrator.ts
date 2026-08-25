@@ -12,18 +12,35 @@ import {
 } from "./live-v2-apply-plan.js";
 import { buildLiveV2TurnView } from "./live-v2-context.js";
 import type {
-  LiveV2CatalogCandidate,
   LiveV2Gate,
   LiveV2TurnView,
   LiveV2ValidationResult
 } from "./live-v2-contract.js";
+import type {
+  CatalogCategory,
+  CatalogSearchCandidate,
+  NormalizedCatalogSearchInput
+} from "../../catalog/catalog-search-tool.js";
 import { validateLiveV2Candidate } from "./live-v2-validator.js";
 import { LIVE_V2_PROMPT_ASSET } from "./assets/prompt.v1.js";
 import { LIVE_V2_TONE_ASSET } from "./assets/tone.v1.js";
 
 export type LiveV2GeneratorInput = {
   turn: LiveV2TurnView;
-  catalogCandidates?: LiveV2CatalogCandidate[];
+  responseMode?: "legacy_candidate" | "turn_action" | "final_result";
+  catalogTool?: {
+    name: "search_catalog";
+    maxResults: 8;
+    categories: ReadonlyArray<{
+      category: CatalogCategory;
+      description: string;
+    }>;
+  };
+  catalogSearch?: {
+    status: "succeeded" | "empty" | "failed" | "timed_out";
+    input: NormalizedCatalogSearchInput;
+    candidates: readonly CatalogSearchCandidate[];
+  };
   assets: {
     prompt: {
       version: string;
@@ -134,6 +151,7 @@ export async function executeLiveV2Turn(input: {
   try {
     rawCandidate = await input.generator.generateDecision({
       turn: turnView,
+      responseMode: "legacy_candidate",
       assets: {
         prompt: LIVE_V2_PROMPT_ASSET,
         tone: LIVE_V2_TONE_ASSET,

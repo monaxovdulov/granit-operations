@@ -2,13 +2,13 @@ import { sha256Hex } from "@granit/shared";
 import { describe, expect, it } from "vitest";
 
 import { MODEL_TURN_TERMINAL_VALIDATION_CODES } from "../src/modules/ai/profiles/live-v2/model-turn-contract.js";
-import { validateModelTurnOutput } from "../src/modules/ai/profiles/live-v2/model-turn-validator.js";
+import { validateFinalTurnResult } from "../src/modules/ai/profiles/live-v2/model-turn-validator.js";
 import { buildLiveV2TestTurn, contextMessage } from "./fixtures/live-v2-synthetic.v1.js";
 
-describe("CONV-2 granit_model_turn.v1 validation", () => {
+describe("granit_model_turn.v2 final validation", () => {
   it("composes one canonical answer, hashes it and leaves it immutable", () => {
-    const result = validateModelTurnOutput({
-      value: output({ answerText: "  Подберём спокойный вариант.  " }),
+    const result = validateFinalTurnResult({
+      value: output({ message: "  Подберём спокойный вариант.  " }),
       turnInput: buildLiveV2TestTurn()
     });
 
@@ -26,10 +26,10 @@ describe("CONV-2 granit_model_turn.v1 validation", () => {
   });
 
   it("composes the separate question exactly once and performs one structural suffix repair", () => {
-    const result = validateModelTurnOutput({
+    const result = validateFinalTurnResult({
       value: output({
-        answerText: "Подберём вариант. Какой материал рассматриваете?",
-        question: { text: "Какой материал рассматриваете?", target: "material" }
+        message: "Подберём вариант. Какой материал рассматриваете?",
+        clarifyingQuestion: { text: "Какой материал рассматриваете?", target: "material" }
       }),
       turnInput: buildLiveV2TestTurn()
     });
@@ -45,9 +45,9 @@ describe("CONV-2 granit_model_turn.v1 validation", () => {
   });
 
   it("drops a known-slot question and does not infer claim safety from prose", () => {
-    const repaired = validateModelTurnOutput({
+    const repaired = validateFinalTurnResult({
       value: output({
-        question: { text: "В каком городе нужна установка?", target: "city" }
+        clarifyingQuestion: { text: "В каком городе нужна установка?", target: "city" }
       }),
       turnInput: buildLiveV2TestTurn({ city: "Москва" })
     });
@@ -57,12 +57,12 @@ describe("CONV-2 granit_model_turn.v1 validation", () => {
       plan: {
         action: "answer",
         finalText: "Подберём подходящий вариант.",
-        validationResults: ["known_slot_requested"]
+        validationResults: ["known_slot_requested", "action_repaired"]
       }
     });
 
-    const unclassifiedProse = validateModelTurnOutput({
-      value: output({ answerText: "Сделаем за три дня." }),
+    const unclassifiedProse = validateFinalTurnResult({
+      value: output({ message: "Сделаем за три дня." }),
       turnInput: buildLiveV2TestTurn()
     });
 
@@ -80,7 +80,7 @@ describe("CONV-2 granit_model_turn.v1 validation", () => {
     const turnInput = buildLiveV2TestTurn({
       inbound: "Нужен чёрный гранит, без золотого оформления"
     });
-    const result = validateModelTurnOutput({
+    const result = validateFinalTurnResult({
       value: output({
         statePatches: [
           {
@@ -132,7 +132,7 @@ describe("CONV-2 granit_model_turn.v1 validation", () => {
       confidence: 0.8,
       evidence: { quote: "гранит" }
     };
-    const result = validateModelTurnOutput({
+    const result = validateFinalTurnResult({
       value: output({
         statePatches: [patch, patch],
         recommendationIds: ["ent_9999999999999999"]
@@ -154,14 +154,15 @@ describe("CONV-2 granit_model_turn.v1 validation", () => {
         validationResults: [
           "invalid_patch_evidence",
           "duplicate_patch",
-          "unsupported_recommendation"
+          "unsupported_recommendation",
+          "action_repaired"
         ]
       }
     });
   });
 
   it("drops a patch whose value is not supported by its quote", () => {
-    const result = validateModelTurnOutput({
+    const result = validateFinalTurnResult({
       value: output({
         statePatches: [
           {
@@ -186,9 +187,9 @@ describe("CONV-2 granit_model_turn.v1 validation", () => {
   });
 
   it("keeps a same-turn patch while dropping its redundant question", () => {
-    const result = validateModelTurnOutput({
+    const result = validateFinalTurnResult({
       value: output({
-        question: { text: "Какой материал рассматриваете?", target: "material" },
+        clarifyingQuestion: { text: "Какой материал рассматриваете?", target: "material" },
         statePatches: [
           {
             operation: "set_slot",
@@ -208,13 +209,13 @@ describe("CONV-2 granit_model_turn.v1 validation", () => {
         action: "answer",
         finalText: "Подберём подходящий вариант.",
         appliedPatches: [{ name: "material", value: "чёрный гранит" }],
-        validationResults: ["known_slot_requested"]
+        validationResults: ["known_slot_requested", "action_repaired"]
       }
     });
   });
 
   it("derives the bounded manager handoff action and forbids a simultaneous question", () => {
-    const result = validateModelTurnOutput({
+    const result = validateFinalTurnResult({
       value: output({ handoffReason: "customer_wants_final_quote" }),
       turnInput: buildLiveV2TestTurn()
     });
@@ -235,29 +236,29 @@ describe("CONV-2 granit_model_turn.v1 validation", () => {
     });
 
     expect(
-      validateModelTurnOutput({
+      validateFinalTurnResult({
         value: output({
           handoffReason: "customer_requested_manager",
-          question: { text: "Какой материал рассматриваете?", target: "material" }
+          clarifyingQuestion: { text: "Какой материал рассматриваете?", target: "material" }
         }),
         turnInput: buildLiveV2TestTurn()
       })
     ).toEqual({ ok: false, code: "invalid_question" });
   });
 
-  it("does not block repeated or stylistically weak prose in the live validator", () => {
+  it("does not block repeated prose but keeps questions out of message", () => {
     const previous = contextMessage({
       id: 91,
       role: "assistant",
       text: "Подберём подходящий вариант."
     });
-    const repeated = validateModelTurnOutput({
+    const repeated = validateFinalTurnResult({
       value: output(),
       turnInput: buildLiveV2TestTurn({ previousMessagesNewestFirst: [previous] })
     });
-    const weakTone = validateModelTurnOutput({
+    const weakTone = validateFinalTurnResult({
       value: output({
-        answerText: "Искренне сочувствую. Оставьте ваш телефон. Что покажем?"
+        message: "Искренне сочувствую. Оставьте ваш телефон. Что покажем?"
       }),
       turnInput: buildLiveV2TestTurn()
     });
@@ -266,34 +267,43 @@ describe("CONV-2 granit_model_turn.v1 validation", () => {
       ok: true,
       plan: { finalText: "Подберём подходящий вариант.", validationResults: [] }
     });
-    expect(weakTone).toMatchObject({
-      ok: true,
-      plan: {
-        finalText: "Искренне сочувствую. Оставьте ваш телефон. Что покажем?",
-        validationResults: []
-      }
-    });
+    expect(weakTone).toEqual({ ok: false, code: "invalid_question" });
+  });
+
+  it("allows at most one question in clarifyingQuestion text", () => {
+    expect(
+      validateFinalTurnResult({
+        value: output({
+          clarifyingQuestion: {
+            text: "Какой материал? Какой размер？",
+            target: "material"
+          }
+        }),
+        turnInput: buildLiveV2TestTurn()
+      })
+    ).toEqual({ ok: false, code: "invalid_question" });
   });
 
   it("keeps the current hard allowlist structural", () => {
     expect(MODEL_TURN_TERMINAL_VALIDATION_CODES).toEqual([
       "invalid_shape",
       "invalid_answer",
-      "invalid_question"
+      "invalid_question",
+      "invalid_action"
     ]);
 
     expect(
-      validateModelTurnOutput({
+      validateFinalTurnResult({
         value: { version: "wrong" },
         turnInput: buildLiveV2TestTurn()
       })
     ).toEqual({ ok: false, code: "invalid_shape" });
 
     expect(
-      validateModelTurnOutput({
+      validateFinalTurnResult({
         value: output({
-          answerText: "В каком городе нужна установка?",
-          question: { text: "В каком городе нужна установка?", target: "city" }
+          message: "В каком городе нужна установка?",
+          clarifyingQuestion: { text: "В каком городе нужна установка?", target: "city" }
         }),
         turnInput: buildLiveV2TestTurn({ city: "Москва" })
       })
@@ -301,11 +311,11 @@ describe("CONV-2 granit_model_turn.v1 validation", () => {
   });
 
   it("drops only an optional question when canonical text would exceed the limit", () => {
-    const answerText = "а".repeat(890);
-    const result = validateModelTurnOutput({
+    const message = "а".repeat(890);
+    const result = validateFinalTurnResult({
       value: output({
-        answerText,
-        question: { text: "Какой материал рассматриваете?", target: "material" }
+        message,
+        clarifyingQuestion: { text: "Какой материал рассматриваете?", target: "material" }
       }),
       turnInput: buildLiveV2TestTurn()
     });
@@ -314,16 +324,16 @@ describe("CONV-2 granit_model_turn.v1 validation", () => {
       ok: true,
       plan: {
         action: "answer",
-        finalText: answerText,
-        validationResults: ["question_dropped_for_length"]
+        finalText: message,
+        validationResults: ["question_dropped_for_length", "action_repaired"]
       }
     });
   });
 });
 
 function output(input: {
-  answerText?: string;
-  question?: { text: string; target: "material" | "city" } | null;
+  message?: string;
+  clarifyingQuestion?: { text: string; target: "material" | "city" } | null;
   statePatches?: unknown[];
   recommendationIds?: string[];
   handoffReason?:
@@ -331,14 +341,22 @@ function output(input: {
     | "customer_wants_final_quote"
     | "customer_ready_to_order";
 } = {}) {
+  const clarifyingQuestion = input.clarifyingQuestion ?? null;
+  const recommendationIds = input.recommendationIds ?? [];
+  const action = recommendationIds.length > 0
+    ? clarifyingQuestion
+      ? "recommend_and_clarify"
+      : "recommend"
+    : clarifyingQuestion
+      ? "clarify"
+      : "answer";
   return {
-    version: "granit_model_turn.v1",
-    message: {
-      answerText: input.answerText ?? "Подберём подходящий вариант.",
-      question: input.question ?? null
-    },
+    version: "granit_model_turn.v2",
+    action,
+    message: input.message ?? "Подберём подходящий вариант.",
+    clarifyingQuestion,
     statePatches: input.statePatches ?? [],
-    recommendationIds: input.recommendationIds ?? [],
+    recommendationIds,
     handoffIntent: input.handoffReason ? { reason: input.handoffReason } : null
   };
 }

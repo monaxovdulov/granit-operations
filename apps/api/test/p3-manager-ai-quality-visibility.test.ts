@@ -65,6 +65,9 @@ describe("P3 protected manager AI quality visibility", () => {
       }
     });
     await waitForTerminalHistory(app, intakeResponse.json().public_session_id);
+    expect(repository.lastAiSaveInput?.body).toContain(
+      "не удалось подготовить точный подбор"
+    );
 
     const leadId = repository.onlyLead().leadId;
     const unauthenticated = await app.inject({
@@ -87,7 +90,7 @@ describe("P3 protected manager AI quality visibility", () => {
       eventType: "runtime_failure",
       reasonCode: "runtime_failed",
       severity: "critical",
-      runStatus: "fallback_unavailable",
+      runStatus: "persisted",
       createdAt: expect.any(String)
     });
     expect(Object.keys(quality).sort()).toEqual([
@@ -214,7 +217,7 @@ postgresDescribe("P3 PostgreSQL latest unresolved AI quality selection", () => {
       eventType: "runtime_failure",
       reasonCode: "runtime_failed",
       severity: "critical",
-      runStatus: "fallback_unavailable",
+      runStatus: "persisted",
       createdAt: openCreatedAt.toISOString()
     });
   });

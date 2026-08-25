@@ -2,9 +2,12 @@ import type { AiTurnContextMessage, AiTurnInput } from "../../ai-turn.js";
 import {
   LIVE_V2_CONTEXT_MAX_CHARACTERS,
   LIVE_V2_CONTEXT_MAX_MESSAGES,
+  LIVE_V2_KNOWN_REQUIREMENTS_MAX_ITEMS,
   LIVE_V2_LAST_AI_QUESTION_MAX_CHARACTERS,
   LIVE_V2_TURN_VIEW_VERSION,
   type LiveV2KnownSlots,
+  type LiveV2KnownRequirement,
+  type LiveV2KnownSlotProvenance,
   type LiveV2TurnView,
   type LiveV2TurnViewMessage
 } from "./live-v2-contract.js";
@@ -59,16 +62,65 @@ export function buildLiveV2TurnView(input: AiTurnInput): LiveV2TurnView {
     }
   ];
 
+  const knownSlots = buildKnownSlots(input);
   return {
     version: LIVE_V2_TURN_VIEW_VERSION,
     messages,
     lastAiQuestion: findLastAiQuestion(selectedPrevious),
-    knownSlots: buildKnownSlots(input),
+    knownSlots,
+    knownSlotProvenance: buildKnownSlotProvenance(input, knownSlots),
+    knownRequirements: buildKnownRequirements(input),
     gate: {
       aiState: input.gateSnapshot.aiState,
       agentAllowedToReply: input.gateSnapshot.agentAllowedToReply
     }
   };
+}
+
+function buildKnownRequirements(input: AiTurnInput): LiveV2KnownRequirement[] {
+  return input.knownRequirements
+    .slice(0, LIVE_V2_KNOWN_REQUIREMENTS_MAX_ITEMS)
+    .flatMap((requirement) => {
+      const value = modelSafeTextValue(requirement.value);
+      if (!value) return [];
+
+      return [
+        {
+          category: requirement.category,
+          mode: requirement.mode,
+          value,
+          provenance: {
+            origin: "saved_requirement" as const,
+            source: requirement.source
+          }
+        }
+      ];
+    });
+}
+
+function buildKnownSlotProvenance(
+  input: AiTurnInput,
+  knownSlots: LiveV2KnownSlots
+): LiveV2KnownSlotProvenance {
+  const result: LiveV2KnownSlotProvenance = {};
+  const names = [
+    "monumentType",
+    "material",
+    "size",
+    "city",
+    "cemetery",
+    "installation",
+    "desiredTiming"
+  ] as const;
+
+  for (const name of names) {
+    const saved = input.knownSlots.values[name];
+    if (knownSlots[name] && saved) {
+      result[name] = { origin: "saved_field", source: saved.source };
+    }
+  }
+
+  return result;
 }
 
 function toTurnViewMessage(message: AiTurnContextMessage): LiveV2TurnViewMessage {
@@ -167,14 +219,20 @@ function modelSafeBusinessSlot<
     | "desiredTiming"
 >(name: Name, value: string | undefined): Partial<Record<Name, string>> {
   const normalized = value?.normalize("NFKC").trim().replace(/\s+/gu, " ");
+  if (!modelSafeTextValue(normalized)) return {};
+  return { [name]: normalized } as Partial<Record<Name, string>>;
+}
+
+function modelSafeTextValue(value: string | undefined): string | undefined {
+  const normalized = value?.normalize("NFKC").trim().replace(/\s+/gu, " ");
   if (
     !normalized ||
     normalized.length > 240 ||
     /(?:@|https?:\/\/|\+?\d[\d\s()\-]{6,}\d)/iu.test(normalized)
   ) {
-    return {};
+    return undefined;
   }
-  return { [name]: normalized } as Partial<Record<Name, string>>;
+  return normalized;
 }
 
 function toModelSafeCity(value: string | undefined): string | undefined {

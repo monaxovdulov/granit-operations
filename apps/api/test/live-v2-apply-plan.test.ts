@@ -144,6 +144,7 @@ describe("live_v2 provider-neutral orchestration", () => {
 
     expect(Object.keys(generatorInput.turn).sort()).toEqual([
       "gate",
+      "knownSlotProvenance",
       "knownSlots",
       "lastAiQuestion",
       "messages",

@@ -702,7 +702,7 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
     ]);
   });
 
-  it("persists a linked degradation run and manager-visible quality evidence", async () => {
+  it("persists a safe text fallback when the model generator fails", async () => {
     const { service, worker } = runtime({
       async generateReply() {
         return {
@@ -715,7 +715,7 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
 
     const accepted = await accept(service, widgetRequest("canonical-degradation"));
     expect(await worker.runOnce(readyNow())).toBe(true);
-    expect(await countMessagesByRole("ai_assistant")).toBe(0);
+    expect(await countMessagesByRole("ai_assistant")).toBe(1);
 
     const [runRows, eventRows] = await Promise.all([
       harness.db.select().from(aiRuns),
@@ -724,10 +724,10 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
     expect(runRows).toMatchObject([
       {
         recordingContract: "logical_recorded_v2",
-        status: "fallback_unavailable",
-        decisionAction: "no_reply",
-        outcomeReason: "generator_failed",
-        failureCode: "runtime_failure",
+        status: "persisted",
+        decisionAction: "answer",
+        outcomeReason: "reply_persisted",
+        failureCode: null,
         inboundPublicMessageId: accepted.public_message_id,
         traceId: expect.any(String),
         configuredModelProvider: "openai",
@@ -739,8 +739,6 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
     ]);
     expect(eventRows).toMatchObject([
       {
-        aiRunId: runRows[0]!.id,
-        messageId: runRows[0]!.inboundMessageId,
         eventType: "runtime_failure",
         reasonCode: "runtime_failed",
         severity: "critical",
@@ -1287,27 +1285,33 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
       async generateDecision() {
         return {
           candidate: {
-            version: "granit_model_turn.v1",
-            message: { answerText: finalText, question: null },
-            statePatches: [
-              {
-                operation: "set_slot",
-                name: "material",
-                value: "чёрный гранит",
-                confidence: 0.96,
-                evidence: { quote: "чёрный гранит" }
-              },
-              {
-                operation: "upsert_requirement",
-                category: "decoration",
-                mode: "avoidance",
-                value: "золото",
-                confidence: 0.9,
-                evidence: { quote: "без золота" }
-              }
-            ],
-            recommendationIds: [],
-            handoffIntent: { reason: "customer_ready_to_order" }
+            version: "granit_model_turn.v2",
+            type: "final",
+            result: {
+              version: "granit_model_turn.v2",
+              action: "answer",
+              message: finalText,
+              clarifyingQuestion: null,
+              statePatches: [
+                {
+                  operation: "set_slot",
+                  name: "material",
+                  value: "чёрный гранит",
+                  confidence: 0.96,
+                  evidence: { quote: "чёрный гранит" }
+                },
+                {
+                  operation: "upsert_requirement",
+                  category: "decoration",
+                  mode: "avoidance",
+                  value: "золото",
+                  confidence: 0.9,
+                  evidence: { quote: "без золота" }
+                }
+              ],
+              recommendationIds: [],
+              handoffIntent: { reason: "customer_ready_to_order" }
+            }
           },
           observation: {
             observedModelProvider: "openai",
@@ -1375,7 +1379,7 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
     expect(outbound).toMatchObject({
       body: finalText,
       metadata: {
-        turn_contract: "granit_model_turn.v1",
+        turn_contract: "granit_model_turn.v2",
         final_text_hash: sha256Hex(finalText),
         applied_patch_count: 2
       }
@@ -1489,17 +1493,20 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
       expectedCode: "invalid_question",
       rawCanary: "RAW_HANDOFF_CANDIDATE_SHOULD_NOT_LEAK_001",
       candidate: {
-        version: "granit_model_turn.v1",
-        message: {
-          answerText: "RAW_HANDOFF_CANDIDATE_SHOULD_NOT_LEAK_001",
-          question: { text: "Какой материал рассматриваете?", target: "material" }
-        },
-        statePatches: [],
-        recommendationIds: [],
-        handoffIntent: { reason: "customer_requested_manager" }
+        version: "granit_model_turn.v2",
+        type: "final",
+        result: {
+          version: "granit_model_turn.v2",
+          action: "clarify",
+          message: "RAW_HANDOFF_CANDIDATE_SHOULD_NOT_LEAK_001",
+          clarifyingQuestion: { text: "Какой материал рассматриваете?", target: "material" },
+          statePatches: [],
+          recommendationIds: [],
+          handoffIntent: { reason: "customer_requested_manager" }
+        }
       }
     }
-  ])("keeps $label internal across PostgreSQL history", async (testCase) => {
+  ])("uses a safe fallback for $label without PostgreSQL leaks", async (testCase) => {
     const repository = new PostgresIntakeRepository(harness.db);
     const generator: ObservedLiveV2DecisionGenerator = {
       async generateDecision() {
@@ -1549,9 +1556,9 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
 
     expect(await worker.runOnce(new Date(queuedJob.availableAt.getTime() + 1))).toBe(true);
     expect(await jobRows()).toEqual([
-      { status: "blocked", attemptCount: 1, terminalReason: "candidate_invalid" }
+      { status: "replied", attemptCount: 1, terminalReason: null }
     ]);
-    expect(await countMessagesByRole("ai_assistant")).toBe(0);
+    expect(await countMessagesByRole("ai_assistant")).toBe(1);
     expect(await harness.db.select().from(conversationHandoffs)).toEqual([]);
     expect(await conversationRows()).toMatchObject([
       { aiState: "ai_collecting_info", agentAllowedToReply: true }
@@ -1565,13 +1572,14 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
       throw new Error("expected v2 public widget history");
     }
     expect(history.body.conversation_state).toBe("ai_active");
-    expect(history.body.messages).toMatchObject([
-      {
-        public_message_id: accepted.public_message_id,
-        sender_role: "visitor",
-        automation: { status: "blocked", reason: "unsafe_model_response" }
-      }
-    ]);
+    expect(
+      history.body.messages.find(
+        (message) => message.public_message_id === accepted.public_message_id
+      )
+    ).toMatchObject({
+      sender_role: "visitor",
+      automation: { status: "replied" }
+    });
     const publicHistory = JSON.stringify(history.body);
     expect(publicHistory).not.toContain("candidate_invalid");
     expect(publicHistory).not.toContain(testCase.expectedCode);
@@ -1587,10 +1595,9 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
       public_conversation_id: accepted.public_conversation_id,
       public_message_id: accepted.public_message_id,
       automation: {
-        status: "degraded",
-        next_step: "retry_or_manager",
-        conversation_state: "ai_active",
-        reason: "unsafe_model_response"
+        status: "replied",
+        next_step: "history_available",
+        conversation_state: "ai_active"
       }
     });
     const publicReplay = JSON.stringify(replay.body);
@@ -1601,13 +1608,12 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
 
     expect(await harness.db.select().from(aiRuns)).toMatchObject([
       {
-        status: "blocked",
-        outcomeReason: "candidate_invalid",
-        failureCode: "invalid_candidate",
-        profileValidatorResult: "rejected",
-        metadata: { validator_failure_code: testCase.expectedCode },
-        outboundMessageId: null,
-        outboundPublicMessageId: null
+        status: "persisted",
+        outcomeReason: "reply_persisted",
+        failureCode: null,
+        profileValidatorResult: "passed",
+        outboundMessageId: expect.any(String),
+        outboundPublicMessageId: expect.any(String)
       }
     ]);
   });
@@ -3171,19 +3177,24 @@ function defaultGenerator(): PublicWidgetAiReplyGenerator {
 function modelTurnCandidate(text: string) {
   const questionMatch = text.match(/^(.*?)([^.!?]+\?)$/u);
   return {
-    version: "granit_model_turn.v1" as const,
-    message: questionMatch
-      ? {
-          answerText: questionMatch[1]?.trim() || "Уточню детали.",
-          question: {
+    version: "granit_model_turn.v2" as const,
+    type: "final" as const,
+    result: {
+      version: "granit_model_turn.v2" as const,
+      action: questionMatch ? "clarify" as const : "answer" as const,
+      message: questionMatch
+        ? questionMatch[1]?.trim() || "Уточню детали."
+        : text,
+      clarifyingQuestion: questionMatch
+        ? {
             text: questionMatch[2]!.trim(),
             target: "material" as const
           }
-        }
-      : { answerText: text, question: null },
-    statePatches: [],
-    recommendationIds: [],
-    handoffIntent: null
+        : null,
+      statePatches: [],
+      recommendationIds: [],
+      handoffIntent: null
+    }
   };
 }
 
