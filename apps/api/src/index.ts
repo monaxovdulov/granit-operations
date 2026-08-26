@@ -8,6 +8,7 @@ import { PostgresAiRunRepository } from "./modules/ai/repositories/postgres-ai-r
 import { PostgresManagerAuthRepository } from "./modules/auth/repositories/postgres-manager-auth-repository.js";
 import { PostgresIntakeRepository } from "./modules/conversations/repositories/postgres-intake-repository.js";
 import { buildConfiguredWidgetAiAssembly } from "./widget-ai-runtime-assembly.js";
+import { buildOperationsReleaseMetadata } from "./release-metadata.js";
 
 setDefaultResultOrder("ipv4first");
 
@@ -38,6 +39,7 @@ const app = buildApi({
   widgetAi,
   publicIntakeCors: config.publicIntakeCors,
   telegramBot: config.telegramBot,
+  release: buildOperationsReleaseMetadata(config.operationsReleaseSha),
   managerAuth: config.managerAuth
     ? {
         repository: managerAuthRepository,

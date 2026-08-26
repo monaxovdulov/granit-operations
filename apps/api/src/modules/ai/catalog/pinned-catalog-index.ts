@@ -8,9 +8,10 @@ import {
 export const PINNED_CATALOG_SOURCE_REPOSITORY =
   "monaxovdulov/landing-granit-static" as const;
 export const PINNED_CATALOG_SOURCE_BASE_SHA =
-  "9d1710867b53323cbd9b99d6642541c7ddd4ec77" as const;
+  "7ad23165eb18dbbbf8953d8242aaae90c0f5e888" as const;
+export const PINNED_CATALOG_VERSION = "landing-catalog.34e6b5f78a6e" as const;
 export const PINNED_CATALOG_CONTENT_HASH =
-  "94038ef1954ce38691d3bc85b3f658c1d9ad1bfc7a428037d66b26f07d87d22b" as const;
+  "73086e6635f56a841df31552ef402caf2d2ac960d1e0d3f24f6aaae04139b710" as const;
 
 export async function loadPinnedCatalogIndex(): Promise<CatalogIndexSnapshot> {
   const content = await readFile(

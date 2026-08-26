@@ -13,6 +13,7 @@ import { registerPublicIntakeRoutes } from "./modules/intake/routes/public-intak
 import { WidgetAiJobWorker } from "./modules/intake/services/widget-ai-job-worker.js";
 import { registerTelegramRoutes } from "./modules/telegram/inbound/routes/telegram-routes.js";
 import type { TelegramBotServiceOptions } from "./modules/telegram/inbound/telegram-bot-service.js";
+import type { OperationsReleaseMetadata } from "./release-metadata.js";
 
 export type BuildApiOptions = {
   repository: IntakeRepository;
@@ -24,6 +25,7 @@ export type BuildApiOptions = {
   managerShell?: ManagerShellOptions;
   telegramBot?: TelegramBotServiceOptions;
   logger?: boolean;
+  release?: OperationsReleaseMetadata;
 };
 
 export function buildApi(options: BuildApiOptions) {
@@ -39,7 +41,8 @@ export function buildApi(options: BuildApiOptions) {
 
   app.get("/health", async () => ({
     ok: true,
-    service: "granit-operations-api"
+    service: "granit-operations-api",
+    ...(options.release ? { release: options.release } : {})
   }));
 
   registerPublicIntakeRoutes(app, context.publicIntake, {

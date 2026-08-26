@@ -1,0 +1,20 @@
+#!/bin/sh
+set -eu
+
+command="${SSH_ORIGINAL_COMMAND:-}"
+prefix="granit-deploy site-preview "
+
+case "$command" in
+    "$prefix"*)
+        commit_sha=${command#"$prefix"}
+        archive=$(mktemp /tmp/granit-preview-validated.XXXXXX.tar.gz)
+        trap 'rm -f "$archive"' EXIT HUP INT TERM
+        /usr/local/libexec/granit/validate-preview-release "$commit_sha" > "$archive"
+        /usr/local/libexec/granit/validate-preview-release --check-main "$commit_sha"
+        sudo /usr/local/sbin/granit-deploy site-preview "$commit_sha" < "$archive"
+        ;;
+    *)
+        echo "denied: this SSH key may only run: granit-deploy site-preview <sha>" >&2
+        exit 126
+        ;;
+esac

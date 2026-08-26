@@ -9,6 +9,7 @@ import {
   PINNED_CATALOG_CONTENT_HASH,
   PINNED_CATALOG_SOURCE_BASE_SHA,
   PINNED_CATALOG_SOURCE_REPOSITORY,
+  PINNED_CATALOG_VERSION,
   loadPinnedCatalogIndex,
 } from '../src/modules/ai/catalog/pinned-catalog-index.js';
 import { executeModelTurn } from '../src/modules/ai/profiles/live-v2/model-turn-orchestrator.js';
@@ -340,7 +341,7 @@ describe('catalog multi-turn transcripts', () => {
       sourceBaseSha: PINNED_CATALOG_SOURCE_BASE_SHA,
       contentHash: PINNED_CATALOG_CONTENT_HASH,
       schemaVersion: 'catalog-index.v1',
-      catalogVersion: 'landing-catalog.e76ee8be770a',
+      catalogVersion: PINNED_CATALOG_VERSION,
     });
     expect(snapshot.items).toHaveLength(229);
   });

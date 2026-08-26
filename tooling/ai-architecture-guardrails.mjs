@@ -31,10 +31,10 @@ const ASSEMBLY_DOCUMENTS = [
 ];
 
 const REVIEWED_ASSEMBLY_HASHES = {
-  "apps/api/src/app.ts": "713ae56f89733ad031951618abc3a1bd3a1495867b8920b9c6f0ed8c45e57af4",
+  "apps/api/src/app.ts": "de47abc17bb24c1f20e09187a8b85576a2597511c90c0827a6fd6998a8e8325f",
   "apps/api/src/app-context.ts": "b52ad0f8b346b75e1a187018370655b9510bfcee839f855ee1292b5b91b95b07",
-  "apps/api/src/config.ts": "9ede71614da02235cae39cf23c66eaca68fb079a5ea18046128d6c5417fce193",
-  "apps/api/src/index.ts": "deda3d5da2df31178a40736666bf43fdabeac1160424325f59ea4f8f1bceaba6",
+  "apps/api/src/config.ts": "74a60d8d31396d37c41078f146b07d63e251321cb8ed3e6446b689ec9d9bdb8b",
+  "apps/api/src/index.ts": "b87fb83d556dfde1bbb29ab835fe19b74f3f73c57a2d0c4371991a071b7a6d66",
   "apps/api/src/widget-ai-runtime-assembly.ts":
     "a546c2bf9fe689c8d917adfeb84a541518db6a8b59ab1b079b28cf6ecc2f3ff9"
 };

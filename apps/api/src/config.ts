@@ -19,6 +19,7 @@ export type ApiConfig = {
   port: number;
   databaseUrl: string;
   deploymentTier: DeploymentTier;
+  operationsReleaseSha?: string;
   publicIntakeCors: {
     allowedOrigins: string[];
   };
@@ -76,6 +77,10 @@ export function loadConfig(env: NodeJS.ProcessEnv): ApiConfig {
     "unknown"
   );
   const widgetAiEnabled = env.AI_WIDGET_ENABLED === "true";
+  const operationsReleaseSha = parseOperationsReleaseSha(
+    deploymentTier,
+    env.OPERATIONS_RELEASE_SHA
+  );
 
   if (
     widgetAiEnabled &&
@@ -90,6 +95,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): ApiConfig {
     port: Number.parseInt(env.PORT ?? "3001", 10),
     databaseUrl,
     deploymentTier,
+    operationsReleaseSha,
     publicIntakeCors: {
       allowedOrigins: parsePublicIntakeAllowedOrigins(env.PUBLIC_INTAKE_ALLOWED_ORIGINS)
     },
@@ -167,6 +173,24 @@ export function loadConfig(env: NodeJS.ProcessEnv): ApiConfig {
     },
     managerAuth: loadManagerAuthConfig(env)
   };
+}
+
+function parseOperationsReleaseSha(
+  deploymentTier: DeploymentTier,
+  value: string | undefined
+): string | undefined {
+  if (value === undefined) {
+    if (deploymentTier === "staging") {
+      throw new Error("OPERATIONS_RELEASE_SHA is required for staging");
+    }
+    return undefined;
+  }
+  if (!/^[0-9a-f]{40}$/u.test(value)) {
+    throw new Error(
+      "OPERATIONS_RELEASE_SHA must be exactly 40 lowercase hex characters"
+    );
+  }
+  return value;
 }
 
 function parseStrictEnum<const T extends readonly string[]>(
