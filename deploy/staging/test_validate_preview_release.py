@@ -34,7 +34,7 @@ OPERATIONS_RELEASE = {
     "operationsSha": OPERATIONS_SHA,
     "catalog": {
         "sourceRepository": gate.LANDING_REPOSITORY,
-        "sourceBaseSha": MAIN_SHA,
+        "sourceBaseSha": "c" * 40,
         "version": "landing-catalog.test123456789",
         "sha256": CATALOG_HASH,
     },
@@ -42,7 +42,7 @@ OPERATIONS_RELEASE = {
 
 
 class PreviewReleaseGateTest(unittest.TestCase):
-    def test_rejects_feature_branch_sha_before_reading_request(self):
+    def test_rejects_a_sha_that_is_not_current_main(self):
         git_result = subprocess.CompletedProcess(
             args=[], returncode=0, stdout=f"{MAIN_SHA}\t{gate.MAIN_REF}\n", stderr=""
         )
@@ -51,62 +51,50 @@ class PreviewReleaseGateTest(unittest.TestCase):
                 gate.ReleaseValidationError,
                 "accepts only current landing main",
             ):
-                gate.require_current_main_sha("c" * 40)
+                gate.require_current_main_sha("d" * 40)
 
-    def test_rejects_operations_catalog_pinned_to_another_landing_sha(self):
+    def test_accepts_a_new_landing_sha_when_catalog_is_unchanged(self):
+        manifest = json.loads(
+            gate.build_release_manifest(
+                MAIN_SHA,
+                CATALOG,
+                OPERATIONS_RELEASE,
+            )
+        )
+
+        self.assertEqual(manifest, expected_manifest())
+        self.assertNotEqual(
+            manifest["landing"]["commit_sha"],
+            OPERATIONS_RELEASE["catalog"]["sourceBaseSha"],
+        )
+
+    def test_rejects_a_catalog_hash_that_differs_from_backend(self):
         operations = {
             **OPERATIONS_RELEASE,
             "catalog": {
                 **OPERATIONS_RELEASE["catalog"],
-                "sourceBaseSha": "c" * 40,
+                "sha256": "d" * 64,
             },
         }
-        manifest = build_manifest()
-        with patch.object(gate, "read_operations_release", return_value=operations):
-            with self.assertRaisesRegex(
-                gate.ReleaseValidationError,
-                "source SHA differs from landing main",
-            ):
-                gate.validate_release_manifest(manifest, CATALOG, MAIN_SHA)
 
-    def test_rejects_catalog_hash_that_differs_from_landing_main(self):
-        manifest = build_manifest(
-            catalog={
-                "version": "landing-catalog.test123456789",
-                "sha256": "c" * 64,
-            }
-        )
-        with patch.object(
-            gate,
-            "read_operations_release",
-            return_value=OPERATIONS_RELEASE,
+        with self.assertRaisesRegex(
+            gate.ReleaseValidationError,
+            "catalog SHA-256 differ",
         ):
-            with self.assertRaisesRegex(
-                gate.ReleaseValidationError,
-                "does not match landing main",
-            ):
-                gate.validate_release_manifest(manifest, CATALOG, MAIN_SHA)
+            gate.build_release_manifest(MAIN_SHA, CATALOG, operations)
 
     def test_builds_deploy_archive_only_from_trusted_main(self):
         source_archive = build_main_archive()
-        request_archive = build_request_archive()
         output = temporary_path(".tar.gz")
         self.addCleanup(source_archive.unlink, missing_ok=True)
-        self.addCleanup(request_archive.unlink, missing_ok=True)
         self.addCleanup(output.unlink, missing_ok=True)
+        manifest_bytes = gate.build_release_manifest(
+            MAIN_SHA,
+            CATALOG,
+            OPERATIONS_RELEASE,
+        )
 
-        manifest_bytes = gate.read_release_request(request_archive)
-        catalog_bytes = gate.inspect_main_archive(source_archive)
-        with patch.object(
-            gate,
-            "read_operations_release",
-            return_value=OPERATIONS_RELEASE,
-        ):
-            gate.validate_release_manifest(
-                json.loads(manifest_bytes),
-                catalog_bytes,
-                MAIN_SHA,
-            )
+        gate.inspect_main_archive(source_archive)
         gate.write_release_archive(source_archive, manifest_bytes, output)
 
         with tarfile.open(output, "r:gz") as archive:
@@ -118,57 +106,53 @@ class PreviewReleaseGateTest(unittest.TestCase):
             )
             self.assertEqual(
                 json.load(archive.extractfile(gate.RELEASE_MANIFEST_PATH)),
-                build_manifest(),
+                expected_manifest(),
             )
         self.assertNotIn(".github/workflows/deploy-preview.yml", names)
 
-    def test_rejects_feature_payload_files_in_release_request(self):
-        request_archive = build_request_archive(
-            extra_members=(("index.html", b"feature branch"),)
-        )
-        self.addCleanup(request_archive.unlink, missing_ok=True)
-        with self.assertRaisesRegex(
-            gate.ReleaseValidationError,
-            "unexpected file: index.html",
-        ):
-            gate.read_release_request(request_archive)
+    def test_fetches_main_into_the_preinitialized_server_repository(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, commit_sha = build_git_source(root)
+            repository = root / "release-cache.git"
+            run_git("init", "--bare", "--quiet", str(repository))
+
+            with (
+                patch.object(gate, "GITHUB_REMOTE", str(source)),
+                patch.object(gate, "REPOSITORY_PATH", repository, create=True),
+                gate.fetch_main_archive(commit_sha) as archive,
+            ):
+                self.assertEqual(gate.inspect_main_archive(archive), CATALOG)
+
+            cached_sha = run_git(
+                "--git-dir",
+                str(repository),
+                "rev-parse",
+                gate.CACHED_MAIN_REF,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            self.assertEqual(cached_sha, commit_sha)
 
     def test_rejects_links_in_main_archive(self):
         source_archive = build_main_archive(include_symlink=True)
         self.addCleanup(source_archive.unlink, missing_ok=True)
+
         with self.assertRaisesRegex(
             gate.ReleaseValidationError,
             "unsafe member: linked-index.html",
         ):
             gate.inspect_main_archive(source_archive)
 
-    def test_rejects_oversized_release_manifest(self):
-        request_archive = build_request_archive(
-            manifest_bytes=b"x" * (gate.MAX_RELEASE_MANIFEST_SIZE_BYTES + 1)
-        )
-        self.addCleanup(request_archive.unlink, missing_ok=True)
-        with self.assertRaisesRegex(
-            gate.ReleaseValidationError,
-            "release file exceeds size guardrail",
-        ):
-            gate.read_release_request(request_archive)
-
     def test_rejects_a_catalog_with_the_wrong_json_shape(self):
-        catalog_bytes = b"[]"
-        manifest = build_manifest(
-            catalog={
-                "version": "landing-catalog.test123456789",
-                "sha256": sha256(catalog_bytes).hexdigest(),
-            }
-        )
         with self.assertRaisesRegex(
             gate.ReleaseValidationError,
             "catalog index shape is invalid",
         ):
-            gate.validate_release_manifest(manifest, catalog_bytes, MAIN_SHA)
+            gate.build_release_manifest(MAIN_SHA, b"[]", OPERATIONS_RELEASE)
 
 
-def build_manifest(catalog=None):
+def expected_manifest():
     return {
         "schema_version": gate.RELEASE_SCHEMA_VERSION,
         "landing": {
@@ -176,8 +160,7 @@ def build_manifest(catalog=None):
             "branch": "main",
             "commit_sha": MAIN_SHA,
         },
-        "catalog": catalog
-        or {
+        "catalog": {
             "version": "landing-catalog.test123456789",
             "sha256": CATALOG_HASH,
         },
@@ -186,16 +169,6 @@ def build_manifest(catalog=None):
             "catalog_sha256": CATALOG_HASH,
         },
     }
-
-
-def build_request_archive(manifest_bytes=None, extra_members=()):
-    path = temporary_path(".tar.gz")
-    content = manifest_bytes or json.dumps(build_manifest()).encode()
-    with tarfile.open(path, "w:gz") as archive:
-        add_bytes(archive, gate.RELEASE_MANIFEST_PATH, content)
-        for name, member_content in extra_members:
-            add_bytes(archive, name, member_content)
-    return path
 
 
 def build_main_archive(include_symlink=False):
@@ -226,6 +199,33 @@ def add_bytes(archive, name, content):
     info = tarfile.TarInfo(name=name)
     info.size = len(content)
     archive.addfile(info, BytesIO(content))
+
+
+def build_git_source(root):
+    worktree = root / "source"
+    source = root / "source.git"
+    run_git("init", "--quiet", "--initial-branch=main", str(worktree))
+    run_git("-C", str(worktree), "config", "user.name", "Release Gate Test")
+    run_git("-C", str(worktree), "config", "user.email", "gate@example.invalid")
+    (worktree / "assets/catalog").mkdir(parents=True)
+    (worktree / "index.html").write_bytes(b"trusted main")
+    (worktree / gate.CATALOG_INDEX_PATH).write_bytes(CATALOG)
+    run_git("-C", str(worktree), "add", ".")
+    run_git("-C", str(worktree), "commit", "--quiet", "-m", "fixture")
+    commit_sha = run_git(
+        "-C",
+        str(worktree),
+        "rev-parse",
+        "HEAD",
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    run_git("clone", "--bare", "--quiet", str(worktree), str(source))
+    return source, commit_sha
+
+
+def run_git(*arguments, **options):
+    return subprocess.run(["git", *arguments], check=True, **options)
 
 
 if __name__ == "__main__":

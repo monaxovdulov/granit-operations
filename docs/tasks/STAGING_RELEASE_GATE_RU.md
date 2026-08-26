@@ -1,6 +1,6 @@
 # Staging release gate: landing, каталог и operations
 
-Статус: `owner_authorized_implementation`.
+Статус: `owner_authorized_simplification`.
 
 ## Один результат
 
@@ -12,34 +12,42 @@
 
 ## Base и источники истины
 
-- operations: `e03a1789dbcfd015d3d4cc06aa553513fa0bc1fe`, ветка
+- исходный operations для упрощения:
+  `e075d30f3b13bd23454cf8edfc13b1f5624860f2`, ветка
   `agent/ai-layer-refactor`;
-- landing remote main: `9d1710867b53323cbd9b99d6642541c7ddd4ec77`;
+- исходный landing remote main:
+  `7ad23165eb18dbbbf8953d8242aaae90c0f5e888`;
 - текущий preview release:
-  `70dfa0e9e78a75cc3d0fc800147e381fe7cd3cf6`;
-- release-кандидат landing: `7ad23165eb18dbbbf8953d8242aaae90c0f5e888`;
+  `7ad23165eb18dbbbf8953d8242aaae90c0f5e888`;
 - pinned catalog version: `landing-catalog.34e6b5f78a6e`;
 - pinned catalog SHA-256:
   `73086e6635f56a841df31552ef402caf2d2ac960d1e0d3f24f6aaae04139b710`;
 - архитектурный контракт каталога:
   `docs/tasks/AI_REF_AILR_03_CATALOG_SHOW_ONE_SHOT_RU.md`, раздел 3.1;
-- server-side enforcement: `/usr/local/sbin/granit-deploy` на preview-хосте.
+- server-side release gate: `/usr/local/sbin/granit-deploy-gate` и
+  `/usr/local/libexec/granit/validate-preview-release` на preview-хосте;
+- server-side shallow cache landing Git:
+  `/srv/granit-prod/repos/landing-granit-static.git`;
+- существующий deploy wrapper после gate: `/usr/local/sbin/granit-deploy`.
 
 Пользовательский dirty work в обоих основных checkout не изменяется. Рабочие
 изменения выполняются в отдельных clean worktree.
 
 ## Scope
 
-- versioned landing catalog index и release manifest;
+- versioned landing catalog index;
 - operations health release metadata с operations SHA и pinned catalog
   provenance;
 - server-side проверка landing SHA и получение exact Git tree текущего `main`
-  через read-only GitHub deploy key;
-- server-side сборка deploy archive из доверенного Git tree, release manifest и
+  через read-only GitHub deploy key и persistent shallow cache вместо полного
+  клонирования репозитория при каждом deploy;
+- server-side сборка deploy archive и `release.json` из доверенного Git tree и
   live operations metadata до переключения preview symlink;
-- workflow из `landing/main`, создающий release manifest и выполняющий deploy;
-- русская документация ownership, проверки версии и rollback;
-- согласованный commit/push/deploy обоих staging-компонентов.
+- workflow из `landing/main`, который передаёт серверу только SHA;
+- ручной безопасный запуск workflow только для `main`;
+- русская FAQ-методичка с типовыми действиями, ошибками и rollback;
+- согласованный commit/push, установка server gate и landing deploy. Backend
+  image не пересобирается, потому что catalog hash не изменился.
 
 ## Вне scope
 
@@ -53,22 +61,32 @@
 
 1. feature-branch SHA и произвольные файлы из CI отклоняются server-side, а
    deploy archive собирается самим сервером из текущего `main`;
-2. main SHA с неверным catalog hash или operations SHA отклоняется;
-3. согласованный main SHA разворачивается и публикует release metadata;
-4. operations `/health` и landing `/release.json` показывают одну catalog
+2. повторный deploy использует server Git cache и не клонирует весь landing с
+   нуля;
+3. main SHA с неверным catalog hash отклоняется;
+4. новый landing SHA с прежним catalog hash не требует backend rebuild;
+5. согласованный main SHA разворачивается и публикует release metadata;
+6. operations `/health` и landing `/release.json` показывают одну catalog
    version/hash и точные runtime SHA;
-5. live browser journey открывает полноразмерные примеры и deep-link каталога;
-6. backend остаётся новым full-conversation runtime;
-7. production target и production symlink не меняются.
+7. live browser journey открывает полноразмерные примеры и deep-link каталога;
+8. backend остаётся новым full-conversation runtime;
+9. production target и production symlink не меняются.
 
 ## Риски и rollback
 
 - Ошибка центрального gate может заблокировать staging deploy. Rollback:
-  восстановить сохранённый wrapper и повторно проверить старый preview SHA без
-  переключения production.
+  восстановить сохранённую предыдущую версию validator и повторно проверить
+  совместимый SHA из `main`. Production при этом не переключается.
 - Несогласованная catalog pair должна fail closed, а не публиковаться частично.
+- Повреждённый server Git cache блокирует deploy. Его можно удалить и заново
+  инициализировать из `main`; активный preview release от этого не меняется.
 - Landing rollback допустим только к release, чей catalog hash совпадает с
   operations. Operations rollback выполняется совместно с совместимым landing
   release.
 - Read-only GitHub deploy key хранится только на preview-хосте, не попадает в
   Git, release archive или логи.
+
+## Методичка владельца
+
+Типовые ситуации, готовые формулировки запросов и расшифровка ошибок находятся
+в `docs/runbooks/STAGING_LANDING_CATALOG_FAQ_RU.md`.

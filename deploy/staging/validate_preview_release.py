@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""Build a trusted landing preview archive from the current main commit."""
+"""Build a preview archive from landing main after checking catalog parity."""
 
 from __future__ import annotations
 
 from contextlib import contextmanager
 from hashlib import sha256
+from io import BytesIO
 from pathlib import Path, PurePosixPath
 from typing import BinaryIO, Iterator
+import fcntl
 import json
 import os
 import subprocess
@@ -21,11 +23,10 @@ OPERATIONS_SCHEMA_VERSION = "granit-operations-release.v1"
 CATALOG_SCHEMA_VERSION = "catalog-index.v1"
 LANDING_REPOSITORY = "monaxovdulov/landing-granit-static"
 MAIN_REF = "refs/heads/main"
+CACHED_MAIN_REF = "refs/remotes/release-gate/main"
 CATALOG_INDEX_PATH = "assets/catalog/catalog-index.v1.json"
 RELEASE_MANIFEST_PATH = "release.json"
-MAX_REQUEST_SIZE_BYTES = 1024 * 1024
 MAX_ARCHIVE_MEMBERS = 4096
-MAX_RELEASE_MANIFEST_SIZE_BYTES = 64 * 1024
 MAX_CATALOG_INDEX_SIZE_BYTES = 16 * 1024 * 1024
 READ_CHUNK_SIZE_BYTES = 1024 * 1024
 
@@ -40,6 +41,12 @@ GITHUB_DEPLOY_KEY = os.environ.get(
 GITHUB_KNOWN_HOSTS = os.environ.get(
     "GRANIT_RELEASE_GATE_GITHUB_KNOWN_HOSTS",
     "/home/granit-deploy/.ssh/known_hosts",
+)
+REPOSITORY_PATH = Path(
+    os.environ.get(
+        "GRANIT_RELEASE_GATE_REPOSITORY",
+        "/srv/granit-prod/repos/landing-granit-static.git",
+    )
 )
 OPERATIONS_HEALTH_URL = os.environ.get(
     "GRANIT_RELEASE_GATE_OPERATIONS_HEALTH_URL",
@@ -57,29 +64,26 @@ def main() -> int:
     if len(sys.argv) != 2:
         print("ERROR: expected exact landing commit SHA", file=sys.stderr)
         return 64
-    commit_sha = sys.argv[1]
 
+    commit_sha = sys.argv[1]
     try:
         validate_commit_sha(commit_sha)
         require_current_main_sha(commit_sha)
-        with receive_request(sys.stdin.buffer) as request_path:
-            manifest_bytes = read_release_request(request_path)
-            with fetch_main_archive(commit_sha) as source_archive:
-                catalog_bytes = inspect_main_archive(source_archive)
-                manifest = parse_json(manifest_bytes, RELEASE_MANIFEST_PATH)
-                validate_release_manifest(manifest, catalog_bytes, commit_sha)
-                with temporary_file("granit-preview-built-", ".tar.gz") as output_path:
-                    write_release_archive(
-                        source_archive,
-                        manifest_bytes,
-                        output_path,
-                    )
-                    require_current_main_sha(commit_sha)
-                    stream_archive(output_path, sys.stdout.buffer)
+        with fetch_main_archive(commit_sha) as source_archive:
+            catalog_bytes = inspect_main_archive(source_archive)
+            operations = read_operations_release()
+            manifest_bytes = build_release_manifest(
+                commit_sha,
+                catalog_bytes,
+                operations,
+            )
+            with temporary_file("granit-preview-built-", ".tar.gz") as output_path:
+                write_release_archive(source_archive, manifest_bytes, output_path)
+                require_current_main_sha(commit_sha)
+                stream_archive(output_path, sys.stdout.buffer)
     except ReleaseValidationError as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1
-
     return 0
 
 
@@ -149,23 +153,6 @@ def git_environment() -> dict[str, str]:
 
 
 @contextmanager
-def receive_request(source: BinaryIO) -> Iterator[Path]:
-    with temporary_file("granit-preview-request-", ".tar.gz") as request_path:
-        size_bytes = 0
-        with request_path.open("wb") as request:
-            while chunk := source.read(READ_CHUNK_SIZE_BYTES):
-                size_bytes += len(chunk)
-                if size_bytes > MAX_REQUEST_SIZE_BYTES:
-                    raise ReleaseValidationError(
-                        "release request exceeds compressed size guardrail"
-                    )
-                request.write(chunk)
-        if size_bytes == 0:
-            raise ReleaseValidationError("empty release request received")
-        yield request_path
-
-
-@contextmanager
 def temporary_file(prefix: str, suffix: str) -> Iterator[Path]:
     temporary = tempfile.NamedTemporaryFile(
         prefix=prefix,
@@ -182,104 +169,86 @@ def temporary_file(prefix: str, suffix: str) -> Iterator[Path]:
 
 @contextmanager
 def fetch_main_archive(commit_sha: str) -> Iterator[Path]:
-    with tempfile.TemporaryDirectory(prefix="granit-preview-main-") as directory:
-        repository = Path(directory) / "repository.git"
-        archive_path = Path(directory) / "main.tar"
-        try:
-            subprocess.run(
-                ["git", "init", "--bare", "--quiet", str(repository)],
-                check=True,
-                capture_output=True,
-                timeout=20,
-            )
-            subprocess.run(
-                [
-                    "git",
-                    "-C",
-                    str(repository),
-                    "fetch",
-                    "--quiet",
-                    "--depth=1",
-                    GITHUB_REMOTE,
-                    MAIN_REF,
-                ],
-                check=True,
-                capture_output=True,
-                timeout=120,
-                env=git_environment(),
-            )
-            result = subprocess.run(
-                ["git", "-C", str(repository), "rev-parse", "FETCH_HEAD"],
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=20,
-            )
-            fetched_sha = result.stdout.strip()
-            if fetched_sha != commit_sha:
-                raise ReleaseValidationError(
-                    "landing main changed while the release was being built"
-                )
-            subprocess.run(
-                [
-                    "git",
-                    "-C",
-                    str(repository),
-                    "archive",
-                    "--format=tar",
-                    f"--output={archive_path}",
-                    commit_sha,
-                ],
-                check=True,
-                capture_output=True,
-                timeout=120,
-            )
-        except (OSError, subprocess.SubprocessError) as error:
-            raise ReleaseValidationError(
-                "cannot build archive from landing main"
-            ) from error
+    with temporary_file("granit-preview-main-", ".tar") as archive_path:
+        with lock_release_repository():
+            fetch_main_into_repository(commit_sha, archive_path)
         yield archive_path
 
 
-def read_release_request(request_path: Path) -> bytes:
-    try:
-        with tarfile.open(request_path, "r:gz") as archive:
-            manifest_bytes = None
-            for member_count, member in enumerate(archive, start=1):
-                if member_count > MAX_ARCHIVE_MEMBERS:
-                    raise ReleaseValidationError(
-                        "release request contains too many members"
-                    )
-                normalized = normalize_archive_path(member.name)
-                if member.isdir():
-                    continue
-                if not member.isfile():
-                    raise ReleaseValidationError(
-                        f"release request contains unsafe member: {normalized}"
-                    )
-                if normalized != RELEASE_MANIFEST_PATH:
-                    raise ReleaseValidationError(
-                        f"release request contains unexpected file: {normalized}"
-                    )
-                if manifest_bytes is not None:
-                    raise ReleaseValidationError(
-                        "release request must contain one release.json"
-                    )
-                manifest_bytes = read_member(
-                    archive,
-                    member,
-                    MAX_RELEASE_MANIFEST_SIZE_BYTES,
-                )
-    except (OSError, tarfile.TarError) as error:
+@contextmanager
+def lock_release_repository() -> Iterator[None]:
+    if not REPOSITORY_PATH.is_dir():
         raise ReleaseValidationError(
-            "release request is not a valid tar.gz"
+            "landing release repository is not initialized"
+        )
+
+    lock_path = REPOSITORY_PATH / "release-gate.lock"
+    try:
+        with lock_path.open("a+b") as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as error:
+                raise ReleaseValidationError(
+                    "another preview deploy is already in progress"
+                ) from error
+            yield
+    except ReleaseValidationError:
+        raise
+    except OSError as error:
+        raise ReleaseValidationError(
+            "landing release repository is unavailable"
         ) from error
 
-    if manifest_bytes is None:
-        raise ReleaseValidationError(
-            "release request must contain one release.json"
+
+def fetch_main_into_repository(commit_sha: str, archive_path: Path) -> None:
+    try:
+        repository = str(REPOSITORY_PATH)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                repository,
+                "fetch",
+                "--quiet",
+                "--force",
+                "--depth=1",
+                GITHUB_REMOTE,
+                f"{MAIN_REF}:{CACHED_MAIN_REF}",
+            ],
+            check=True,
+            capture_output=True,
+            timeout=300,
+            env=git_environment(),
         )
-    return manifest_bytes
+        result = subprocess.run(
+            ["git", "-C", repository, "rev-parse", CACHED_MAIN_REF],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        if result.stdout.strip() != commit_sha:
+            raise ReleaseValidationError(
+                "landing main changed while the release was being built"
+            )
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                repository,
+                "archive",
+                "--format=tar",
+                f"--output={archive_path}",
+                commit_sha,
+            ],
+            check=True,
+            capture_output=True,
+            timeout=120,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        raise ReleaseValidationError(
+            "cannot build archive from landing main"
+        ) from error
 
 
 def inspect_main_archive(source_archive: Path) -> bytes:
@@ -344,79 +313,65 @@ def read_member(
 
 def normalize_archive_path(value: str) -> str:
     normalized = PurePosixPath(value)
-    parts = normalized.parts
-    if normalized.is_absolute() or ".." in parts or not parts:
+    if normalized.is_absolute() or ".." in normalized.parts or not normalized.parts:
         raise ReleaseValidationError(f"unsafe archive path: {value}")
     return str(normalized)
 
 
-def parse_json(content: bytes, path: str):
-    try:
-        return json.loads(content)
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise ReleaseValidationError(f"invalid JSON in {path}") from error
+def build_release_manifest(
+    commit_sha: str,
+    catalog_bytes: bytes,
+    operations: dict,
+) -> bytes:
+    catalog = parse_catalog(catalog_bytes)
+    operations_catalog = operations["catalog"]
+    if operations_catalog["sourceRepository"] != LANDING_REPOSITORY:
+        raise ReleaseValidationError(
+            "operations catalog source repository differs from landing"
+        )
 
+    catalog_hash = sha256(catalog_bytes).hexdigest()
+    if catalog_hash != operations_catalog["sha256"]:
+        raise ReleaseValidationError("landing and operations catalog SHA-256 differ")
+    if catalog["catalog_version"] != operations_catalog["version"]:
+        raise ReleaseValidationError("landing and operations catalog versions differ")
 
-def validate_release_manifest(manifest, catalog_bytes: bytes, commit_sha: str) -> None:
-    expected_top_level = {"schema_version", "landing", "catalog", "operations"}
-    if not isinstance(manifest, dict) or set(manifest) != expected_top_level:
-        raise ReleaseValidationError("release manifest shape is invalid")
-    if manifest["schema_version"] != RELEASE_SCHEMA_VERSION:
-        raise ReleaseValidationError("release manifest schema version is invalid")
-
-    expected_landing = {
-        "repository": LANDING_REPOSITORY,
-        "branch": "main",
-        "commit_sha": commit_sha,
+    manifest = {
+        "schema_version": RELEASE_SCHEMA_VERSION,
+        "landing": {
+            "repository": LANDING_REPOSITORY,
+            "branch": "main",
+            "commit_sha": commit_sha,
+        },
+        "catalog": {
+            "version": catalog["catalog_version"],
+            "sha256": catalog_hash,
+        },
+        "operations": {
+            "commit_sha": operations["operationsSha"],
+            "catalog_sha256": operations_catalog["sha256"],
+        },
     }
-    if manifest["landing"] != expected_landing:
-        raise ReleaseValidationError("release manifest landing identity is invalid")
+    return (
+        json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    ).encode()
 
-    catalog = parse_json(catalog_bytes, CATALOG_INDEX_PATH)
+
+def parse_catalog(catalog_bytes: bytes) -> dict:
+    try:
+        catalog = json.loads(catalog_bytes)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ReleaseValidationError("catalog index is invalid JSON") from error
     if (
         not isinstance(catalog, dict)
         or catalog.get("schema_version") != CATALOG_SCHEMA_VERSION
         or not isinstance(catalog.get("catalog_version"), str)
     ):
         raise ReleaseValidationError("catalog index shape is invalid")
-    catalog_manifest = manifest["catalog"]
-    if (
-        not isinstance(catalog_manifest, dict)
-        or set(catalog_manifest) != {"version", "sha256"}
-    ):
-        raise ReleaseValidationError("release manifest catalog shape is invalid")
-    if catalog_manifest["sha256"] != sha256(catalog_bytes).hexdigest():
-        raise ReleaseValidationError(
-            "release catalog SHA-256 does not match landing main"
-        )
-    if catalog_manifest["version"] != catalog["catalog_version"]:
-        raise ReleaseValidationError(
-            "release catalog version does not match landing main"
-        )
-
-    operations = read_operations_release()
-    operations_catalog = operations["catalog"]
-    if operations_catalog["sourceRepository"] != LANDING_REPOSITORY:
-        raise ReleaseValidationError(
-            "operations catalog source repository differs from landing"
-        )
-    if operations_catalog["sourceBaseSha"] != commit_sha:
-        raise ReleaseValidationError(
-            "operations catalog source SHA differs from landing main"
-        )
-    expected_operations = {
-        "commit_sha": operations["operationsSha"],
-        "catalog_sha256": operations_catalog["sha256"],
-    }
-    if manifest["operations"] != expected_operations:
-        raise ReleaseValidationError("release manifest operations identity is stale")
-    if catalog_manifest["sha256"] != operations_catalog["sha256"]:
-        raise ReleaseValidationError("landing and operations catalog SHA-256 differ")
-    if catalog_manifest["version"] != operations_catalog["version"]:
-        raise ReleaseValidationError("landing and operations catalog versions differ")
+    return catalog
 
 
-def read_operations_release():
+def read_operations_release() -> dict:
     try:
         with urlopen(OPERATIONS_HEALTH_URL, timeout=15) as response:
             health = json.load(response)
@@ -471,10 +426,7 @@ def write_release_archive(
         manifest_info.size = len(manifest_bytes)
         manifest_info.mode = 0o644
         manifest_info.mtime = 0
-        with tempfile.SpooledTemporaryFile() as manifest_source:
-            manifest_source.write(manifest_bytes)
-            manifest_source.seek(0)
-            destination.addfile(manifest_info, manifest_source)
+        destination.addfile(manifest_info, BytesIO(manifest_bytes))
 
 
 def stream_archive(archive_path: Path, destination: BinaryIO) -> None:
