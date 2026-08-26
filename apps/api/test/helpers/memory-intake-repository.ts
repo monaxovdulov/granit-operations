@@ -71,6 +71,7 @@ import {
   type TakeoverSiteWidgetConversationInput
 } from "../../src/repositories/intake-repository.js";
 import { sanitizeAiObservabilityMetadata } from "../../src/modules/ai/observability/ai-observability-sanitizer.js";
+import { toAiDialogTranscript } from "../../src/modules/conversations/repositories/ai-dialog-transcript.js";
 
 function memoryRunningAiRun(id: string, input: BeginAiRunInput): RunningAiRunRecord {
   const attemptId = randomUUID();
@@ -1299,10 +1300,6 @@ export class MemoryIntakeRepository implements IntakeRepository {
             conversation?.messages ?? [],
             existing.publicMessageId
           ),
-          rollingSummary: toMemoryAiRollingSummary(
-            conversation?.messages ?? [],
-            existing.publicMessageId
-          ),
           persistedSlots: this.aiSlotsByConversation.get(conversationId) ?? {},
           persistedRequirements: this.aiRequirementsByConversation.get(conversationId) ?? []
         }
@@ -1474,10 +1471,6 @@ export class MemoryIntakeRepository implements IntakeRepository {
       },
       {
         recentMessages: toMemoryAiRecentMessages(
-          conversation?.messages ?? [],
-          input.publicMessageId
-        ),
-        rollingSummary: toMemoryAiRollingSummary(
           conversation?.messages ?? [],
           input.publicMessageId
         ),
@@ -3102,7 +3095,6 @@ function buildMemorySiteWidgetAiTurnInput(
   },
   context: {
     recentMessages: AiTurnInput["compactContext"]["messages"];
-    rollingSummary?: AiTurnInput["compactContext"]["rollingSummary"];
     persistedSlots: AiKnownSlots;
     persistedRequirements: AiTurnInput["knownRequirements"];
   }
@@ -3135,7 +3127,6 @@ function buildMemorySiteWidgetAiTurnInput(
       agentAllowedToReply: accepted.agentAllowedToReply
     },
     recentMessages: context.recentMessages,
-    rollingSummary: context.rollingSummary,
     persistedSlots: context.persistedSlots,
     persistedRequirements: context.persistedRequirements
   });
@@ -3145,78 +3136,20 @@ function toMemoryAiRecentMessages(
   messages: ManagerLeadDetail["conversations"][number]["messages"],
   currentPublicMessageId: string
 ): AiTurnInput["compactContext"]["messages"] {
-  const eligible = messages
-    .filter(
-      (message) =>
-        message.publicMessageId !== currentPublicMessageId &&
-        message.contentType === "text" &&
-        (message.direction === "inbound" || message.direction === "outbound") &&
-        (message.senderRole === "visitor" || message.senderRole === "ai_assistant") &&
-        message.body.trim()
-    )
-    .slice(-12);
-  const bounded: AiTurnInput["compactContext"]["messages"] = [];
-  let remainingCharacters = 12_000;
-
-  for (let index = eligible.length - 1; index >= 0 && remainingCharacters > 0; index -= 1) {
-    const message = eligible[index];
-
-    if (!message) {
-      continue;
-    }
-
-    const fullText = message.body.trim();
-    const text =
-      fullText.length <= remainingCharacters
-        ? fullText
-        : fullText.slice(fullText.length - remainingCharacters);
-
-    bounded.unshift({
-      publicMessageId: message.publicMessageId,
-      direction: message.direction as "inbound" | "outbound",
-      senderRole: message.senderRole as "visitor" | "ai_assistant",
-      contentType: "text",
-      submittedAt: message.createdAt,
-      text
-    });
-    remainingCharacters -= text.length;
-  }
-
-  return bounded;
-}
-
-function toMemoryAiRollingSummary(
-  messages: ManagerLeadDetail["conversations"][number]["messages"],
-  currentPublicMessageId: string
-): AiTurnInput["compactContext"]["rollingSummary"] | undefined {
-  const eligible = messages.filter(
-    (message) =>
-      message.publicMessageId !== currentPublicMessageId &&
-      message.contentType === "text" &&
-      (message.direction === "inbound" || message.direction === "outbound") &&
-      (message.senderRole === "visitor" || message.senderRole === "ai_assistant") &&
-      message.body.trim()
+  const currentIndex = messages.findIndex(
+    (message) => message.publicMessageId === currentPublicMessageId
   );
-  const older = eligible.slice(0, Math.max(0, eligible.length - 12));
+  const causalMessages = currentIndex >= 0 ? messages.slice(0, currentIndex + 1) : messages;
+  const newestFirst = [...causalMessages].reverse().map((message) => ({
+    publicMessageId: message.publicMessageId,
+    direction: message.direction,
+    senderRole: message.senderRole,
+    contentType: message.contentType,
+    submittedAt: new Date(message.createdAt),
+    body: message.body
+  }));
 
-  if (!older.length) {
-    return undefined;
-  }
-
-  const summary = older
-    .map((message) => {
-      const speaker = message.senderRole === "visitor" ? "Клиент" : "Ассистент";
-      return `[${message.createdAt}] ${speaker}: ${message.body.trim()}`;
-    })
-    .join("\n");
-  const bounded = summary.length <= 12_000 ? summary : summary.slice(-12_000);
-  const covered = older.at(-1)!;
-
-  return {
-    text: bounded,
-    coveredThroughPublicMessageId: covered.publicMessageId,
-    updatedAt: covered.createdAt
-  };
+  return toAiDialogTranscript(newestFirst, currentPublicMessageId);
 }
 
 function toManagerTelegramLead(

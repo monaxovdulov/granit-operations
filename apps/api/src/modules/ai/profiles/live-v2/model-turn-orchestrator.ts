@@ -1,4 +1,8 @@
 import type { AiTurnInput } from '../../ai-turn.js';
+import {
+  LIVE_V2_MAX_INPUT_CHARACTERS,
+  measureLiveV2ModelRequestCharacters,
+} from '../../ports/live-v2-runtime.js';
 import type { CatalogIndexSnapshot } from '../../catalog/catalog-index.js';
 import {
   CATALOG_SEARCH_TIMEOUT_MS,
@@ -75,6 +79,13 @@ export type ModelTurnTrace = {
   };
   selectedAction: FinalTurnAction | 'safe_fallback' | 'blocked';
   finalRecommendationIds: string[];
+  requestBudget?: {
+    status: 'exceeded';
+    phase: 'decision' | 'final';
+    requestCharacters: number;
+    maxCharacters: number;
+    transcriptMessageCount: number;
+  };
 };
 
 export type ModelTurnOutcome = {
@@ -327,6 +338,18 @@ async function generate(
   trace: ModelTurnTrace,
 ): Promise<{ ok: true; value: unknown } | { ok: false }> {
   const startedAt = Date.now();
+  const requestCharacters = measureLiveV2ModelRequestCharacters(input);
+  if (requestCharacters > LIVE_V2_MAX_INPUT_CHARACTERS) {
+    trace.requestBudget = {
+      status: 'exceeded',
+      phase,
+      requestCharacters,
+      maxCharacters: LIVE_V2_MAX_INPUT_CHARACTERS,
+      transcriptMessageCount: input.turn.messages.length,
+    };
+    return { ok: false };
+  }
+
   trace.modelCallCount += 1;
   try {
     const value = await generator.generateDecision(input);

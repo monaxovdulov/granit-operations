@@ -8,7 +8,6 @@ import {
   gt,
   inArray,
   isNotNull,
-  lt,
   lte,
   ne,
   or,
@@ -23,7 +22,6 @@ import {
   aiRuntimeControls,
   aiRuns,
   channelIdentities,
-  conversationAiMemory,
   conversationHandoffs,
   conversationMessages,
   conversationRequirements,
@@ -116,6 +114,7 @@ import type {
   SiteWidgetStoredAiReply
 } from "./conversation-message-repository.js";
 import { buildWidgetAiTurnIdempotencyKey } from "./conversation-message-repository.js";
+import { toAiDialogTranscript } from "./ai-dialog-transcript.js";
 import type { IntakeRepository } from "./intake-repository.js";
 import { AI_REVIEW_LABELS } from "./manager-lead-repository.js";
 import { AiControlVersionConflictError } from "./manager-lead-repository.js";
@@ -529,8 +528,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
                   })
                   .from(conversationMessages)
                   .where(eq(conversationMessages.conversationId, conversation.id))
-                  .orderBy(desc(conversationMessages.createdAt))
-                  .limit(13),
+                  .orderBy(desc(conversationMessages.messageSequence)),
                 tx
                   .select({
                     name: conversationSlots.name,
@@ -565,16 +563,6 @@ export class PostgresIntakeRepository implements IntakeRepository {
               ])
             : [[], [], []];
 
-        const rollingSummary =
-          input.channel === "site_widget"
-            ? await advanceAiRollingSummary(
-                tx,
-                conversation.id,
-                message.publicMessageId,
-                recentMessageRows,
-                now
-              )
-            : undefined;
         const [runtimeControl] =
           input.channel === "site_widget"
             ? await tx
@@ -592,8 +580,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
           publicSessionId: widgetSession?.publicSessionId,
           agentAllowedToReply: effectiveAgentAllowedToReply,
           aiState: toAiState(conversation.aiState),
-          recentMessages: toAiRecentMessages(recentMessageRows, message.publicMessageId),
-          rollingSummary,
+          recentMessages: toAiDialogTranscript(recentMessageRows, message.publicMessageId),
           persistedSlots: toAiKnownSlots(slotRows),
           persistedRequirements: toAiKnownRequirements(requirementRows)
         });
@@ -3320,7 +3307,8 @@ export class PostgresIntakeRepository implements IntakeRepository {
     const widgetAiJob = replaySnapshot?.inboundJob;
     const context = await this.loadAiDialogContext(
       existing.conversationId,
-      existing.publicMessageId
+      existing.publicMessageId,
+      existing.messageSequence
     );
     const effectiveAgentAllowedToReply =
       replaySnapshot?.agentAllowedToReply ?? existing.agentAllowedToReply;
@@ -3463,7 +3451,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
     currentPublicMessageId: string,
     respondsThroughSequence?: number
   ) {
-    const [recentMessageRows, slotRows, requirementRows, memoryRows] = await Promise.all([
+    const [recentMessageRows, slotRows, requirementRows] = await Promise.all([
       this.db
         .select({
           publicMessageId: conversationMessages.publicMessageId,
@@ -3489,8 +3477,7 @@ export class PostgresIntakeRepository implements IntakeRepository {
               : lte(conversationMessages.messageSequence, respondsThroughSequence)
           )
         )
-        .orderBy(desc(conversationMessages.messageSequence))
-        .limit(12),
+        .orderBy(desc(conversationMessages.messageSequence)),
       this.db
         .select({
           name: conversationSlots.name,
@@ -3521,21 +3508,11 @@ export class PostgresIntakeRepository implements IntakeRepository {
         .from(conversationRequirements)
         .where(eq(conversationRequirements.conversationId, conversationId))
         .orderBy(desc(conversationRequirements.updatedAt))
-        .limit(60),
-      this.db
-        .select({
-          summary: conversationAiMemory.summary,
-          coveredThroughPublicMessageId: conversationAiMemory.coveredThroughPublicMessageId,
-          updatedAt: conversationAiMemory.updatedAt
-        })
-        .from(conversationAiMemory)
-        .where(eq(conversationAiMemory.conversationId, conversationId))
-        .limit(1)
+        .limit(60)
     ]);
 
     return {
-      recentMessages: toAiRecentMessages(recentMessageRows, currentPublicMessageId),
-      rollingSummary: toAiRollingSummary(memoryRows[0]),
+      recentMessages: toAiDialogTranscript(recentMessageRows, currentPublicMessageId),
       persistedSlots: toAiKnownSlots(slotRows),
       persistedRequirements: toAiKnownRequirements(requirementRows)
     };
@@ -3700,138 +3677,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-async function advanceAiRollingSummary(
-  tx: Transaction,
-  conversationId: string,
-  currentPublicMessageId: string,
-  recentRows: AiContextMessageRow[],
-  now: Date
-): Promise<AiTurnInput["compactContext"]["rollingSummary"] | undefined> {
-  const [memory] = await tx
-    .select({
-      summary: conversationAiMemory.summary,
-      coveredThroughPublicMessageId: conversationAiMemory.coveredThroughPublicMessageId,
-      coveredThroughCreatedAt: conversationAiMemory.coveredThroughCreatedAt,
-      updatedAt: conversationAiMemory.updatedAt
-    })
-    .from(conversationAiMemory)
-    .where(eq(conversationAiMemory.conversationId, conversationId))
-    .limit(1);
-  const recentEligible = recentRows
-    .filter((row) => row.publicMessageId !== currentPublicMessageId && isAiContextMessageRow(row))
-    .slice(0, 12);
-  const oldestRecent = recentEligible.at(-1);
-
-  if (!oldestRecent) {
-    return toAiRollingSummary(memory);
-  }
-
-  const olderRows = await tx
-    .select({
-      publicMessageId: conversationMessages.publicMessageId,
-      direction: conversationMessages.direction,
-      senderRole: conversationMessages.senderRole,
-      contentType: conversationMessages.contentType,
-      submittedAt: conversationMessages.submittedAt,
-      body: conversationMessages.body,
-      createdAt: conversationMessages.createdAt,
-      messageSequence: conversationMessages.messageSequence
-    })
-    .from(conversationMessages)
-    .where(
-      memory
-        ? and(
-            eq(conversationMessages.conversationId, conversationId),
-            gt(conversationMessages.createdAt, memory.coveredThroughCreatedAt),
-            lt(conversationMessages.createdAt, oldestRecent.createdAt)
-          )
-        : and(
-            eq(conversationMessages.conversationId, conversationId),
-            lt(conversationMessages.createdAt, oldestRecent.createdAt)
-          )
-    )
-    .orderBy(asc(conversationMessages.createdAt))
-    .limit(100);
-  const eligibleOlderRows = olderRows.filter(isAiContextMessageRow);
-
-  if (!eligibleOlderRows.length) {
-    return toAiRollingSummary(memory);
-  }
-
-  const newestCovered = eligibleOlderRows.at(-1)!;
-  const appended = eligibleOlderRows
-    .map((row) => {
-      const speaker = row.senderRole === "visitor" ? "Клиент" : "Ассистент";
-      return `[${row.submittedAt.toISOString()}] ${speaker}: ${row.body.trim()}`;
-    })
-    .join("\n");
-  const summary = boundRollingSummary(
-    memory?.summary ? `${memory.summary}\n${appended}` : appended
-  );
-
-  await tx
-    .insert(conversationAiMemory)
-    .values({
-      conversationId,
-      summary,
-      coveredThroughPublicMessageId: newestCovered.publicMessageId,
-      coveredThroughCreatedAt: newestCovered.createdAt,
-      updatedAt: now
-    })
-    .onConflictDoUpdate({
-      target: conversationAiMemory.conversationId,
-      set: {
-        summary,
-        coveredThroughPublicMessageId: newestCovered.publicMessageId,
-        coveredThroughCreatedAt: newestCovered.createdAt,
-        updatedAt: now
-      }
-    });
-
-  return {
-    text: summary,
-    coveredThroughPublicMessageId: newestCovered.publicMessageId,
-    updatedAt: now.toISOString()
-  };
-}
-
-function toAiRollingSummary(
-  memory:
-    | {
-        summary: string;
-        coveredThroughPublicMessageId: string;
-        updatedAt: Date;
-      }
-    | undefined
-): AiTurnInput["compactContext"]["rollingSummary"] | undefined {
-  return memory
-    ? {
-        text: memory.summary,
-        coveredThroughPublicMessageId: memory.coveredThroughPublicMessageId,
-        updatedAt: memory.updatedAt.toISOString()
-      }
-    : undefined;
-}
-
-function boundRollingSummary(value: string): string {
-  if (value.length <= 12_000) {
-    return value;
-  }
-
-  const tail = value.slice(-12_000);
-  const firstLineBreak = tail.indexOf("\n");
-  return firstLineBreak >= 0 ? tail.slice(firstLineBreak + 1) : tail;
-}
-
-function isAiContextMessageRow(row: AiContextMessageRow): boolean {
-  return (
-    row.contentType === "text" &&
-    (row.direction === "inbound" || row.direction === "outbound") &&
-    (row.senderRole === "visitor" || row.senderRole === "ai_assistant") &&
-    Boolean(row.body.trim())
-  );
-}
-
 function nextAiStateForInbound(currentAiState: string, needsManager: boolean): AiState {
   const current = toAiState(currentAiState);
 
@@ -3866,7 +3711,6 @@ function buildSiteWidgetAiTurnInput(
     agentAllowedToReply: boolean;
     aiState: AiState;
     recentMessages: AiTurnInput["compactContext"]["messages"];
-    rollingSummary?: AiTurnInput["compactContext"]["rollingSummary"];
     persistedSlots: AiKnownSlots;
     persistedRequirements: AiTurnInput["knownRequirements"];
   }
@@ -3908,7 +3752,6 @@ function buildSiteWidgetAiTurnInput(
       agentAllowedToReply: accepted.agentAllowedToReply
     },
     recentMessages: accepted.recentMessages,
-    rollingSummary: accepted.rollingSummary,
     persistedSlots: accepted.persistedSlots,
     persistedRequirements: accepted.persistedRequirements
   });
@@ -3940,7 +3783,6 @@ function buildPersistedSiteWidgetAiTurnInput(
   },
   context: {
     recentMessages: AiTurnInput["compactContext"]["messages"];
-    rollingSummary?: AiTurnInput["compactContext"]["rollingSummary"];
     persistedSlots: AiKnownSlots;
     persistedRequirements: AiTurnInput["knownRequirements"];
   }
@@ -3980,66 +3822,9 @@ function buildPersistedSiteWidgetAiTurnInput(
       agentAllowedToReply: input.agentAllowedToReply
     },
     recentMessages: context.recentMessages,
-    rollingSummary: context.rollingSummary,
     persistedSlots: context.persistedSlots,
     persistedRequirements: context.persistedRequirements
   });
-}
-
-type AiContextMessageRow = {
-  publicMessageId: string;
-  direction: string;
-  senderRole: string;
-  contentType: string;
-  submittedAt: Date;
-  body: string;
-  createdAt: Date;
-  messageSequence: number;
-};
-
-function toAiRecentMessages(
-  rows: AiContextMessageRow[],
-  currentPublicMessageId: string
-): AiTurnInput["compactContext"]["messages"] {
-  const chronological = rows
-    .filter(
-      (row) =>
-        row.publicMessageId !== currentPublicMessageId &&
-        row.contentType === "text" &&
-        (row.direction === "inbound" || row.direction === "outbound") &&
-        (row.senderRole === "visitor" || row.senderRole === "ai_assistant") &&
-        row.body.trim()
-    )
-    .slice(0, 12)
-    .reverse();
-  const bounded: AiTurnInput["compactContext"]["messages"] = [];
-  let remainingCharacters = 12_000;
-
-  for (let index = chronological.length - 1; index >= 0 && remainingCharacters > 0; index -= 1) {
-    const row = chronological[index];
-
-    if (!row) {
-      continue;
-    }
-
-    const fullText = row.body.trim();
-    const text =
-      fullText.length <= remainingCharacters
-        ? fullText
-        : fullText.slice(fullText.length - remainingCharacters);
-
-    bounded.unshift({
-      publicMessageId: row.publicMessageId,
-      direction: row.direction as "inbound" | "outbound",
-      senderRole: row.senderRole as "visitor" | "ai_assistant",
-      contentType: "text",
-      submittedAt: row.submittedAt.toISOString(),
-      text
-    });
-    remainingCharacters -= text.length;
-  }
-
-  return bounded;
 }
 
 type AiSlotRow = {

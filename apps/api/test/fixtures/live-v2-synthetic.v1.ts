@@ -139,7 +139,7 @@ export function buildLiveV2TestTurn(input: {
       aiState: input.gate?.aiState ?? "ai_collecting_info",
       agentAllowedToReply: input.gate?.agentAllowedToReply ?? true
     },
-    previousMessagesNewestFirst: input.previousMessagesNewestFirst ?? []
+    recentMessages: [...(input.previousMessagesNewestFirst ?? [])].reverse()
   });
 }
 

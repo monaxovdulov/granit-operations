@@ -83,7 +83,7 @@ export const REQUIRED_EVIDENCE = [
   },
   {
     path: "apps/api/test/widget-ai-postgres-runtime-invariants.test.ts",
-    sha256: "3819c4d5abd406941e0cffcd35b42dff447f2e0e9d67d2cc77f2c8bf2510b93f",
+    sha256: "95f9118d4084ccb42557e4cba5d245398aa01ebd2db64cdcaa012d06e42e7b13",
     minimumTests: 30,
     sentinels: [
       "allows only one concurrent lease owner for one pending job",

@@ -61,6 +61,11 @@ const LEGACY_ALLOWED_AI_METADATA_KEYS = new Set([
   "latency_ms",
   "model_name",
   "model_provider",
+  "model_request_budget_phase",
+  "model_request_budget_status",
+  "model_request_characters",
+  "model_request_max_characters",
+  "model_transcript_message_count",
   "openai_response_id",
   "policy_version",
   "plan_normalization_reason",
@@ -98,7 +103,10 @@ const BOUNDED_OPERATIONAL_INTEGER_METADATA = new Map([
   ["dropped_recommendation_count", 0],
   ["queue_wait_ms", 0],
   ["response_window_epoch", 0],
-  ["responds_through_sequence", 1]
+  ["responds_through_sequence", 1],
+  ["model_request_characters", 0],
+  ["model_request_max_characters", 0],
+  ["model_transcript_message_count", 0]
 ] as const);
 
 export class AiObservabilitySanitizationError extends Error {
@@ -137,6 +145,14 @@ export function sanitizeAiObservabilityMetadata(
       }
       continue;
     }
+    if (key === "model_request_budget_status") {
+      if (value === "exceeded") sanitized[key] = value;
+      continue;
+    }
+    if (key === "model_request_budget_phase") {
+      if (value === "decision" || value === "final") sanitized[key] = value;
+      continue;
+    }
 
     const minimumInteger = BOUNDED_OPERATIONAL_INTEGER_METADATA.get(
       key as
@@ -146,6 +162,9 @@ export function sanitizeAiObservabilityMetadata(
         | "queue_wait_ms"
         | "response_window_epoch"
         | "responds_through_sequence"
+        | "model_request_characters"
+        | "model_request_max_characters"
+        | "model_transcript_message_count"
     );
     if (minimumInteger !== undefined) {
       if (

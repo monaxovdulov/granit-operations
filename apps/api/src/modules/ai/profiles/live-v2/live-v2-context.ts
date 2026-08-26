@@ -1,9 +1,6 @@
 import type { AiTurnContextMessage, AiTurnInput } from "../../ai-turn.js";
 import {
-  LIVE_V2_CONTEXT_MAX_CHARACTERS,
-  LIVE_V2_CONTEXT_MAX_MESSAGES,
   LIVE_V2_KNOWN_REQUIREMENTS_MAX_ITEMS,
-  LIVE_V2_LAST_AI_QUESTION_MAX_CHARACTERS,
   LIVE_V2_TURN_VIEW_VERSION,
   type LiveV2KnownSlots,
   type LiveV2KnownRequirement,
@@ -20,8 +17,8 @@ import {
 export function buildLiveV2TurnView(input: AiTurnInput): LiveV2TurnView {
   const currentInbound = input.inboundMessage;
 
-  if (!currentInbound.text || currentInbound.text.length > LIVE_V2_CONTEXT_MAX_CHARACTERS) {
-    throw new Error("live_v2 current inbound exceeds the context character limit");
+  if (!currentInbound.text) {
+    throw new Error("live_v2 current inbound is empty");
   }
 
   const previousMessages = input.compactContext.messages.filter(
@@ -29,14 +26,11 @@ export function buildLiveV2TurnView(input: AiTurnInput): LiveV2TurnView {
   );
   const selectedNewestFirst: AiTurnContextMessage[] = [];
   const seenPublicMessageIds = new Set<string>([currentInbound.publicMessageId]);
-  let characterCount = currentInbound.text.length;
 
   for (let index = previousMessages.length - 1; index >= 0; index -= 1) {
     const message = previousMessages[index];
 
-    if (!message || selectedNewestFirst.length >= LIVE_V2_CONTEXT_MAX_MESSAGES - 1) {
-      break;
-    }
+    if (!message) continue;
 
     assertModelSafeMessageShape(message);
 
@@ -44,13 +38,8 @@ export function buildLiveV2TurnView(input: AiTurnInput): LiveV2TurnView {
       continue;
     }
 
-    if (characterCount + message.text.length > LIVE_V2_CONTEXT_MAX_CHARACTERS) {
-      continue;
-    }
-
     selectedNewestFirst.push(message);
     seenPublicMessageIds.add(message.publicMessageId);
-    characterCount += message.text.length;
   }
 
   const selectedPrevious = selectedNewestFirst.reverse();
@@ -66,7 +55,6 @@ export function buildLiveV2TurnView(input: AiTurnInput): LiveV2TurnView {
   return {
     version: LIVE_V2_TURN_VIEW_VERSION,
     messages,
-    lastAiQuestion: findLastAiQuestion(selectedPrevious),
     knownSlots,
     knownSlotProvenance: buildKnownSlotProvenance(input, knownSlots),
     knownRequirements: buildKnownRequirements(input),
@@ -144,47 +132,6 @@ function assertModelSafeMessageShape(message: AiTurnContextMessage): void {
   if (!message.text) {
     throw new Error("live_v2 context contains an empty text message");
   }
-}
-
-function findLastAiQuestion(messages: AiTurnContextMessage[]): string | null {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-
-    if (
-      !message ||
-      message.direction !== "outbound" ||
-      message.senderRole !== "ai_assistant"
-    ) {
-      continue;
-    }
-
-    const questionMarkIndex = message.text.lastIndexOf("?");
-
-    if (questionMarkIndex < 0) {
-      continue;
-    }
-
-    const textBeforeQuestionMark = message.text.slice(0, questionMarkIndex);
-    const previousSentenceBoundary = Math.max(
-      textBeforeQuestionMark.lastIndexOf("."),
-      textBeforeQuestionMark.lastIndexOf("!"),
-      textBeforeQuestionMark.lastIndexOf("?"),
-      textBeforeQuestionMark.lastIndexOf("\n")
-    );
-    const question = message.text
-      .slice(previousSentenceBoundary + 1, questionMarkIndex + 1)
-      .trim();
-
-    if (!question) {
-      continue;
-    }
-
-    return question.length <= LIVE_V2_LAST_AI_QUESTION_MAX_CHARACTERS
-      ? question
-      : question.slice(-LIVE_V2_LAST_AI_QUESTION_MAX_CHARACTERS);
-  }
-
-  return null;
 }
 
 function buildKnownSlots(input: AiTurnInput): LiveV2KnownSlots {

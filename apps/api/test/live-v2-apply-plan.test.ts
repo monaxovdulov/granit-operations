@@ -144,9 +144,9 @@ describe("live_v2 provider-neutral orchestration", () => {
 
     expect(Object.keys(generatorInput.turn).sort()).toEqual([
       "gate",
+      "knownRequirements",
       "knownSlotProvenance",
       "knownSlots",
-      "lastAiQuestion",
       "messages",
       "version"
     ]);
@@ -174,7 +174,7 @@ describe("live_v2 provider-neutral orchestration", () => {
     expect(JSON.stringify(generatorInput.assets.facts)).not.toContain("ownerApproved");
   });
 
-  it("blocks before generation when the incoming context is too long and gate is closed", async () => {
+  it("blocks before generation when the gate is closed", async () => {
     const generateDecision = vi.fn(async () => answerCandidate());
     const turnInput = buildLiveV2TestTurn({
       inbound: "a".repeat(6001),
@@ -306,7 +306,7 @@ describe("live_v2 provider-neutral orchestration", () => {
     expect(gateReader.readGate).toHaveBeenCalledTimes(1);
   });
 
-  it("returns context_invalid and skips generator and gate reader for 6001-char inbound", async () => {
+  it("does not apply the removed 6000-character context cap", async () => {
     const turnInput = buildLiveV2TestTurn({
       inbound: "a".repeat(6001),
       gate: {
@@ -325,15 +325,12 @@ describe("live_v2 provider-neutral orchestration", () => {
     });
 
     expect(outcome).toMatchObject({
-      status: "context_invalid",
-      validation: null,
-      plan: {
-        kind: "no_reply",
-        reason: "context_invalid"
-      }
+      status: "evaluated",
+      validation: { ok: true },
+      plan: { kind: "persist_reply" }
     });
-    expect(generateDecision).not.toHaveBeenCalled();
-    expect(gateReader.readGate).not.toHaveBeenCalled();
+    expect(generateDecision).toHaveBeenCalledTimes(1);
+    expect(gateReader.readGate).toHaveBeenCalledTimes(1);
   });
 
   it("blocks an invalid generated candidate before any apply step", async () => {

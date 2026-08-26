@@ -50,7 +50,12 @@ describe("AI observability metadata sanitizer", () => {
       public_session_id: "550e8400-e29b-41d4-a716-446655440000",
       queue_wait_ms: 27,
       response_window_epoch: 0,
-      responds_through_sequence: 3
+      responds_through_sequence: 3,
+      model_request_budget_status: "exceeded",
+      model_request_budget_phase: "final",
+      model_request_characters: 256_001,
+      model_request_max_characters: 256_000,
+      model_transcript_message_count: 65
     });
 
     expect(sanitized).toEqual({
@@ -75,7 +80,12 @@ describe("AI observability metadata sanitizer", () => {
       public_session_id: "550e8400-e29b-41d4-a716-446655440000",
       queue_wait_ms: 27,
       response_window_epoch: 0,
-      responds_through_sequence: 3
+      responds_through_sequence: 3,
+      model_request_budget_status: "exceeded",
+      model_request_budget_phase: "final",
+      model_request_characters: 256_001,
+      model_request_max_characters: 256_000,
+      model_transcript_message_count: 65
     });
   });
 
@@ -84,7 +94,10 @@ describe("AI observability metadata sanitizer", () => {
       sanitizeAiObservabilityMetadata({
         queue_wait_ms: -1,
         response_window_epoch: 1.5,
-        responds_through_sequence: 0
+        responds_through_sequence: 0,
+        model_request_characters: -1,
+        model_request_max_characters: 1.5,
+        model_transcript_message_count: 2_147_483_648
       })
     ).toEqual({});
   });

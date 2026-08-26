@@ -1,16 +1,12 @@
 import type { WidgetAiUsage } from "../ports/widget-ai-usage.js";
+import {
+  serializeOpenAiStructuredResponseBody,
+  type OpenAiStructuredResponseBodyInput
+} from "../ports/openai-structured-response-body.js";
 
-export type OpenAiStructuredResponseRequest = {
+export type OpenAiStructuredResponseRequest = OpenAiStructuredResponseBodyInput & {
   apiKey: string;
-  model: string;
   timeoutMs: number;
-  instructions: string;
-  input: string;
-  formatName?: string;
-  schema?: Record<string, unknown>;
-  metadata: Record<string, string>;
-  maxOutputTokens: number;
-  reasoningEffort?: "low" | "medium" | "high";
   signal?: AbortSignal;
 };
 
@@ -48,30 +44,7 @@ export async function requestOpenAiStructuredResponse(
         "Content-Type": "application/json",
         Authorization: `Bearer ${request.apiKey}`
       },
-      body: JSON.stringify({
-        model: request.model,
-        store: false,
-        instructions: request.instructions,
-        input: request.input,
-        max_output_tokens: request.maxOutputTokens,
-        reasoning: {
-          effort: request.reasoningEffort ?? "low"
-        },
-        text: request.schema && request.formatName
-          ? {
-              verbosity: "low",
-              format: {
-                type: "json_schema",
-                name: request.formatName,
-                strict: true,
-                schema: request.schema
-              }
-            }
-          : {
-              verbosity: "low"
-            },
-        metadata: request.metadata
-      }),
+      body: serializeOpenAiStructuredResponseBody(request),
       signal: controller.signal
     });
 

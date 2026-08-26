@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { buildStageASiteWidgetAiTurnInput } from '../src/modules/ai/ai-turn.js';
 import { loadPinnedCatalogIndex } from '../src/modules/ai/catalog/pinned-catalog-index.js';
 import { executeModelTurn } from '../src/modules/ai/profiles/live-v2/model-turn-orchestrator.js';
+import { LIVE_V2_MAX_INPUT_CHARACTERS } from '../src/modules/ai/ports/live-v2-runtime.js';
 import { TEST_LIVE_V2_FACTS } from './fixtures/live-v2-synthetic.v1.js';
 
 describe('bounded model-turn orchestration', () => {
@@ -44,6 +45,7 @@ describe('bounded model-turn orchestration', () => {
     expect(generator.mock.calls[0]?.[0]).toMatchObject({ responseMode: 'turn_action' });
     expect(generator.mock.calls[1]?.[0]).toMatchObject({
       responseMode: 'final_result',
+      turn: generator.mock.calls[0]?.[0].turn,
       catalogSearch: {
         status: 'succeeded',
         candidates: [expect.objectContaining({ id: 'ent_ae4234fc4a358865' })],
@@ -67,6 +69,43 @@ describe('bounded model-turn orchestration', () => {
         status: 'succeeded',
         candidateIds: ['ent_ae4234fc4a358865'],
       },
+    });
+  });
+
+  it('uses a safe fallback without a model call when the full request exceeds its budget', async () => {
+    const generator = vi.fn(async () => finalAction('answer'));
+    const input = turnInput();
+    input.compactContext.messages = [
+      {
+        publicMessageId: '33333333-3333-4333-8333-333333333333',
+        direction: 'inbound',
+        senderRole: 'visitor',
+        contentType: 'text',
+        submittedAt: '2026-08-25T11:59:00.000Z',
+        text: 'x'.repeat(LIVE_V2_MAX_INPUT_CHARACTERS),
+      },
+    ];
+
+    const outcome = await execute({ generator, search: vi.fn(), turn: input });
+
+    expect(generator).not.toHaveBeenCalled();
+    expect(outcome.plan).toMatchObject({
+      kind: 'persist_reply',
+      validatedPlan: {
+        responseAction: 'answer',
+        recommendationIds: [],
+        validationResults: expect.arrayContaining(['final_output_invalid']),
+      },
+    });
+    expect(outcome.trace).toMatchObject({
+      modelCallCount: 0,
+      requestBudget: {
+        status: 'exceeded',
+        phase: 'decision',
+        maxCharacters: LIVE_V2_MAX_INPUT_CHARACTERS,
+        transcriptMessageCount: 2,
+      },
+      selectedAction: 'safe_fallback',
     });
   });
 
@@ -191,9 +230,10 @@ async function execute(input: {
   generator: ReturnType<typeof vi.fn>;
   search: ReturnType<typeof vi.fn>;
   timeoutMs?: number;
+  turn?: ReturnType<typeof turnInput>;
 }) {
   return executeModelTurn({
-    turnInput: turnInput(),
+    turnInput: input.turn ?? turnInput(),
     approvedFacts: TEST_LIVE_V2_FACTS,
     catalogSnapshot: await loadPinnedCatalogIndex(),
     generator: { generateDecision: input.generator },

@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import {
   SITE_WIDGET_MESSAGE_EVENT_TYPE,
   SITE_WIDGET_V2_CONTRACT_VERSION,
@@ -8,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { buildApi } from "../src/app.js";
 import {
+  LIVE_V2_MAX_INPUT_CHARACTERS,
   LiveV2GenerationError,
   type ObservedLiveV2DecisionGenerator
 } from "../src/modules/ai/ports/live-v2-runtime.js";
@@ -479,6 +482,97 @@ describe("M2 app-owned direct live_v2 runtime", () => {
     });
     expect(repository.lastAiSaveInput?.metadata.catalog_references).toHaveLength(3);
   });
+
+  it("persists sanitized budget evidence and a safe fallback without calling the model", async () => {
+    const repository = new MemoryIntakeRepository();
+    const publicSessionId = "44444444-4444-4444-8444-444444444444";
+    const privateMarker = "private-budget-marker";
+
+    for (let index = 0; index < 64; index += 1) {
+      const request = widgetRequest(
+        `budget-history-${String(index).padStart(2, "0")}`,
+        `${privateMarker}-${index}-`.padEnd(4_000, "x"),
+        publicSessionId
+      );
+      await repository.saveAcceptedSiteWidgetMessage({
+        publicMessageId: randomUUID(),
+        publicSessionId,
+        agentAllowedToReply: true,
+        request,
+        requestFingerprint: sha256Hex(JSON.stringify(request))
+      });
+    }
+
+    const generateDecision = vi.fn<ObservedLiveV2DecisionGenerator["generateDecision"]>();
+    const app = track(
+      buildApi({
+        repository,
+        widgetAi: {
+          enabled: true,
+          directLiveV2: {
+            generator: { generateDecision },
+            modelName: "gpt-5.6-luna",
+            approvedFacts: TEST_LIVE_V2_FACTS
+          },
+          jobWorker: testJobWorkerOptions()
+        }
+      })
+    );
+    const response = await app.inject({
+      method: "POST",
+      url: "/public/intake/site-widget/messages",
+      payload: widgetRequest("budget-current-0001", "Финальное сообщение", publicSessionId)
+    });
+    expect(response.statusCode, JSON.stringify(response.json())).toBe(202);
+    for (let attempt = 0; attempt < 200 && !repository.lastAiSaveInput; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    const historyResponse = await app.inject({
+      method: "GET",
+      url: `/public/intake/site-widget/sessions/${response.json().public_session_id}/history?schema_version=site_widget.history.v2`
+    });
+    const history = historyResponse.json();
+
+    expect(generateDecision).not.toHaveBeenCalled();
+    expect(repository.lastAiSaveInput).toBeDefined();
+    expect(history.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sender_role: "ai_assistant",
+          text: expect.stringContaining("не удалось подготовить точный подбор")
+        })
+      ])
+    );
+    expect(repository.lastAiSaveInput?.metadata).toMatchObject({
+      model_call_count: 0,
+      selected_response_action: "safe_fallback",
+      model_request_budget_status: "exceeded",
+      model_request_budget_phase: "decision",
+      model_request_max_characters: LIVE_V2_MAX_INPUT_CHARACTERS,
+      model_transcript_message_count: 65
+    });
+    expect(repository.lastAiSaveInput?.metadata.model_request_characters).toBeGreaterThan(
+      LIVE_V2_MAX_INPUT_CHARACTERS
+    );
+    expect(JSON.stringify(repository.lastAiSaveInput?.metadata)).not.toContain(privateMarker);
+    expect(repository.lastAiSaveInput?.handoff).toBeUndefined();
+    const persistedLead = await repository.getManagerLead(
+      repository.lastAiSaveInput!.leadId
+    );
+    const persistedEvent = [...(persistedLead?.timeline ?? [])].reverse().find(
+      (event) => event.eventType === "conversation.ai_message_sent"
+    );
+    expect(persistedEvent?.metadata).toMatchObject({
+      model_request_budget_status: "exceeded",
+      model_request_budget_phase: "decision",
+      model_request_max_characters: LIVE_V2_MAX_INPUT_CHARACTERS,
+      model_transcript_message_count: 65
+    });
+    expect(persistedEvent?.metadata.model_request_characters).toBeGreaterThan(
+      LIVE_V2_MAX_INPUT_CHARACTERS
+    );
+    expect(JSON.stringify(persistedEvent?.metadata)).not.toContain(privateMarker);
+  });
 });
 
 function observed(candidate: unknown, runtimeRunId?: string) {
@@ -517,7 +611,10 @@ async function waitForTerminalHistory(
       url: `/public/intake/site-widget/sessions/${publicSessionId}/history?schema_version=site_widget.history.v2`
     });
     const body = response.json();
-    const status = body.messages?.[0]?.automation?.status;
+    const status = body.messages
+      ?.map((message: { automation?: { status?: string } }) => message.automation?.status)
+      .filter(Boolean)
+      .at(-1);
 
     if (status && !["pending", "processing", "retrying"].includes(status)) {
       return body;
@@ -531,13 +628,15 @@ async function waitForTerminalHistory(
 
 function widgetRequest(
   idempotencyKey: string,
-  messageText: string
+  messageText: string,
+  publicSessionId?: string
 ): SiteWidgetMessageRequest {
   return {
     schema_version: SITE_WIDGET_V2_CONTRACT_VERSION,
     event_type: SITE_WIDGET_MESSAGE_EVENT_TYPE,
     idempotency_key: idempotencyKey,
     submitted_at: "2026-07-14T20:00:00.000Z",
+    ...(publicSessionId ? { public_session_id: publicSessionId } : {}),
     source: {
       channel: "site_widget",
       page_url: "https://granit.example/catalog/widget",

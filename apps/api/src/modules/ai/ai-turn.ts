@@ -19,9 +19,7 @@ import {
 
 export const AI_TURN_INPUT_VERSION = "granit_ai_turn_input.stage_b.v2";
 export const AI_TURN_EXECUTION_CONTEXT_VERSION = "granit_ai_turn_execution_context.v1";
-export const AI_TURN_CONTEXT_CURSOR_VERSION = "conversation_updated_at.v1";
-export const AI_TURN_CONTEXT_MAX_MESSAGES = 8;
-export const AI_TURN_CONTEXT_MAX_CHARACTERS = 8_000;
+export const AI_TURN_CONTEXT_CURSOR_VERSION = "message_sequence.v1";
 export const PUBLIC_WIDGET_CATALOG_ACTION_LIMIT = 3;
 
 export type AiReplyCapableChannel = "site_widget";
@@ -257,7 +255,6 @@ export type BuildStageASiteWidgetAiTurnInput = {
     agentAllowedToReply: boolean;
   };
   recentMessages?: AiTurnInput["compactContext"]["messages"];
-  previousMessagesNewestFirst?: AiTurnContextMessage[];
   rollingSummary?: AiTurnInput["compactContext"]["rollingSummary"];
   persistedSlots?: AiKnownSlots;
   persistedRequirements?: AiTurnInput["knownRequirements"];
@@ -296,59 +293,6 @@ export function buildSiteWidgetAiTurnExecutionContext(
   };
 }
 
-export type BuildBoundedAiTurnContextInput = {
-  currentInboundMessage: AiTurnContextMessage & {
-    direction: "inbound";
-    senderRole: "visitor";
-  };
-  previousMessagesNewestFirst: AiTurnContextMessage[];
-  maxMessages?: number;
-  maxCharacters?: number;
-};
-
-export function buildBoundedAiTurnContext(
-  input: BuildBoundedAiTurnContextInput
-): AiTurnContextMessage[] {
-  const maxMessages = input.maxMessages ?? AI_TURN_CONTEXT_MAX_MESSAGES;
-  const maxCharacters = input.maxCharacters ?? AI_TURN_CONTEXT_MAX_CHARACTERS;
-
-  if (!Number.isInteger(maxMessages) || maxMessages < 1) {
-    throw new Error("AI turn context maxMessages must be a positive integer");
-  }
-
-  if (!Number.isInteger(maxCharacters) || maxCharacters < 1) {
-    throw new Error("AI turn context maxCharacters must be a positive integer");
-  }
-
-  if (input.currentInboundMessage.text.length > maxCharacters) {
-    throw new Error("accepted inbound message exceeds the AI turn context character limit");
-  }
-
-  const selectedNewestFirst: AiTurnContextMessage[] = [input.currentInboundMessage];
-  const seenPublicMessageIds = new Set([input.currentInboundMessage.publicMessageId]);
-  let characterCount = input.currentInboundMessage.text.length;
-
-  for (const message of input.previousMessagesNewestFirst) {
-    if (selectedNewestFirst.length >= maxMessages) {
-      break;
-    }
-
-    if (seenPublicMessageIds.has(message.publicMessageId)) {
-      continue;
-    }
-
-    if (characterCount + message.text.length > maxCharacters) {
-      break;
-    }
-
-    selectedNewestFirst.push(message);
-    seenPublicMessageIds.add(message.publicMessageId);
-    characterCount += message.text.length;
-  }
-
-  return selectedNewestFirst.reverse();
-}
-
 export function buildStageASiteWidgetAiTurnInput(
   input: BuildStageASiteWidgetAiTurnInput
 ): AiTurnInput {
@@ -381,21 +325,7 @@ export function buildStageASiteWidgetAiTurnInput(
     customer: input.customer,
     visitor: input.visitor,
     compactContext: {
-      messages:
-        input.recentMessages ??
-        (input.previousMessagesNewestFirst
-          ? buildBoundedAiTurnContext({
-              currentInboundMessage: {
-                publicMessageId: input.publicMessageId,
-                direction: "inbound",
-                senderRole: "visitor",
-                contentType: "text",
-                submittedAt: input.submittedAt,
-                text: input.text
-              },
-              previousMessagesNewestFirst: input.previousMessagesNewestFirst
-            })
-          : []),
+      messages: input.recentMessages ?? [],
       rollingSummary: input.rollingSummary
     },
     knownRequirements: input.persistedRequirements ?? [],

@@ -7,9 +7,6 @@ export const LIVE_V2_DECISION_PROFILE = "live_v2" as const;
 export const LIVE_V2_CANDIDATE_VERSION = "granit_live_v2_candidate.v1" as const;
 export const LIVE_V2_TURN_VIEW_VERSION = "granit_live_v2_turn_view.v1" as const;
 
-export const LIVE_V2_CONTEXT_MAX_MESSAGES = 8;
-export const LIVE_V2_CONTEXT_MAX_CHARACTERS = 6_000;
-export const LIVE_V2_LAST_AI_QUESTION_MAX_CHARACTERS = 320;
 export const LIVE_V2_KNOWN_REQUIREMENTS_MAX_ITEMS = 24;
 
 export type LiveV2Action =
@@ -138,7 +135,6 @@ export type LiveV2Gate = {
 export type LiveV2TurnView = {
   version: typeof LIVE_V2_TURN_VIEW_VERSION;
   messages: LiveV2TurnViewMessage[];
-  lastAiQuestion: string | null;
   knownSlots: LiveV2KnownSlots;
   knownSlotProvenance: LiveV2KnownSlotProvenance;
   knownRequirements: LiveV2KnownRequirement[];

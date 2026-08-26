@@ -150,6 +150,8 @@ const ALLOWED_CATALOG_SEARCH_STATUSES = new Set([
   "failed",
   "timed_out"
 ]);
+const ALLOWED_MODEL_REQUEST_BUDGET_STATUSES = new Set(["exceeded"]);
+const ALLOWED_MODEL_REQUEST_PHASES = new Set(["decision", "final"]);
 const ALLOWED_MODEL_TURN_VALIDATION_RESULTS = new Set([
   "duplicate_question",
   "known_slot_requested",
@@ -266,6 +268,8 @@ function safeModelTurnDiagnostics(metadata: Record<string, unknown>) {
     ALLOWED_MODEL_TURN_VALIDATION_RESULTS,
     32
   );
+  const budgetStatus = metadata.model_request_budget_status;
+  const budgetPhase = metadata.model_request_budget_phase;
 
   return {
     ...(isNonNegativeInteger(metadata.model_call_count)
@@ -295,7 +299,23 @@ function safeModelTurnDiagnostics(metadata: Record<string, unknown>) {
       : {}),
     ...(candidateIds ? { catalog_candidate_ids: candidateIds } : {}),
     ...(finalIds ? { final_recommendation_ids: finalIds } : {}),
-    ...(validationResults ? { validation_results: validationResults } : {})
+    ...(validationResults ? { validation_results: validationResults } : {}),
+    ...(typeof budgetStatus === "string" &&
+      ALLOWED_MODEL_REQUEST_BUDGET_STATUSES.has(budgetStatus)
+      ? { model_request_budget_status: budgetStatus }
+      : {}),
+    ...(typeof budgetPhase === "string" && ALLOWED_MODEL_REQUEST_PHASES.has(budgetPhase)
+      ? { model_request_budget_phase: budgetPhase }
+      : {}),
+    ...(isNonNegativeInteger(metadata.model_request_characters)
+      ? { model_request_characters: metadata.model_request_characters }
+      : {}),
+    ...(isNonNegativeInteger(metadata.model_request_max_characters)
+      ? { model_request_max_characters: metadata.model_request_max_characters }
+      : {}),
+    ...(isNonNegativeInteger(metadata.model_transcript_message_count)
+      ? { model_transcript_message_count: metadata.model_transcript_message_count }
+      : {})
   };
 }
 

@@ -13,9 +13,10 @@ Production enablement still requires separate manual owner approval.
 1. The visitor message is durably persisted before model generation.
 2. A PostgreSQL job is claimed only while the conversation gate, generation
    epoch, latest visitor sequence and lease are current.
-3. Authoritative conversation state is read after claim. The model receives a
-   bounded view with the current inbound, recent safe messages, known slots and
-   approved static facts.
+3. Authoritative conversation state is read after claim. The model receives the
+   full model-safe visitor/AI transcript through the claimed message sequence,
+   including the current inbound exactly once, plus known slots, requirements
+   and approved static facts.
 4. The main model returns a typed `granit_model_turn.v2` action. It either
    finishes the turn or requests the single read-only `search_catalog` tool.
    The backend does not infer a category from visitor keywords.
@@ -66,10 +67,19 @@ remain separate owner gates.
 
 ## Conversation state
 
-- Fresh context is assembled from app-owned conversation messages, slots,
-  requirements and memory after a job is claimed.
-- The model-safe view is bounded and excludes internal IDs, timestamps, URLs,
-  contact values and unrestricted metadata.
+- Fresh context is assembled from app-owned conversation messages, slots and
+  requirements after a job is claimed.
+- The model-safe transcript contains every non-empty text message with the
+  `visitor` or `ai_assistant` role through the current causal cursor, ordered by
+  message sequence. Manager/system/non-text messages are excluded.
+- The model-safe view excludes separate internal/public IDs, timestamps, URLs,
+  contact values and unrestricted metadata. Raw visitor/assistant text remains
+  the actual conversation and may contain data that the visitor typed.
+- One app-owned 256,000-character gate covers the exact serialized Responses
+  request body, including model settings, response schema, metadata,
+  instructions, transcript, tools, tone, facts and catalog results. Overflow is
+  not silently truncated or summarized; the current turn receives the safe
+  text-only fallback without manager handoff.
 - Important saved business slots include model-safe provenance, while the
   current visitor message remains visible and has prompt-level priority over a
   conflicting saved value. The backend does not silently add saved values as
@@ -77,8 +87,9 @@ remain separate owner gates.
 - Slot and requirement patches apply only when their value is supported by a
   unique exact quote from the current visitor message.
 - Manager-authored values cannot be silently overwritten.
-- A summary or previous assistant statement is context, not evidence for a new
-  visitor fact.
+- A previous assistant statement is context, not evidence for a new visitor
+  fact. The direct runtime does not use a rolling summary in place of the
+  transcript.
 
 ## Handoff and degradation
 
@@ -104,6 +115,8 @@ remain separate owner gates.
 - Terminal validator evidence may retain only an allowlisted historical code;
   raw prompts, model output, customer traces, provider errors and PII are not
   added to manager/public observability.
+- Request-budget overflow records only the phase and numeric request limit,
+  size and transcript message count. It never records raw transcript text.
 - Historical `unsafe_claim`, `tone_violation` and `repeated_reply` codes remain
   readable for old durable evidence. Their presence in the enum does not make
   them current live terminal gates.

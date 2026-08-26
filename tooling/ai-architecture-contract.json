@@ -9,9 +9,9 @@
       "apps/api/src/widget-ai-runtime-assembly.ts"
     ],
     "provider_boundary": "apps/api/src/modules/ai/adapters/openai-live-v2-decision-generator.ts",
-    "source_count": 145,
-    "source_paths_sha256": "2920e0d785124ba77393c8ceba6b9108aac2d386a005874cf722538367e66ec7",
-    "source_contents_sha256": "f63121248ee679b330c24c3dd4157f27560b46ff2f0a94a5256efd3e83655d3d"
+    "source_count": 147,
+    "source_paths_sha256": "bb6fb7f084ef19aeaac25db9efbdc720c8281375eac3e1512a6aafb701964802",
+    "source_contents_sha256": "888ce49ec32ea3f57d1cabb09388b0d09c44bff5f7026ad8aaa1e5cb81191095"
   },
   "documents": {
     "active_goal": "docs/tasks/AI_LAYER_SIMPLIFICATION_GOAL_RU.md",
@@ -36,8 +36,8 @@
     "allowed_provenance_paths": [
       "docs/tasks/ARCHIVE_RU.md"
     ],
-    "task_count": 27,
-    "task_paths_sha256": "c5582abb3ea2fd68ff6d6ef6ad760b746414e3d79b6e7554c908794d8f1c425e",
+    "task_count": 28,
+    "task_paths_sha256": "9ba92f98ce7a5edadc1a88ae4da799984af82f3e217245982283c0e6857ec71e",
     "routing_surface_hashes": {
       "docs/source-of-truth.md": "2d65a17e51a68dc07f8b8daee5e398beca067331de8d0633617510edb2cd47a5",
       "docs/tasks/README.md": "441b27d6716d9dea233a1956234c5726286a2836284d815b3a2a59831fb31ff4"

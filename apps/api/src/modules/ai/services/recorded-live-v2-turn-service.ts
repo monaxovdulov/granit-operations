@@ -914,11 +914,21 @@ function decisionMetadata(
 
 function modelTurnTraceMetadata(trace: ModelTurnTrace) {
   const search = trace.catalogSearch;
+  const requestBudget = trace.requestBudget;
   return {
     model_call_count: trace.modelCallCount,
     selected_response_action: trace.selectedAction,
     catalog_search_called: trace.searchCatalogCalled,
     final_recommendation_ids: trace.finalRecommendationIds,
+    ...(requestBudget
+      ? {
+          model_request_budget_status: requestBudget.status,
+          model_request_budget_phase: requestBudget.phase,
+          model_request_characters: requestBudget.requestCharacters,
+          model_request_max_characters: requestBudget.maxCharacters,
+          model_transcript_message_count: requestBudget.transcriptMessageCount
+        }
+      : {}),
     ...(search
       ? {
           catalog_search_status: search.status,

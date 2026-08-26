@@ -1,7 +1,19 @@
+import {
+  DIRECT_LIVE_V2_OPENAI_MODEL,
+  DIRECT_LIVE_V2_OPENAI_REASONING_EFFORT
+} from "../../../config.js";
+import {
+  FINAL_TURN_RESULT_JSON_SCHEMA,
+  MODEL_TURN_ACTION_JSON_SCHEMA
+} from "../profiles/live-v2/model-turn-validator.js";
 import type { LiveV2GeneratorInput } from "../profiles/live-v2/live-v2-orchestrator.js";
+import { LIVE_V2_PROVIDER_CANDIDATE_JSON_SCHEMA } from "../profiles/live-v2/live-v2-validator.js";
 import { isSafeWidgetAiModelName } from "../widget-ai-model-name.js";
+import { serializeOpenAiStructuredResponseBody } from "./openai-structured-response-body.js";
 
-export const LIVE_V2_MAX_INPUT_CHARACTERS = 64_000;
+// App-owned circuit breaker sized for short consultations; the provider window
+// is deliberately not the application budget.
+export const LIVE_V2_MAX_INPUT_CHARACTERS = 256_000;
 export const LIVE_V2_MAX_OUTPUT_TOKENS = 4_000;
 export const LIVE_V2_PROVIDER_TIMEOUT_MS = 15_000;
 
@@ -79,9 +91,33 @@ export class LiveV2GenerationError extends Error {
 }
 
 export function buildLiveV2ModelRequest(input: LiveV2GeneratorInput): {
+  model: string;
   instructions: string;
   serializedInput: string;
+  formatName: string;
+  schema: Record<string, unknown>;
+  metadata: Record<string, string>;
+  maxOutputTokens: number;
+  reasoningEffort: "low" | "medium" | "high";
+  requestCharacters: number;
 } {
+  const request = serializeLiveV2ModelRequest(input);
+
+  if (request.requestCharacters > LIVE_V2_MAX_INPUT_CHARACTERS) {
+    throw new LiveV2GenerationError(undefined, "invalid_request");
+  }
+
+  return request;
+}
+
+export function measureLiveV2ModelRequestCharacters(
+  input: LiveV2GeneratorInput
+): number {
+  return serializeLiveV2ModelRequest(input).requestCharacters;
+}
+
+function serializeLiveV2ModelRequest(input: LiveV2GeneratorInput) {
+  const instructions = input.assets.prompt.instructions.join("\n");
   const serializedInput = JSON.stringify({
     decisionProfile: "live_v2",
     turn: input.turn,
@@ -91,14 +127,61 @@ export function buildLiveV2ModelRequest(input: LiveV2GeneratorInput): {
     tone: input.assets.tone,
     facts: input.assets.facts
   });
-
-  if (serializedInput.length > LIVE_V2_MAX_INPUT_CHARACTERS) {
-    throw new LiveV2GenerationError(undefined, "invalid_request");
-  }
+  const responseContract = selectResponseContract(input.responseMode);
+  const request = {
+    model: DIRECT_LIVE_V2_OPENAI_MODEL,
+    instructions,
+    input: serializedInput,
+    formatName: responseContract.formatName,
+    schema: responseContract.schema,
+    metadata: {
+      channel: "site_widget",
+      decision_profile: "live_v2",
+      turn_contract: "granit_model_turn.v2",
+      call_phase: responseContract.callPhase
+    },
+    maxOutputTokens: LIVE_V2_MAX_OUTPUT_TOKENS,
+    reasoningEffort: DIRECT_LIVE_V2_OPENAI_REASONING_EFFORT
+  };
 
   return {
-    instructions: input.assets.prompt.instructions.join("\n"),
-    serializedInput
+    model: request.model,
+    instructions,
+    serializedInput,
+    formatName: request.formatName,
+    schema: request.schema,
+    metadata: request.metadata,
+    maxOutputTokens: request.maxOutputTokens,
+    reasoningEffort: request.reasoningEffort,
+    requestCharacters: serializeOpenAiStructuredResponseBody(request).length
+  };
+}
+
+function selectResponseContract(
+  responseMode: LiveV2GeneratorInput["responseMode"]
+): {
+  formatName: string;
+  schema: Record<string, unknown>;
+  callPhase: string;
+} {
+  if (responseMode === "legacy_candidate") {
+    return {
+      formatName: "granit_live_v2_candidate",
+      schema: LIVE_V2_PROVIDER_CANDIDATE_JSON_SCHEMA,
+      callPhase: "legacy_candidate"
+    };
+  }
+  if (responseMode === "final_result") {
+    return {
+      formatName: "granit_final_turn_result",
+      schema: FINAL_TURN_RESULT_JSON_SCHEMA,
+      callPhase: "final"
+    };
+  }
+  return {
+    formatName: "granit_model_turn_action",
+    schema: MODEL_TURN_ACTION_JSON_SCHEMA,
+    callPhase: "decision"
   };
 }
 

@@ -2479,6 +2479,36 @@ describe.sequential("PR0a real PostgreSQL widget AI runtime invariants", () => {
     ]);
   });
 
+  it("loads the full causal transcript beyond twenty messages for the claimed turn", async () => {
+    const sessionId = randomUUID();
+    const modelTranscripts: string[][] = [];
+    const { service, worker } = runtime({
+      async generateReply(input) {
+        modelTranscripts.push(input.compactContext.messages.map((message) => message.text));
+        return reply(`Ответ на: ${input.inboundMessage.text}`);
+      }
+    });
+
+    for (let turn = 1; turn <= 11; turn += 1) {
+      await accept(
+        service,
+        widgetRequest(`full-transcript-${String(turn).padStart(2, "0")}`, {
+          sessionId,
+          text: `Сообщение посетителя ${turn}`
+        })
+      );
+      await drain(worker, 1);
+    }
+
+    const finalTranscript = modelTranscripts.at(-1) ?? [];
+    expect(finalTranscript).toHaveLength(21);
+    expect(finalTranscript[0]).toBe("Сообщение посетителя 1");
+    expect(finalTranscript.at(-1)).toBe("Сообщение посетителя 11");
+    expect(
+      finalTranscript.filter((text) => text === "Сообщение посетителя 11")
+    ).toHaveLength(1);
+  });
+
   it("retires migrated non-latest pending jobs before history polling", async () => {
     const sessionId = randomUUID();
     const { service, worker } = runtime();
