@@ -32,6 +32,8 @@ Prefer the Russian template in this directory for new owner-facing evidence.
 
 Current evidence records:
 
+- `AUTOMATIC_MAIN_TO_STAGING_20260827_RU.md` - активация автоматического
+  backend/manager deploy из `main`, exact-SHA smoke и live rollback recovery.
 - `AUDIT_STAGING_DEPLOY_20260818_RU.md` - exact audit backend deployment paired
   with the live rebuilt catalog and widget, including schema reconciliation,
   rollback artifacts, skipped owner-manual smoke and the remaining new-catalog

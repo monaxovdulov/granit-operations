@@ -1,6 +1,6 @@
 # Автоматический `main → staging` для backend/manager
 
-Статус: `technical_done`; live activation/evidence pending.
+Статус: `done`; live activation и rollback evidence приняты 2026-08-27.
 
 ## Результат
 
@@ -53,6 +53,8 @@ immutable backend image, пересоздаёт только `ops-api` и при
 
 Installation contract и operator rollback описаны в
 [`../runbooks/STAGING_BACKEND_AUTODEPLOY_RU.md`](../runbooks/STAGING_BACKEND_AUTODEPLOY_RU.md).
+Фактическая активация зафиксирована в
+[`../release/evidence/AUTOMATIC_MAIN_TO_STAGING_20260827_RU.md`](../release/evidence/AUTOMATIC_MAIN_TO_STAGING_20260827_RU.md).
 
 ## Риски и rollback
 

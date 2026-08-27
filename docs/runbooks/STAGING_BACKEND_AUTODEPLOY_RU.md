@@ -1,6 +1,6 @@
 # Автоматический deploy backend/manager `main → staging`
 
-Статус: repo-local implementation accepted; live activation не выполнена.
+Статус: active; первый exact-SHA deploy и rollback drill приняты 2026-08-27.
 
 ## Что делает схема
 

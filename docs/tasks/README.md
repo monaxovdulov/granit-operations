@@ -4,12 +4,12 @@
 roadmap-формулировки не делает его текущей инструкцией: карточка активируется
 только отдельной командой владельца.
 
-## Active operations task
+## Last completed operations task
 
-Владелец активировал
+Владелец завершил
 [`AUTOMATIC_MAIN_TO_STAGING_RU.md`](AUTOMATIC_MAIN_TO_STAGING_RU.md):
 repo-local автоматизацию `granit-operations/main → staging` только для
-backend/manager. Это не активирует следующий legacy cleanup slice.
+backend/manager. Следующая AI-карточка этим автоматически не активирована.
 
 ## Active AI route
 
