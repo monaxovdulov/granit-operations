@@ -5,6 +5,7 @@ coverage/
 .turbo/
 .cache/
 .pnpm-store/
+__pycache__/
 
 .env
 .env.*
