@@ -4,17 +4,17 @@ Status: accepted by owner
 Date: 2026-08-04
 Repo scope: `granit-operations`
 Related completed Goal: `docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md`;
-current active Goal: `docs/tasks/AI_LAYER_SIMPLIFICATION_GOAL_RU.md`;
+completed Goal provenance: `docs/tasks/AI_LAYER_SIMPLIFICATION_GOAL_RU.md`;
 retired task provenance: `docs/tasks/ARCHIVE_RU.md`
 
-Current-state reconciliation (2026-08-06): this ADR's ownership decision remains
+Current-state reconciliation (2026-08-27): this ADR's ownership decision remains
 accepted, while its original PR0a—PR9 sequencing and bounded-Mastra wording are
-historical. The current implementation order is the active
-`AI-LAYER-SIMPLIFICATION` Goal/card. `AI-RUNTIME-CONVERGENCE` completed with
-`understanding_verified`; CONV-3 removed the Mastra dependency/runtime
-and executable `legacy_s05`; returning a second runtime requires a new accepted
-ADR and owner stop-gate. Historical wording below is retained as decision
-provenance, not active routing.
+historical. `AI-RUNTIME-CONVERGENCE`, `AI-LAYER-SIMPLIFICATION` and AILR-03 are
+completed provenance, not active routing. Current work starts from the
+current-runtime map and an explicitly activated task card, if one exists.
+CONV-3 removed the Mastra dependency/runtime and executable `legacy_s05`;
+returning a second runtime requires a new accepted ADR and owner stop-gate.
+Historical wording below is retained as decision provenance.
 
 ## Context
 
@@ -64,7 +64,8 @@ contracts, migrations или manager controls. Его последующее у�
 ## Consequences
 
 - Новые AI-задачи начинаются с `README.md`, `docs/source-of-truth.md`, этого ADR,
-  актуальных owner architecture docs и текущей `AI_REF_*` карточки.
+  актуальных owner architecture docs, current-runtime map и явно активированной
+  карточки текущего среза, если она существует.
 - Расхождение кода и target docs фиксируется как gap, а не скрывается выбором
   удобного источника.
 - Изменение runtime ownership или roadmap снова требует owner stop-gate.

@@ -6,13 +6,14 @@ Repo scope: `granit-operations`
 Retired reconciliation provenance: `docs/tasks/ARCHIVE_RU.md`
 Reconciled: 2026-08-04 by `ADR-012-REPO_LOCAL_AI_SOURCE_OF_TRUTH_RU.md`
 
-Current-state reconciliation (2026-08-06): CONV-3 removed the Mastra
+Current-state reconciliation (2026-08-27): CONV-3 removed the Mastra
 dependency/runtime and executable `legacy_s05`. The observability ownership and
 privacy rules of this ADR remain accepted; references below to an existing
 Mastra adapter describe the historical state at adoption and do not authorize a
 second runtime. `AI-RUNTIME-CONVERGENCE` subsequently completed with
-`understanding_verified`; current sequencing comes from the active
-`AI-LAYER-SIMPLIFICATION` Goal/card.
+`understanding_verified`; `AI-LAYER-SIMPLIFICATION` and AILR-03 are also
+completed provenance. Current work is routed through the current-runtime map
+and an explicitly activated task card, if one exists.
 
 ## Context
 

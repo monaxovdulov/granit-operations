@@ -45,10 +45,10 @@ repetition. Those expressions produced false terminal turns and are not a
 reliable semantic verifier. The prompt still forbids unsupported commercial
 claims, but a prompt is not independent factual evidence.
 
-AILR-02 by itself is not production approval. Structured published
-catalog/evidence validation and final cross-repo acceptance are combined in the
-active AILR-03 OneShot; any new staging publication and any production rollout
-remain separate owner gates.
+AILR-02 by itself was not production approval. Structured published
+catalog/evidence validation and final cross-repo acceptance were completed by
+AILR-03 and are reflected in the current runtime. Any new staging publication
+and any production rollout remain separate owner gates.
 
 ## Knowledge and recommendations
 
