@@ -9,15 +9,42 @@ const ACTIVE_AI_DOCUMENTS = [
   "README.md",
   "docs/source-of-truth.md",
   "docs/AGENT_WORKFLOW.md",
-  "docs/AI_AGENT_REFACTOR_PLAYBOOK_RU.md",
   "docs/AI_POLICY.md",
   "docs/adr/ADR-011-CUSTOMER_FACING_LANDING_SOURCE_RU.md",
   "docs/adr/ADR-010-AI_OBSERVABILITY_RUNTIME_BOUNDARY_RU.md",
   "docs/adr/ADR-012-REPO_LOCAL_AI_SOURCE_OF_TRUTH_RU.md",
-  "docs/architecture/AI_LIVE_AGENT_REFACTOR_FINAL_OWNER_REVIEW_RU.md",
-  "docs/architecture/AI_LIVE_AGENT_REFACTOR_OWNER_SPEC_RU.md",
-  "docs/architecture/AI_REFACTOR_MINIMAL_GOAL_GOVERNANCE_RU.md",
+  "docs/architecture/AI_CURRENT_RUNTIME_RU.md",
   "docs/tasks/README.md"
+];
+
+const CURRENT_RUNTIME_SPEC_PATH = "docs/architecture/AI_CURRENT_RUNTIME_RU.md";
+const REQUIRED_CURRENT_RUNTIME_SECTIONS = [
+  "## Исполняемый путь",
+  "## Runtime contract",
+  "## Один model-turn",
+  "## App-owned ограничения и отправка"
+];
+const CURRENT_RUNTIME_CONTRACT_LINES = [
+  "- `production_entry`: `executeModelTurn`",
+  "- `tool_owner`: model-owned `search_catalog`",
+  "- `model_call_budget`: at most `2`",
+  "- `validation_owner`: app-owned validation",
+  "- `persistence_gate`: fresh send gate before atomic commit"
+];
+const REQUIRED_ROUTING_SURFACE_PATHS = [
+  CURRENT_RUNTIME_SPEC_PATH,
+  "docs/source-of-truth.md",
+  "docs/tasks/README.md"
+].sort();
+const ALLOWED_ACTIVE_CARD_STATUSES = [
+  "planned",
+  "implementing",
+  "technical_done",
+  "independent_review",
+  "needs_fix",
+  "needs_evidence",
+  "needs_redesign",
+  "needs_human_decision"
 ];
 
 export const ARCHITECTURE_CONTRACT_PATH = "tooling/ai-architecture-contract.json";
@@ -103,7 +130,6 @@ export function evaluateArchitectureGuardrails(snapshot) {
 
   const guardedStatuses = snapshot.taskDocumentPaths.filter((documentPath) => {
     const source = files.get(documentPath) ?? "";
-    if (documentPath === contract?.documents.active_goal) return false;
     if (!isAiTaskDocument(documentPath, source)) return false;
     const status = readCardStatus(source);
     return status === "implementing" || status === "independent_review";
@@ -118,10 +144,12 @@ export function evaluateArchitectureGuardrails(snapshot) {
 
   const taskIndex = requiredFile(files, "docs/tasks/README.md", fail);
   const indexedCards = extractIndexedAiCards(taskIndex);
-  if (indexedCards.length !== 1) {
+  const activeCard = contract?.documents.active_card ?? null;
+  const expectedCardCount = activeCard ? 1 : 0;
+  if (indexedCards.length !== expectedCardCount) {
     fail(
       "ACTIVE_CARD_ROUTE",
-      `docs/tasks/README.md must route to exactly one AI_REF card; found ${indexedCards.length}`
+      `docs/tasks/README.md must route to ${expectedCardCount} AI_REF card(s); found ${indexedCards.length}`
     );
   }
 
@@ -130,10 +158,19 @@ export function evaluateArchitectureGuardrails(snapshot) {
       fail("ACTIVE_CARD_ROUTE", `indexed active card does not exist: ${cardPath}`);
     }
   }
+  if (activeCard) {
+    const activeCardStatus = readCardStatus(requiredFile(files, activeCard, fail));
+    if (!ALLOWED_ACTIVE_CARD_STATUSES.includes(activeCardStatus)) {
+      fail(
+        "ACTIVE_CARD_ROUTE",
+        `AI card status is not active: ${activeCard} (${activeCardStatus})`
+      );
+    }
+  }
   if (
     contract &&
     indexedCards.length === 1 &&
-    indexedCards[0] !== contract.documents.active_card
+    indexedCards[0] !== activeCard
   ) {
     fail(
       "ACTIVE_CARD_ROUTE",
@@ -154,14 +191,13 @@ export function evaluateArchitectureGuardrails(snapshot) {
   const activeRouteReferences = extractActiveRouteTaskReferences(taskIndex);
   const expectedActiveRouteReferences = [
     "docs/source-of-truth.md",
-    "docs/tasks/AI_REFACTOR_SLICE_TEMPLATE_RU.md",
-    contract?.documents.active_goal ?? "docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md",
+    CURRENT_RUNTIME_SPEC_PATH,
     ...indexedCards
   ].sort();
   if (!arraysEqual(activeRouteReferences, expectedActiveRouteReferences)) {
     fail(
       "ACTIVE_CARD_ROUTE",
-      `active AI route must contain only source map, Goal and one AI_REF card; found ${activeRouteReferences.join(", ")}`
+      `active AI route differs from the current runtime/card contract; found ${activeRouteReferences.join(", ")}`
     );
   }
 
@@ -209,6 +245,33 @@ export function evaluateArchitectureGuardrails(snapshot) {
         );
       }
     }
+  }
+
+  const currentRuntimeSpec = stripNonAuthoritativeMarkdown(
+    requiredFile(files, CURRENT_RUNTIME_SPEC_PATH, fail)
+  );
+  const currentRuntimeSections = currentRuntimeSpec
+    .split("\n")
+    .map(normalizeAtxSecondLevelHeading)
+    .filter((heading) => heading !== null);
+  for (const section of REQUIRED_CURRENT_RUNTIME_SECTIONS) {
+    const sectionCount = currentRuntimeSections.filter((heading) => heading === section).length;
+    if (sectionCount !== 1) {
+      fail(
+        "ACTIVE_RUNTIME_SPEC",
+        `${CURRENT_RUNTIME_SPEC_PATH} must contain exactly one current-runtime section: ${section}`
+      );
+    }
+  }
+  const runtimeContractLines = extractMarkdownSectionLines(
+    currentRuntimeSpec,
+    "## Runtime contract"
+  );
+  if (!arraysEqual(runtimeContractLines, CURRENT_RUNTIME_CONTRACT_LINES)) {
+    fail(
+      "ACTIVE_RUNTIME_SPEC",
+      `${CURRENT_RUNTIME_SPEC_PATH} must contain the exact affirmative runtime contract`
+    );
   }
 
   for (const manifestPath of snapshot.packageManifestPaths) {
@@ -411,17 +474,44 @@ function evaluateArchitectureContract(snapshot, fail) {
   }
 
   const documents = contract.documents;
+  const hasActiveCard =
+    documents.active_card === null ||
+    (typeof documents.active_card === "string" && documents.active_card.length > 0);
   if (
+    documents.active_goal !== null ||
+    !hasActiveCard ||
     !isUniquePathArray(documents.active_authority_paths) ||
     !isUniquePathArray(documents.allowed_provenance_paths) ||
-    !documents.active_authority_paths.includes(documents.active_goal) ||
-    !documents.active_authority_paths.includes(documents.active_card) ||
+    !documents.active_authority_paths.includes(CURRENT_RUNTIME_SPEC_PATH) ||
+    (documents.active_card !== null &&
+      !documents.active_authority_paths.includes(documents.active_card)) ||
     documents.allowed_provenance_paths.some((value) =>
       documents.active_authority_paths.includes(value)
     ) ||
     !hasStringValues(documents.routing_surface_hashes)
   ) {
     fail("ARCHITECTURE_CONTRACT", "document authority contract is malformed");
+  }
+  if (
+    !arraysEqual(
+      Object.keys(documents.routing_surface_hashes ?? {}).sort(),
+      REQUIRED_ROUTING_SURFACE_PATHS
+    )
+  ) {
+    fail(
+      "ARCHITECTURE_CONTRACT",
+      "routing surface hashes must cover exactly the current runtime spec and route indexes"
+    );
+  }
+  const expectedActiveAuthorityPaths = unique([
+    ...ACTIVE_AI_DOCUMENTS,
+    ...(typeof documents.active_card === "string" ? [documents.active_card] : [])
+  ]);
+  if (!arraysEqual(unique(documents.active_authority_paths ?? []), expectedActiveAuthorityPaths)) {
+    fail(
+      "ACTIVE_DOCUMENT_ROUTE",
+      `active authority paths differ from the required current route: ${documents.active_authority_paths?.join(", ") ?? "missing"}`
+    );
   }
   const taskPaths = unique(snapshot.taskDocumentPaths);
   const actualTaskPathsHash = pathSetHash(taskPaths);
@@ -628,6 +718,31 @@ function extractActiveDocumentManifest(source) {
       .map((line) => line.trim())
       .filter((line) => /^(?:AGENTS|README|docs\/[A-Za-z0-9_./-]+)\.md$/.test(line))
   );
+}
+
+function extractMarkdownSectionLines(source, heading) {
+  const lines = source.split("\n");
+  const startIndex = lines.findIndex(
+    (line) => normalizeAtxSecondLevelHeading(line) === heading
+  );
+  if (startIndex < 0) return [];
+  const remainder = lines.slice(startIndex + 1);
+  const nextHeadingIndex = remainder.findIndex(
+    (line) => normalizeAtxSecondLevelHeading(line) !== null
+  );
+  return remainder
+    .slice(0, nextHeadingIndex < 0 ? undefined : nextHeadingIndex)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function normalizeAtxSecondLevelHeading(line) {
+  const match = line.match(/^ {0,3}##(?!#)(?:[ \t]+(.*))?[ \t]*$/);
+  if (!match) return null;
+  const content = (match[1] ?? "")
+    .replace(/[ \t]+#+[ \t]*$/, "")
+    .trim();
+  return `## ${content}`;
 }
 
 function extractAuthorityDocumentReferences(source) {

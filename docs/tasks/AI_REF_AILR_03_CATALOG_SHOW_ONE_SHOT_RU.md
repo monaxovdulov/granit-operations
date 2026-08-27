@@ -1,8 +1,7 @@
 # Карточка среза AI-LAYER-SIMPLIFICATION: AILR-03 — OneShot «покажи каталог»
 
-Статус: `owner_authorized_live_validation`. Это один вертикальный срез с одним
-пользовательским результатом. Внутренние checkpoints не считаются отдельными
-принятыми срезами и не дают права объявить частичную реализацию готовой.
+Статус: `completed`. Карточка закрыта и сохранена как implementation
+provenance; она не является active-card и не активирует следующий срез.
 
 Goal: `AI-LAYER-SIMPLIFICATION`.
 

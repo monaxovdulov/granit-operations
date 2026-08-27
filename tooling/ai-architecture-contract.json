@@ -14,33 +14,38 @@
     "source_contents_sha256": "892fa4c85eef9c517474ecb1991ff057e5c2d5246928f3e61ea0a47dc897070b"
   },
   "documents": {
-    "active_goal": "docs/tasks/AI_LAYER_SIMPLIFICATION_GOAL_RU.md",
-    "active_card": "docs/tasks/AI_REF_AILR_03_CATALOG_SHOW_ONE_SHOT_RU.md",
+    "active_goal": null,
+    "active_card": null,
     "active_authority_paths": [
       "AGENTS.md",
       "README.md",
       "docs/AGENT_WORKFLOW.md",
-      "docs/AI_AGENT_REFACTOR_PLAYBOOK_RU.md",
       "docs/AI_POLICY.md",
       "docs/adr/ADR-010-AI_OBSERVABILITY_RUNTIME_BOUNDARY_RU.md",
       "docs/adr/ADR-011-CUSTOMER_FACING_LANDING_SOURCE_RU.md",
       "docs/adr/ADR-012-REPO_LOCAL_AI_SOURCE_OF_TRUTH_RU.md",
-      "docs/architecture/AI_LIVE_AGENT_REFACTOR_FINAL_OWNER_REVIEW_RU.md",
-      "docs/architecture/AI_LIVE_AGENT_REFACTOR_OWNER_SPEC_RU.md",
-      "docs/architecture/AI_REFACTOR_MINIMAL_GOAL_GOVERNANCE_RU.md",
+      "docs/architecture/AI_CURRENT_RUNTIME_RU.md",
       "docs/source-of-truth.md",
-      "docs/tasks/AI_LAYER_SIMPLIFICATION_GOAL_RU.md",
-      "docs/tasks/AI_REF_AILR_03_CATALOG_SHOW_ONE_SHOT_RU.md",
       "docs/tasks/README.md"
     ],
     "allowed_provenance_paths": [
+      "docs/AI_AGENT_REFACTOR_PLAYBOOK_RU.md",
+      "docs/architecture/AI_LIVE_AGENT_REFACTOR_FINAL_OWNER_REVIEW_RU.md",
+      "docs/architecture/AI_LIVE_AGENT_REFACTOR_OWNER_SPEC_RU.md",
+      "docs/architecture/AI_REFACTOR_MINIMAL_GOAL_GOVERNANCE_RU.md",
+      "docs/tasks/AI_LAYER_SIMPLIFICATION_GOAL_RU.md",
+      "docs/tasks/AI_REF_AILR_00_RUNTIME_HARNESS_MAP_RU.md",
+      "docs/tasks/AI_REF_AILR_01_VALIDATOR_OBSERVABILITY_RU.md",
+      "docs/tasks/AI_REF_AILR_02_VALIDATOR_POLICY_RU.md",
+      "docs/tasks/AI_REF_AILR_03_CATALOG_SHOW_ONE_SHOT_RU.md",
       "docs/tasks/ARCHIVE_RU.md"
     ],
     "task_count": 29,
     "task_paths_sha256": "1b77d766ca3573cf346e7a0720af9022405a172c26577fdbb60d8f6f31af6901",
     "routing_surface_hashes": {
-      "docs/source-of-truth.md": "2d65a17e51a68dc07f8b8daee5e398beca067331de8d0633617510edb2cd47a5",
-      "docs/tasks/README.md": "441b27d6716d9dea233a1956234c5726286a2836284d815b3a2a59831fb31ff4"
+      "docs/architecture/AI_CURRENT_RUNTIME_RU.md": "4dca0122d996c309f45479ed093510be02280b568735fe206d0345eb20b674b3",
+      "docs/source-of-truth.md": "b1780ff4df74a2895a17f694de50a7ae94c0aeb3b633e4cde254c5ca34c8e862",
+      "docs/tasks/README.md": "2a3584d88f8af4a79ecbdbc36b50fb2f6e81ba7001dc35ffa3cc32b430affe56"
     }
   },
   "compatibility": {

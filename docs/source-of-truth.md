@@ -1,22 +1,17 @@
 # Source Of Truth
 
-Status: active repo-local source map approved by the owner on 2026-08-04
+Status: active repo-local source map, refreshed for current runtime on 2026-08-27
 
 <!-- architecture-guard: active-ai-documents
 AGENTS.md
 README.md
 docs/AGENT_WORKFLOW.md
-docs/AI_AGENT_REFACTOR_PLAYBOOK_RU.md
 docs/AI_POLICY.md
 docs/adr/ADR-010-AI_OBSERVABILITY_RUNTIME_BOUNDARY_RU.md
 docs/adr/ADR-011-CUSTOMER_FACING_LANDING_SOURCE_RU.md
 docs/adr/ADR-012-REPO_LOCAL_AI_SOURCE_OF_TRUTH_RU.md
-docs/architecture/AI_LIVE_AGENT_REFACTOR_FINAL_OWNER_REVIEW_RU.md
-docs/architecture/AI_LIVE_AGENT_REFACTOR_OWNER_SPEC_RU.md
-docs/architecture/AI_REFACTOR_MINIMAL_GOAL_GOVERNANCE_RU.md
+docs/architecture/AI_CURRENT_RUNTIME_RU.md
 docs/source-of-truth.md
-docs/tasks/AI_LAYER_SIMPLIFICATION_GOAL_RU.md
-docs/tasks/AI_REF_AILR_03_CATALOG_SHOW_ONE_SHOT_RU.md
 docs/tasks/README.md
 -->
 
@@ -25,79 +20,78 @@ architecture, scope, gates or implementation order.
 
 ## Authority
 
-Use two kinds of truth without mixing them:
+Не смешивайте четыре уровня:
 
-1. Current executable behavior is established by the checked-out `main` SHA,
-   public contracts, active Drizzle schema/migrations, runtime assembly and
+1. Текущее исполняемое поведение определяют проверяемый checkout SHA,
+   production assembly, публичные контракты, Drizzle schema/migrations и
    executable tests.
-2. Target AI architecture and implementation order are established by accepted
-   repo-local owner decisions, ADRs and the active `AI_REF_*` slice card.
+2. Короткая проверенная карта этого поведения находится в
+   `docs/architecture/AI_CURRENT_RUNTIME_RU.md`. Она не заменяет код.
+3. Принятые решения и ограничения находятся в
+   `docs/adr/ADR-010-AI_OBSERVABILITY_RUNTIME_BOUNDARY_RU.md`,
+   `docs/adr/ADR-011-CUSTOMER_FACING_LANDING_SOURCE_RU.md`,
+   `docs/adr/ADR-012-REPO_LOCAL_AI_SOURCE_OF_TRUTH_RU.md` и
+   `docs/AI_POLICY.md`.
+4. Порядок работы задают `AGENTS.md` и `docs/AGENT_WORKFLOW.md`. Отдельная
+   задача становится текущей только по явной команде владельца и отражается в
+   `docs/tasks/README.md`; сейчас active AI-card отсутствует.
 
-The active decision hierarchy is:
+Routing/lifecycle ссылки внутри принятых документов на прежние Goal и cards —
+исторический контекст. Они не возвращают заменённый процесс и не создают второй
+roadmap. Если prose и код расходятся, prose нельзя выдавать за уже
+реализованное состояние.
 
-1. `docs/adr/ADR-012-REPO_LOCAL_AI_SOURCE_OF_TRUTH_RU.md`;
-2. `docs/architecture/AI_LIVE_AGENT_REFACTOR_FINAL_OWNER_REVIEW_RU.md`;
-3. `docs/architecture/AI_LIVE_AGENT_REFACTOR_OWNER_SPEC_RU.md`;
-4. `docs/architecture/AI_REFACTOR_MINIMAL_GOAL_GOVERNANCE_RU.md`;
-5. `docs/AI_AGENT_REFACTOR_PLAYBOOK_RU.md`;
-6. `docs/tasks/AI_REF_AILR_03_CATALOG_SHOW_ONE_SHOT_RU.md`, единственная active
-   AI-card, и exact-SHA evidence трёх repo;
-7. current code, contracts, migrations and tests for factual implementation
-   details not decided above.
+## Current AI Runtime
 
-If prose and code disagree, do not silently describe the target as already
-implemented. Code defines current behavior; accepted owner documents define the
-target and roadmap. Record the gap in the current slice.
-
-Historical task, evidence, design and ADR files may contain links to retired
-external plans. Those links are provenance only and are not instructions or an
-active source of truth.
-
-## Current AI Direction
-
-The approved architecture is:
+Фактический production route на проверенном SHA:
 
 ```text
 public intake
   -> app-owned PostgreSQL persistence and durable queue
-  -> latest-wins / response-window identity / fresh context
-  -> direct model boundary by default
+  -> fresh app-owned conversation context
+  -> executeModelTurn
+  -> model-owned bounded search_catalog при необходимости
   -> app-owned validation, commit fence and send gate
   -> atomic reply and terminal job commit
   -> app-owned observability and manager controls
 ```
 
-Mastra dependency/runtime и executable `legacy_s05` path удалены принятым
-CONV-3. Единственный production assembly использует app-owned direct model
-boundary; возвращение второго runtime требует нового accepted ADR/owner gate.
-
-Goal `AI-RUNTIME-CONVERGENCE` закрыта как `understanding_verified`. Активный
-порядок определяется Goal `AI-LAYER-SIMPLIFICATION`: AILR-00, AILR-01 и AILR-02
-приняты. Текущий AILR-03 OneShot объединяет прежние catalog-срезы 03—06: от
-versioned authority и server-validated recommendation IDs до `history.v2`
-кнопки, focus в актуальном каталоге и deterministic transcript eval. Он не
-получает право на commit/push/deploy без отдельной команды владельца.
-PR0a—PR9, CONV-1—CONV-5,
-AI_DIALOG/Mastra и S01—S15 — исторические этапы, не active routing.
+Первый model call выбирает `final` или `search_catalog`; search path допускает
+ровно один второй model call. Приложение валидирует output и recommendation
+IDs, перечитывает send gate и только затем допускает atomic persistence.
+Подробности и оставшийся executable legacy debt зафиксированы в current-runtime
+map без объявления будущей расчистки реализованной.
 
 ## Active AI Route
 
-Новый агент читает только:
+Для runtime-задачи новый агент идёт коротким маршрутом:
 
-1. корневой `README.md` и этот source map;
-2. текущую `docs/AI_POLICY.md`, ADR-010 и ADR-012;
-3. `AI_LIVE_AGENT_REFACTOR_FINAL_OWNER_REVIEW_RU.md` и
-   `AI_LIVE_AGENT_REFACTOR_OWNER_SPEC_RU.md`;
-4. `AI_REFACTOR_MINIMAL_GOAL_GOVERNANCE_RU.md` и
-   `AI_AGENT_REFACTOR_PLAYBOOK_RU.md`;
-5. `AI_LAYER_SIMPLIFICATION_GOAL_RU.md` и active card из
-   `docs/tasks/README.md`.
+1. `README.md` и этот source map;
+2. `docs/architecture/AI_CURRENT_RUNTIME_RU.md`;
+3. применимые `docs/AI_POLICY.md` и принятые ADR-010—ADR-012;
+4. `docs/tasks/README.md`, чтобы проверить наличие отдельно активированной
+   карточки.
 
-Завершённые task records сведены в `docs/tasks/ARCHIVE_RU.md`; archive и Git
-history сохраняют provenance, но не расширяют обязательный контекст.
+Процессные правила уже приходят из `AGENTS.md` и
+`docs/AGENT_WORKFLOW.md`. Они не требуют чтения прежних Goal/process roadmaps.
 
-The current customer-facing landing source is decided by
-`docs/adr/ADR-011-CUSTOMER_FACING_LANDING_SOURCE_RU.md`.
+## Historical provenance
+
+Сохранены без роли обязательного маршрута:
+
+- `docs/AI_AGENT_REFACTOR_PLAYBOOK_RU.md`;
+- `docs/architecture/AI_REFACTOR_MINIMAL_GOAL_GOVERNANCE_RU.md`;
+- `docs/architecture/AI_LIVE_AGENT_REFACTOR_FINAL_OWNER_REVIEW_RU.md`;
+- `docs/architecture/AI_LIVE_AGENT_REFACTOR_OWNER_SPEC_RU.md`;
+- `docs/tasks/AI_LAYER_SIMPLIFICATION_GOAL_RU.md`;
+- `docs/tasks/AI_REF_AILR_00_RUNTIME_HARNESS_MAP_RU.md`;
+- `docs/tasks/AI_REF_AILR_01_VALIDATOR_OBSERVABILITY_RU.md`;
+- `docs/tasks/AI_REF_AILR_02_VALIDATOR_POLICY_RU.md`;
+- `docs/tasks/AI_REF_AILR_03_CATALOG_SHOW_ONE_SHOT_RU.md`;
+- `docs/tasks/ARCHIVE_RU.md`.
+
+Git history и эти records сохраняют происхождение решений, но не продолжают
+работу автоматически.
 
 ## Boundary
 

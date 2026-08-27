@@ -14,20 +14,17 @@ import {
   REQUIRED_EVIDENCE
 } from "./ai-architecture-guardrails.mjs";
 
+const CURRENT_RUNTIME_SPEC = "docs/architecture/AI_CURRENT_RUNTIME_RU.md";
 const ACTIVE_DOCUMENTS = [
   "AGENTS.md",
   "README.md",
-  "docs/source-of-truth.md",
   "docs/AGENT_WORKFLOW.md",
-  "docs/AI_AGENT_REFACTOR_PLAYBOOK_RU.md",
   "docs/AI_POLICY.md",
   "docs/adr/ADR-010-AI_OBSERVABILITY_RUNTIME_BOUNDARY_RU.md",
   "docs/adr/ADR-011-CUSTOMER_FACING_LANDING_SOURCE_RU.md",
   "docs/adr/ADR-012-REPO_LOCAL_AI_SOURCE_OF_TRUTH_RU.md",
-  "docs/architecture/AI_LIVE_AGENT_REFACTOR_FINAL_OWNER_REVIEW_RU.md",
-  "docs/architecture/AI_LIVE_AGENT_REFACTOR_OWNER_SPEC_RU.md",
-  "docs/architecture/AI_REFACTOR_MINIMAL_GOAL_GOVERNANCE_RU.md",
-  "docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md"
+  CURRENT_RUNTIME_SPEC,
+  "docs/source-of-truth.md"
 ];
 
 const ASSEMBLY_DOCUMENTS = [
@@ -38,8 +35,167 @@ const ASSEMBLY_DOCUMENTS = [
   "apps/api/src/widget-ai-runtime-assembly.ts"
 ];
 
+const CURRENT_AUTHORITY_DOCUMENTS = [
+  "AGENTS.md",
+  "README.md",
+  "docs/AGENT_WORKFLOW.md",
+  "docs/AI_POLICY.md",
+  "docs/adr/ADR-010-AI_OBSERVABILITY_RUNTIME_BOUNDARY_RU.md",
+  "docs/adr/ADR-011-CUSTOMER_FACING_LANDING_SOURCE_RU.md",
+  "docs/adr/ADR-012-REPO_LOCAL_AI_SOURCE_OF_TRUTH_RU.md",
+  CURRENT_RUNTIME_SPEC,
+  "docs/source-of-truth.md",
+  "docs/tasks/README.md"
+];
+
 test("passing fixture exercises the same evaluator as the CLI", () => {
   assert.deepEqual(evaluateArchitectureGuardrails(passingSnapshot()), []);
+});
+
+test("allows a current-runtime route without an active Goal or AI card", () => {
+  const snapshot = passingSnapshot();
+  const historicalCard = snapshot.architectureContract.documents.active_card;
+
+  snapshot.files.set(CURRENT_RUNTIME_SPEC, currentRuntimeSpecFixture());
+  snapshot.files.set(historicalCard, "Статус: `completed`.\n");
+  snapshot.architectureContract.documents.active_card = null;
+  snapshot.architectureContract.documents.active_authority_paths = [
+    ...CURRENT_AUTHORITY_DOCUMENTS
+  ];
+  snapshot.files.set(
+    "docs/source-of-truth.md",
+    "<!-- architecture-guard: active-ai-documents\n" +
+      CURRENT_AUTHORITY_DOCUMENTS.join("\n") +
+      "\n-->\n"
+  );
+  snapshot.files.set(
+    "docs/tasks/README.md",
+    "## Active AI route\n\n" +
+      "1. `../source-of-truth.md`\n" +
+      "2. `../architecture/AI_CURRENT_RUNTIME_RU.md`\n"
+  );
+  refreshArchitectureContract(snapshot);
+
+  assert.deepEqual(evaluateArchitectureGuardrails(snapshot), []);
+
+  snapshot.files.set(
+    "docs/tasks/README.md",
+    snapshot.files.get("docs/tasks/README.md") +
+      `3. \`${path.basename(historicalCard)}\`\n`
+  );
+  assertFailure(snapshot, "ACTIVE_CARD_ROUTE");
+});
+
+test("rejects removing a required policy document from the reviewed route", () => {
+  const snapshot = passingSnapshot();
+  const removedDocument = "docs/AI_POLICY.md";
+  const activeAuthorityPaths =
+    snapshot.architectureContract.documents.active_authority_paths.filter(
+      (documentPath) => documentPath !== removedDocument
+    );
+
+  snapshot.architectureContract.documents.active_authority_paths =
+    activeAuthorityPaths;
+  snapshot.files.set(
+    "docs/source-of-truth.md",
+    "<!-- architecture-guard: active-ai-documents\n" +
+      activeAuthorityPaths.join("\n") +
+      "\n-->\n"
+  );
+  refreshArchitectureContract(snapshot);
+
+  assertFailure(snapshot, "ACTIVE_DOCUMENT_ROUTE");
+});
+
+test("rejects a hollow current-runtime spec after routing hashes are refreshed", () => {
+  const snapshot = passingSnapshot();
+  snapshot.files.set(CURRENT_RUNTIME_SPEC, "Status: current runtime map\n");
+  refreshArchitectureContract(snapshot);
+
+  assertFailure(snapshot, "ACTIVE_RUNTIME_SPEC");
+});
+
+test("rejects current-runtime markers hidden in an HTML comment", () => {
+  const snapshot = passingSnapshot();
+  snapshot.files.set(
+    CURRENT_RUNTIME_SPEC,
+    "<!-- executeModelTurn model-owned search_catalog не более двух app-owned validation send gate -->\n"
+  );
+  refreshArchitectureContract(snapshot);
+
+  assertFailure(snapshot, "ACTIVE_RUNTIME_SPEC");
+});
+
+test("rejects current-runtime keywords used only in negated prose", () => {
+  const snapshot = passingSnapshot();
+  snapshot.files.set(
+    CURRENT_RUNTIME_SPEC,
+    "## Исполняемый путь\n" +
+      "## Runtime contract\n" +
+      "Нельзя утверждать executeModelTurn или model-owned search_catalog; " +
+      "не более двух вызовов не доказано. Нет доказательств app-owned validation " +
+      "или send gate.\n" +
+      "## Один model-turn\n" +
+      "## App-owned ограничения и отправка\n" +
+      "Нет подтверждённого runtime.\n"
+  );
+  refreshArchitectureContract(snapshot);
+
+  assertFailure(snapshot, "ACTIVE_RUNTIME_SPEC");
+});
+
+test("rejects a duplicate contradictory runtime contract section", () => {
+  const snapshot = passingSnapshot();
+  snapshot.files.set(
+    CURRENT_RUNTIME_SPEC,
+    currentRuntimeSpecFixture() +
+      "## Runtime contract\n" +
+      "Эти утверждения не доказаны; фактический runtime неизвестен.\n"
+  );
+  refreshArchitectureContract(snapshot);
+
+  assertFailure(snapshot, "ACTIVE_RUNTIME_SPEC");
+});
+
+test("rejects a CommonMark-equivalent duplicate runtime contract heading", () => {
+  const snapshot = passingSnapshot();
+  snapshot.files.set(
+    CURRENT_RUNTIME_SPEC,
+    currentRuntimeSpecFixture() +
+      "## Runtime contract ##\n" +
+      "Эти утверждения не доказаны; фактический runtime неизвестен.\n"
+  );
+  refreshArchitectureContract(snapshot);
+
+  assertFailure(snapshot, "ACTIVE_RUNTIME_SPEC");
+});
+
+test("rejects a missing current-runtime routing hash", () => {
+  const snapshot = passingSnapshot();
+  delete snapshot.architectureContract.documents.routing_surface_hashes[
+    CURRENT_RUNTIME_SPEC
+  ];
+
+  assertFailure(snapshot, "ARCHITECTURE_CONTRACT");
+});
+
+test("rejects terminal, missing or unknown active-card statuses", () => {
+  const invalidCards = [
+    ["accepted", "Статус: `accepted`.\n"],
+    ["accept", "Статус: `accept`.\n"],
+    ["completed", "Статус: `completed`.\n"],
+    ["missing", "# Card without status\n"],
+    ["unknown", "Статус: `mystery`.\n"]
+  ];
+
+  for (const [label, source] of invalidCards) {
+    const snapshot = passingSnapshot();
+    const activeCard = snapshot.architectureContract.documents.active_card;
+    snapshot.files.set(activeCard, source);
+    refreshArchitectureContract(snapshot);
+
+    assertFailure(snapshot, "ACTIVE_CARD_ROUTE", label);
+  }
 });
 
 test("filesystem fixture exercises the repository loader before evaluation", () => {
@@ -74,7 +230,7 @@ test("rejects more than one implementing or independent-review AI card", () => {
   assertFailure(snapshot, "AI_CARD_LIMIT");
 });
 
-test("allows the long-lived implementing Goal while its card is in independent review", () => {
+test("allows one explicitly routed card on top of the current-runtime route", () => {
   const snapshot = passingSnapshot();
   const activeCard = snapshot.aiCardPaths[0];
   snapshot.files.set(activeCard, "Статус: `independent_review`.\n");
@@ -84,37 +240,17 @@ test("allows the long-lived implementing Goal while its card is in independent r
   assert.deepEqual(evaluateArchitectureGuardrails(snapshot), []);
 });
 
-test("routes a replacement Goal, ignores historical mentions and rejects Goal reactivation", () => {
+test("rejects reactivation of a long-lived Goal control plane", () => {
   const snapshot = passingSnapshot();
-  const previousGoal = "docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md";
   const activeGoal = "docs/tasks/AI_LAYER_SIMPLIFICATION_GOAL_RU.md";
-  const activeCard = snapshot.aiCardPaths[0];
-  const activeAuthorityPaths = snapshot.architectureContract.documents.active_authority_paths
-    .map((documentPath) => documentPath === previousGoal ? activeGoal : documentPath)
-    .sort();
-
-  snapshot.files.set(previousGoal, "Статус: `understanding_verified`.\n");
   snapshot.files.set(activeGoal, "Статус: `implementing`.\n");
   snapshot.taskDocumentPaths.push(activeGoal);
   snapshot.architectureContract.documents.active_goal = activeGoal;
-  snapshot.architectureContract.documents.active_authority_paths = activeAuthorityPaths;
-  snapshot.files.set(
-    "docs/source-of-truth.md",
-    "<!-- architecture-guard: active-ai-documents\n" +
-      activeAuthorityPaths.join("\n") +
-      "\n-->\n"
-  );
-  snapshot.files.set(
-    "docs/tasks/README.md",
-    activeRouteIndex(path.basename(activeCard), "", path.basename(activeGoal)) +
-      "Completed `AI_REF_CONV_5_HISTORICAL.md` is provenance only.\n"
-  );
+  snapshot.architectureContract.documents.active_authority_paths.push(activeGoal);
+  snapshot.architectureContract.documents.active_authority_paths.sort();
   refreshArchitectureContract(snapshot);
 
-  assert.deepEqual(evaluateArchitectureGuardrails(snapshot), []);
-
-  snapshot.files.set(previousGoal, "Статус: `implementing`.\n");
-  assertFailure(snapshot, "AI_CARD_LIMIT");
+  assertFailure(snapshot, "ARCHITECTURE_CONTRACT");
 });
 
 test("rejects an indexed card that differs from the architecture contract", () => {
@@ -702,15 +838,12 @@ test("rejects a symbolic link used as a direct guard input", () => {
 function passingSnapshot() {
   const files = new Map();
   for (const documentPath of ACTIVE_DOCUMENTS) files.set(documentPath, "current\n");
+  files.set(CURRENT_RUNTIME_SPEC, currentRuntimeSpecFixture());
   for (const assemblyPath of ASSEMBLY_DOCUMENTS) files.set(assemblyPath, "direct only\n");
 
   const activeCard = "docs/tasks/AI_REF_CONV_5_FIXTURE.md";
   files.set("docs/source-of-truth.md", activeDocumentManifest(activeCard));
   files.set(activeCard, "Статус: `implementing`.\n");
-  files.set(
-    "docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md",
-    "Статус: `implementing`.\n"
-  );
   files.set(
     "docs/tasks/README.md",
     activeRouteIndex("AI_REF_CONV_5_FIXTURE.md")
@@ -755,13 +888,14 @@ function passingSnapshot() {
         source_contents_sha256: ""
       },
       documents: {
-        active_goal: "docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md",
+        active_goal: null,
         active_card: activeCard,
         active_authority_paths: [...ACTIVE_DOCUMENTS, "docs/tasks/README.md", activeCard].sort(),
         allowed_provenance_paths: ["docs/tasks/ARCHIVE_RU.md"],
         task_count: 0,
         task_paths_sha256: "",
         routing_surface_hashes: {
+          [CURRENT_RUNTIME_SPEC]: "",
           "docs/source-of-truth.md": "",
           "docs/tasks/README.md": ""
         }
@@ -782,11 +916,7 @@ function passingSnapshot() {
       }
     },
     aiCardPaths: [activeCard],
-    taskDocumentPaths: [
-      activeCard,
-      "docs/tasks/AI_RUNTIME_CONVERGENCE_GOAL_RU.md",
-      "docs/tasks/README.md"
-    ],
+    taskDocumentPaths: [activeCard, "docs/tasks/README.md"],
     acceptedAdrPaths: [compatibilityAdr],
     productionSourcePaths: [...ASSEMBLY_DOCUMENTS, providerBoundary, compatibilityExport],
     reviewedAssemblyHashes: Object.fromEntries(
@@ -864,26 +994,38 @@ function writeFixtureFile(root, relativePath, source) {
   writeFileSync(absolutePath, source, "utf8");
 }
 
-function activeRouteIndex(
-  cardName,
-  extra = "",
-  goalName = "AI_RUNTIME_CONVERGENCE_GOAL_RU.md"
-) {
+function activeRouteIndex(cardName, extra = "") {
   return (
     "# Task Docs\n\n## Active AI route\n\n" +
     "1. `../source-of-truth.md`\n" +
-    `2. \`${goalName}\`\n` +
+    "2. `../architecture/AI_CURRENT_RUNTIME_RU.md`\n" +
     `3. \`${cardName}\`\n` +
-    "Шаблон: `AI_REFACTOR_SLICE_TEMPLATE_RU.md`.\n" +
     extra +
-    "\n## Historical records\n"
+    "\n## Starting a future card\n\n" +
+    "Шаблон: `AI_REFACTOR_SLICE_TEMPLATE_RU.md`.\n"
   );
 }
 
-function assertFailure(snapshot, code) {
+function currentRuntimeSpecFixture() {
+  return (
+    "Status: current runtime map\n" +
+    "## Исполняемый путь\n" +
+    "## Runtime contract\n" +
+    "- `production_entry`: `executeModelTurn`\n" +
+    "- `tool_owner`: model-owned `search_catalog`\n" +
+    "- `model_call_budget`: at most `2`\n" +
+    "- `validation_owner`: app-owned validation\n" +
+    "- `persistence_gate`: fresh send gate before atomic commit\n" +
+    "## Один model-turn\n" +
+    "## App-owned ограничения и отправка\n" +
+    "Current runtime details.\n"
+  );
+}
+
+function assertFailure(snapshot, code, context = "") {
   const failures = evaluateArchitectureGuardrails(snapshot);
   assert.ok(
     failures.some((failure) => failure.code === code),
-    `expected ${code}, received ${JSON.stringify(failures)}`
+    `${context ? `${context}: ` : ""}expected ${code}, received ${JSON.stringify(failures)}`
   );
 }

@@ -1,18 +1,21 @@
 # Task Docs
 
-Этот каталог хранит task records, но только явно указанная карточка является
-активным AI-маршрутом. Наличие другого файла в каталоге не делает его текущей
-инструкцией.
+Этот каталог хранит task records. Наличие файла, прежнего lifecycle status или
+roadmap-формулировки не делает его текущей инструкцией: карточка активируется
+только отдельной командой владельца.
 
 ## Active AI route
 
-1. `../source-of-truth.md` — карта полномочий и фактического состояния.
-2. `AI_LAYER_SIMPLIFICATION_GOAL_RU.md` — текущая долгоживущая Goal.
-3. `AI_REF_AILR_03_CATALOG_SHOW_ONE_SHOT_RU.md` — единственная active AI-card:
-   OneShot от актуального versioned catalog retrieval и validated IDs до
-   `history.v2`-кнопки, deep-link/focus в новом каталоге и transcript eval.
+1. `../source-of-truth.md` — карта полномочий и источников истины.
+2. `../architecture/AI_CURRENT_RUNTIME_RU.md` — проверенная карта текущего
+   production assembly и его границ.
 
-Шаблон новой карточки: `AI_REFACTOR_SLICE_TEMPLATE_RU.md`.
+Активной `AI_REF_*` карточки сейчас нет. Следующий срез выбирает владелец
+отдельной командой; task index не продолжает roadmap автоматически.
+
+## Starting a future card
+
+Шаблон для отдельно активированной задачи: `AI_REFACTOR_SLICE_TEMPLATE_RU.md`.
 
 ## Historical records
 
@@ -28,6 +31,13 @@ fingerprint `d72aa14603fb500b7a6cac4848863880bf71f2b75a7783e97cdd8a18cd47624e`;
 41-entry payload с critical/high/medium/low `0/0/0/0`; это predecessor evidence,
 а не active catalog route.
 
+`AI_REF_AILR_03_CATALOG_SHOW_ONE_SHOT_RU.md` — закрытый implementation record.
+Его catalog/tool-loop и full-context части представлены текущим кодом и
+проверяются по current-runtime map; карточка больше не задаёт следующий шаг.
+
+`AI_LAYER_SIMPLIFICATION_GOAL_RU.md` завершена вместе с AILR-03 и остаётся
+историческим owner roadmap, а не долгоживущим control plane.
+
 `ARCHIVE_RU.md` перечисляет retired AI/S01—S04 task records, их canonical
 replacement и published commits. Archive index и Git history сохраняют
 provenance, но не задают текущий roadmap.
@@ -38,13 +48,16 @@ Accepted ADR остаются в `../adr/`, а воспроизводимые о
 Operations/staging/Telegram task records, оставшиеся в этом каталоге, не входят
 в active AI route и выполняются только по отдельному текущему поручению.
 
-## Completed Goal and planning input
+## Completed Goals and planning input
 
 `AI_RUNTIME_CONVERGENCE_GOAL_RU.md` закрыта со статусом
 `understanding_verified`; `AI_REF_CONV_5_ANTI_CLUTTER_GUARDRAILS_RU.md`
 сохраняет accepted/publication provenance.
 
-`AI_LAYER_REFACTOR_DRAFT_RU.md` — исходный неактивный planning input новой
-Goal. Он не задаёт второй roadmap: фактический порядок находится только в
-`AI_LAYER_SIMPLIFICATION_GOAL_RU.md`. Перед каждым behavioral срезом по-прежнему
-обязателен code-derived preflight и применимый owner stop-gate.
+`AI_LAYER_REFACTOR_DRAFT_RU.md` — исходный неактивный planning input прежней
+Goal. `AI_LEGACY_CLEANUP_REFACTOR_TASKS_RU.md` имеет статус `planning_input` и
+тоже не становится active-card из-за наличия в рабочем дереве или ссылки на
+LGC-срез. Каждый его срез требует отдельной команды владельца.
+
+Перед каждой новой behavioral задачей обязателен code-derived preflight и
+применимый owner stop-gate.

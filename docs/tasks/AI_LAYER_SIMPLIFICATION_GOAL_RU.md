@@ -1,7 +1,7 @@
 # Goal: упрощение AI-слоя и возврат навигации по каталогу
 
-Статус: `implementing`. Goal активирована владельцем 2026-08-24 после
-`understanding_verified` для `AI-RUNTIME-CONVERGENCE`.
+Статус: `completed`. Goal закрыта после AILR-03; документ сохранён как
+исторический owner roadmap и не управляет следующей задачей.
 
 Goal ID: `AI-LAYER-SIMPLIFICATION`.
 
