@@ -1,0 +1,27 @@
+FROM node:22.22.0-bookworm-slim@sha256:7cc56ef285a8568121537d17b05e72128f01b89c54607b51acf084a50ef483f3
+
+ARG OPERATIONS_RELEASE_SHA
+
+LABEL org.opencontainers.image.source="https://github.com/monaxovdulov/granit-operations"
+LABEL org.opencontainers.image.revision="${OPERATIONS_RELEASE_SHA}"
+
+ENV DEPLOYMENT_TIER=staging \
+    NODE_ENV=production \
+    NPM_CONFIG_UPDATE_NOTIFIER=false \
+    OPERATIONS_RELEASE_SHA="${OPERATIONS_RELEASE_SHA}"
+
+WORKDIR /app
+
+COPY package.json package-lock.json tsconfig.json vitest.config.ts AGENTS.md README.md ./
+COPY apps ./apps
+COPY packages ./packages
+COPY tooling ./tooling
+COPY docs ./docs
+
+RUN npm ci --include=dev && npm run build
+
+USER node
+
+EXPOSE 3001
+
+CMD ["./node_modules/.bin/tsx", "apps/api/src/index.ts"]

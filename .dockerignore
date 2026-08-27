@@ -1,0 +1,9 @@
+.git
+.github
+.agents
+.env
+.env.*
+node_modules
+**/node_modules
+apps/manager/dist
+coverage

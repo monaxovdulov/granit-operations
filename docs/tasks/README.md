@@ -4,6 +4,13 @@
 roadmap-формулировки не делает его текущей инструкцией: карточка активируется
 только отдельной командой владельца.
 
+## Active operations task
+
+Владелец активировал
+[`AUTOMATIC_MAIN_TO_STAGING_RU.md`](AUTOMATIC_MAIN_TO_STAGING_RU.md):
+repo-local автоматизацию `granit-operations/main → staging` только для
+backend/manager. Это не активирует следующий legacy cleanup slice.
+
 ## Active AI route
 
 1. `../source-of-truth.md` — карта полномочий и источников истины.

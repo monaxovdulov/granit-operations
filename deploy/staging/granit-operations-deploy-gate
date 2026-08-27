@@ -1,0 +1,27 @@
+#!/bin/sh
+set -eu
+
+command=${SSH_ORIGINAL_COMMAND:-}
+prefix="granit-deploy operations-staging "
+
+case "$command" in
+    "$prefix"*)
+        commit_sha=${command#"$prefix"}
+        case "$commit_sha" in
+            *[!0-9a-f]* | "")
+                echo "denied: commit SHA must be lowercase hexadecimal" >&2
+                exit 126
+                ;;
+        esac
+        if [ "${#commit_sha}" -ne 40 ]; then
+            echo "denied: commit SHA must contain exactly 40 characters" >&2
+            exit 126
+        fi
+        exec /usr/bin/env -i PATH=/usr/local/bin:/usr/bin:/bin \
+            /usr/local/libexec/granit/deploy-operations-staging "$commit_sha"
+        ;;
+    *)
+        echo "denied: this SSH key may only deploy exact operations main" >&2
+        exit 126
+        ;;
+esac

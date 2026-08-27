@@ -40,12 +40,12 @@
       "docs/tasks/AI_REF_AILR_03_CATALOG_SHOW_ONE_SHOT_RU.md",
       "docs/tasks/ARCHIVE_RU.md"
     ],
-    "task_count": 29,
-    "task_paths_sha256": "1b77d766ca3573cf346e7a0720af9022405a172c26577fdbb60d8f6f31af6901",
+    "task_count": 30,
+    "task_paths_sha256": "07fc9896662b3b2e078c7c309659ac694921eb3624b7ed6d65863fd269189224",
     "routing_surface_hashes": {
       "docs/architecture/AI_CURRENT_RUNTIME_RU.md": "4dca0122d996c309f45479ed093510be02280b568735fe206d0345eb20b674b3",
       "docs/source-of-truth.md": "b1780ff4df74a2895a17f694de50a7ae94c0aeb3b633e4cde254c5ca34c8e862",
-      "docs/tasks/README.md": "2a3584d88f8af4a79ecbdbc36b50fb2f6e81ba7001dc35ffa3cc32b430affe56"
+      "docs/tasks/README.md": "0f6d890c2f520e4f94d865581d3a777ed64609a31cecf402c65315084ff458a4"
     }
   },
   "compatibility": {
