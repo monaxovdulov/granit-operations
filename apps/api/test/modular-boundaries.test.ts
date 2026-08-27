@@ -154,8 +154,12 @@ describe("ops-api modular monolith boundaries", () => {
     );
     expect(appContextSource).toContain("new RecordedLiveV2TurnService");
     expect(appContextSource).toContain("new RecordedPublicWidgetAiTurnExecutor");
+    expect(appContextSource).not.toContain("turnContract");
     expect(appContextSource).not.toMatch(/WidgetAiService|ShadowWidget|Mastra/);
     expect(recordedTurnServiceSource).toContain("implements RecordedAiTurnService");
+    expect(recordedTurnServiceSource).toContain("executeModelTurn");
+    expect(recordedTurnServiceSource).not.toContain("executeLiveV2Turn");
+    expect(recordedTurnServiceSource).not.toContain("turnContract");
     expect(recordedTurnServiceSource).not.toMatch(/\bfetch\(/);
     expect(modelTurnOrchestratorSource).not.toContain("@granit/db");
     expect(modelTurnOrchestratorSource).not.toContain("modules/intake");

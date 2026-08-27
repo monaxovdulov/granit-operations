@@ -59,7 +59,7 @@ const ASSEMBLY_DOCUMENTS = [
 
 const REVIEWED_ASSEMBLY_HASHES = {
   "apps/api/src/app.ts": "de47abc17bb24c1f20e09187a8b85576a2597511c90c0827a6fd6998a8e8325f",
-  "apps/api/src/app-context.ts": "b52ad0f8b346b75e1a187018370655b9510bfcee839f855ee1292b5b91b95b07",
+  "apps/api/src/app-context.ts": "0b260e3bc35792edc4978bec1ed277f621c9bdd15fe4c0681ffaa27912e25e20",
   "apps/api/src/config.ts": "74a60d8d31396d37c41078f146b07d63e251321cb8ed3e6446b689ec9d9bdb8b",
   "apps/api/src/index.ts": "b87fb83d556dfde1bbb29ab835fe19b74f3f73c57a2d0c4371991a071b7a6d66",
   "apps/api/src/widget-ai-runtime-assembly.ts":

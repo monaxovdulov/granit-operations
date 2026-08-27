@@ -154,7 +154,6 @@ function buildDirectWidgetAiTurnExecutor(
     generator,
     approvedFacts: parseLiveV2FactsSnapshot(options.directLiveV2.approvedFacts),
     catalogSnapshot: options.directLiveV2.catalogSnapshot,
-    turnContract: "model_turn_v1",
     versions: {
       policyVersion: liveAssets.policyVersion,
       promptVersion: MODEL_TURN_PROMPT_VERSION,

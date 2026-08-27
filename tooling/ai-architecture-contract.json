@@ -11,7 +11,7 @@
     "provider_boundary": "apps/api/src/modules/ai/adapters/openai-live-v2-decision-generator.ts",
     "source_count": 148,
     "source_paths_sha256": "e208d996531994ef1ebdb9864c25c49161fe73dcdf4d17a4a8e38bec54bcb6a6",
-    "source_contents_sha256": "892fa4c85eef9c517474ecb1991ff057e5c2d5246928f3e61ea0a47dc897070b"
+    "source_contents_sha256": "10f0d33caa0caa9ea93087a0c8553ec234db2b5874bbe7ae9b1a500d5e14f66d"
   },
   "documents": {
     "active_goal": null,
@@ -43,7 +43,7 @@
     "task_count": 30,
     "task_paths_sha256": "07fc9896662b3b2e078c7c309659ac694921eb3624b7ed6d65863fd269189224",
     "routing_surface_hashes": {
-      "docs/architecture/AI_CURRENT_RUNTIME_RU.md": "4dca0122d996c309f45479ed093510be02280b568735fe206d0345eb20b674b3",
+      "docs/architecture/AI_CURRENT_RUNTIME_RU.md": "52524ff2b9dbcfa38918f3b41042c310bda7beecb4d766aa155d8fec7a3cdbd1",
       "docs/source-of-truth.md": "b1780ff4df74a2895a17f694de50a7ae94c0aeb3b633e4cde254c5ca34c8e862",
       "docs/tasks/README.md": "62a5179199e3f2e46766c17854a2ec07822da3ba1b2deee0c7562c4cb2e7b899"
     }

@@ -15,10 +15,6 @@ import {
   type TrustedLiveV2RuntimeObservation
 } from "../ports/live-v2-runtime.js";
 import type { LiveV2FactsSnapshot } from "../profiles/live-v2/live-v2-assets.js";
-import {
-  executeLiveV2Turn,
-  type LiveV2TurnOutcome
-} from "../profiles/live-v2/live-v2-orchestrator.js";
 import type { LiveV2Candidate } from "../profiles/live-v2/live-v2-contract.js";
 import {
   executeModelTurn,
@@ -66,7 +62,6 @@ export type RecordedLiveV2TurnServiceOptions = {
   versions: AiRunVersions;
   model: AiRunModelConfig;
   runtimeMode?: AiRunRuntimeMode;
-  turnContract?: "legacy_live_v2_candidate" | "model_turn_v1";
   clock?: () => Date;
   idGenerator?: () => string;
 };
@@ -96,7 +91,6 @@ type TerminalState = Pick<
   | "qualityEvents"
 >;
 
-type RecordedPipelineOutcome = LiveV2TurnOutcome | ModelTurnOutcome;
 type RecordedReplyDecision = {
   action: "answer" | "ask_clarifying_question" | "handoff_to_manager";
   reason: string;
@@ -227,12 +221,10 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
     let atomicCompletion: TerminalAiRunRecord | undefined;
 
     try {
-      const executeTurn =
-        this.options.turnContract === "model_turn_v1" ? executeModelTurn : executeLiveV2Turn;
-      const liveOutcome: RecordedPipelineOutcome = await executeTurn({
+      const liveOutcome = await executeModelTurn({
         turnInput: input.turnInput,
         approvedFacts: this.options.approvedFacts,
-        ...(this.options.turnContract === "model_turn_v1" && this.options.catalogSnapshot
+        ...(this.options.catalogSnapshot
           ? { catalogSnapshot: this.options.catalogSnapshot }
           : {}),
         generator: {
@@ -295,15 +287,11 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
         throwIfRecordedTurnAborted(input.signal);
         const action = liveOutcome.plan.action;
         const decision = replyDecision(liveOutcome.plan);
-        const validatedPlan = modelTurnPlan(liveOutcome.plan);
-        const appliedPatches = validatedPlan
-          ? splitAppliedPatches(validatedPlan.appliedPatches)
-          : undefined;
-        const handoff = validatedPlan
-          ? buildRecordedHandoff(input.turnInput, validatedPlan, appliedPatches)
-          : undefined;
+        const validatedPlan = liveOutcome.plan.validatedPlan;
+        const appliedPatches = splitAppliedPatches(validatedPlan.appliedPatches);
+        const handoff = buildRecordedHandoff(input.turnInput, validatedPlan, appliedPatches);
         const catalogReferences =
-          validatedPlan && this.options.catalogSnapshot
+          this.options.catalogSnapshot
             ? buildCatalogReferences(
                 this.options.catalogSnapshot,
                 validatedPlan.recommendationIds
@@ -315,18 +303,18 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
             executionContext: input.executionContext,
             action,
             replyDraft: liveOutcome.plan.replyDraft,
-            ...(validatedPlan ? { finalTextHash: validatedPlan.finalTextHash } : {}),
+            finalTextHash: validatedPlan.finalTextHash,
             metadata: decisionMetadata(
               decision,
               validatedPlan,
-              catalogReferences,
+              liveOutcome.trace,
               this.options.catalogSnapshot,
-              "trace" in liveOutcome ? liveOutcome.trace : undefined
+              catalogReferences
             ),
-            ...(appliedPatches?.slotUpdates.length
+            ...(appliedPatches.slotUpdates.length
               ? { slotUpdates: appliedPatches.slotUpdates }
               : {}),
-            ...(appliedPatches?.requirementUpdates.length
+            ...(appliedPatches.requirementUpdates.length
               ? { requirementUpdates: appliedPatches.requirementUpdates }
               : {}),
             ...(handoff ? { handoff } : {}),
@@ -369,7 +357,7 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
         };
       }
 
-      const state = terminalStateFor(liveOutcome, this.options.turnContract);
+      const state = terminalStateFor(liveOutcome);
       throwIfRecordedTurnAborted(input.signal);
       const completed = await this.completeWithoutReply(
         run,
@@ -438,7 +426,7 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
 
   private outcomeSpans(input: {
     startedAt: Date;
-    liveOutcome: RecordedPipelineOutcome;
+    liveOutcome: ModelTurnOutcome;
     modelCalls: ModelCallObservation[];
     gateStartedAt?: Date;
     gateCompletedAt?: Date;
@@ -458,8 +446,8 @@ export class RecordedLiveV2TurnService implements RecordedAiTurnService {
       );
     }
 
-    const modelTrace = "trace" in input.liveOutcome ? input.liveOutcome.trace : undefined;
-    if (modelTrace?.catalogSearch) {
+    const modelTrace = input.liveOutcome.trace;
+    if (modelTrace.catalogSearch) {
       const search = modelTrace.catalogSearch;
       const succeeded = search.status === "succeeded" || search.status === "empty";
       spans.push({
@@ -727,9 +715,7 @@ function allowedReplyState(
   };
 }
 
-function fallbackQualityEvents(outcome: RecordedPipelineOutcome): AiQualityEventWrite[] {
-  if (!("trace" in outcome)) return [];
-
+function fallbackQualityEvents(outcome: ModelTurnOutcome): AiQualityEventWrite[] {
   const events: AiQualityEventWrite[] = [];
   if (outcome.trace.modelCalls.some((call) => call.status === "failed")) {
     events.push(event("runtime_failure", "runtime_failed", "critical"));
@@ -771,10 +757,7 @@ function persistenceUnconfirmedState(
   };
 }
 
-function terminalStateFor(
-  outcome: RecordedPipelineOutcome,
-  turnContract: RecordedLiveV2TurnServiceOptions["turnContract"]
-): TerminalState {
+function terminalStateFor(outcome: ModelTurnOutcome): TerminalState {
   const decision = validatedDecision(outcome);
   const normalizedAction = decision?.action ?? "no_reply";
 
@@ -824,9 +807,7 @@ function terminalStateFor(
   }
 
   const validatorFailureCode =
-    turnContract === "model_turn_v1" &&
-    outcome.validation?.ok === false &&
-    isAiValidatorFailureCode(outcome.validation.code)
+    outcome.validation?.ok === false && isAiValidatorFailureCode(outcome.validation.code)
       ? outcome.validation.code
       : undefined;
 
@@ -876,37 +857,31 @@ function event(
 
 function decisionMetadata(
   decision: RecordedReplyDecision,
-  plan?: ValidatedTurnPlan,
-  catalogReferences: ReturnType<typeof buildCatalogReferences> = [],
+  plan: ValidatedTurnPlan,
+  trace: ModelTurnTrace,
   catalogSnapshot?: CatalogIndexSnapshot,
-  trace?: ModelTurnTrace
+  catalogReferences: ReturnType<typeof buildCatalogReferences> = []
 ) {
   return {
     normalized_action: decision.action,
-    ...(plan
+    turn_contract: "granit_model_turn.v2",
+    final_text_hash: plan.finalTextHash,
+    applied_patch_count: plan.appliedPatches.length,
+    dropped_patch_count: plan.droppedPatches.length,
+    dropped_recommendation_count: plan.droppedRecommendationIds.length,
+    validation_results: plan.validationResults,
+    ...modelTurnTraceMetadata(trace),
+    ...(catalogSnapshot
       ? {
-          turn_contract: "granit_model_turn.v2",
-          final_text_hash: plan.finalTextHash,
-          applied_patch_count: plan.appliedPatches.length,
-          dropped_patch_count: plan.droppedPatches.length,
-          dropped_recommendation_count: plan.droppedRecommendationIds.length,
-          validation_results: plan.validationResults,
-          ...(trace ? modelTurnTraceMetadata(trace) : {}),
-          ...(catalogSnapshot
-            ? {
-                catalog_schema_version: catalogSnapshot.schemaVersion,
-                catalog_version: catalogSnapshot.catalogVersion,
-                catalog_content_hash: catalogSnapshot.contentHash
-              }
-            : {}),
-          ...(catalogReferences.length > 0
-            ? { catalog_references: catalogReferences }
-            : {})
+          catalog_schema_version: catalogSnapshot.schemaVersion,
+          catalog_version: catalogSnapshot.catalogVersion,
+          catalog_content_hash: catalogSnapshot.contentHash
         }
       : {}),
+    ...(catalogReferences.length > 0 ? { catalog_references: catalogReferences } : {}),
     ...(decision.action === "handoff_to_manager"
       ? {
-          handoff_reason: plan?.handoffAction?.reason ?? "manager_requested"
+          handoff_reason: plan.handoffAction?.reason ?? "manager_requested"
         }
       : {})
   };
@@ -992,7 +967,7 @@ function persistedOutcome(
 }
 
 function terminalOutcome(
-  outcome: RecordedPipelineOutcome,
+  outcome: ModelTurnOutcome,
   run: TerminalAiRunRecord
 ): RecordedAiTurnOutcome {
   const decision = validatedDecision(outcome);
@@ -1040,16 +1015,9 @@ function noReplyOutcome(reason: string): RecordedAiTurnOutcome {
 }
 
 function validatedDecision(
-  outcome: RecordedPipelineOutcome
+  outcome: ModelTurnOutcome
 ): RecordedReplyDecision | { action: "no_reply"; reason: string } | undefined {
   if (!outcome.validation?.ok) return undefined;
-
-  if ("decision" in outcome.validation) {
-    return {
-      action: outcome.validation.decision.action,
-      reason: outcome.validation.decision.reason
-    };
-  }
 
   return {
     action: outcome.validation.plan.action,
@@ -1058,19 +1026,9 @@ function validatedDecision(
 }
 
 function replyDecision(
-  plan: Extract<RecordedPipelineOutcome["plan"], { kind: "persist_reply" }>
+  plan: Extract<ModelTurnApplyPlan, { kind: "persist_reply" }>
 ): RecordedReplyDecision {
-  if ("validatedPlan" in plan) {
-    return { action: plan.action, reason: plan.validatedPlan.reason };
-  }
-
-  return { action: plan.action, reason: plan.decision.reason };
-}
-
-function modelTurnPlan(
-  plan: Extract<RecordedPipelineOutcome["plan"], { kind: "persist_reply" }>
-): ValidatedTurnPlan | undefined {
-  return "validatedPlan" in plan ? plan.validatedPlan : undefined;
+  return { action: plan.action, reason: plan.validatedPlan.reason };
 }
 
 function splitAppliedPatches(patches: ValidatedTurnPlan["appliedPatches"]): {

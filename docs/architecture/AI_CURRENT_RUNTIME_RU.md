@@ -1,7 +1,9 @@
 # Текущий AI runtime
 
-Статус: current-runtime map, проверен на SHA
-`e03a1789dbcfd015d3d4cc06aa553513fa0bc1fe` 2026-08-27.
+Статус: current-runtime map, проверен 2026-08-27 по production source
+closure SHA-256
+`10f0d33caa0caa9ea93087a0c8553ec234db2b5874bbe7ae9b1a500d5e14f66d`,
+закреплённому в `tooling/ai-architecture-contract.json`.
 
 Этот документ описывает фактический production assembly текущего checkout. Он
 не является roadmap, active-card, release approval или доказательством того,
@@ -13,7 +15,7 @@
 ```text
 public widget intake
   -> PostgreSQL message/job state
-  -> RecordedLiveV2TurnService с turnContract="model_turn_v1"
+  -> RecordedLiveV2TurnService
   -> executeModelTurn
   -> app-owned validation и свежий send gate
   -> atomic reply/run/job commit
@@ -22,20 +24,20 @@ public widget intake
 `executeModelTurn` оставляет app-owned validation и send gate приложению; model
 output сам по себе не является разрешением на отправку.
 
-- `apps/api/src/app-context.ts` собирает прямой runtime и явно передаёт
-  `turnContract: "model_turn_v1"`.
+- `apps/api/src/app-context.ts` собирает единственный прямой runtime без
+  selector.
 - `apps/api/src/modules/ai/services/recorded-live-v2-turn-service.ts` вызывает
-  `executeModelTurn` для этого production selector, записывает model
-  observations и передаёт только validated plan к persistence boundary.
+  только `executeModelTurn`, записывает model observations и передаёт только
+  validated plan к persistence boundary.
 - `apps/api/src/modules/ai/profiles/live-v2/model-turn-orchestrator.ts` владеет
   текущим ходом модели.
 - `apps/api/src/modules/ai/adapters/openai-live-v2-decision-generator.ts` —
   текущая provider boundary. Возврат второго production runtime требует нового
   принятого ADR.
 
-В `RecordedLiveV2TurnService` ещё остаётся исполняемая legacy-ветка для вызова
-без current selector. Она не выбирается production assembly на этом SHA. Её
-наличие — подтверждённый cleanup debt, а не второй текущий production route.
+`RecordedLiveV2TurnService` больше не принимает internal selector и не вызывает
+legacy candidate orchestrator. Старый `executeLiveV2Turn` остаётся отдельным
+source/test debt и не является исполняемой веткой production service.
 
 ## Runtime contract
 
