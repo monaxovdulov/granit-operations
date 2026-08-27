@@ -14,7 +14,10 @@ import {
   LiveV2GenerationError,
   type ObservedLiveV2DecisionGenerator
 } from "../src/modules/ai/ports/live-v2-runtime.js";
-import { loadPinnedCatalogIndex } from "../src/modules/ai/catalog/pinned-catalog-index.js";
+import {
+  loadPinnedCatalogIndex,
+  PINNED_CATALOG_VERSION
+} from "../src/modules/ai/catalog/pinned-catalog-index.js";
 import { TEST_LIVE_V2_FACTS } from "./fixtures/live-v2-synthetic.v1.js";
 import { MemoryIntakeRepository } from "./helpers/memory-intake-repository.js";
 
@@ -141,7 +144,7 @@ describe("M2 app-owned direct live_v2 runtime", () => {
         final_text_hash: sha256Hex(finalText),
         applied_patch_count: 2,
         catalog_schema_version: "catalog-index.v1",
-        catalog_version: "landing-catalog.e76ee8be770a",
+        catalog_version: PINNED_CATALOG_VERSION,
         catalog_content_hash: catalogSnapshot.contentHash,
         model_call_count: 2,
         selected_response_action: "recommend",

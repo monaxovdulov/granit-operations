@@ -45,7 +45,7 @@ describe("P3 approved AI assets", () => {
       "На первом вызове выбери ровно одно: final или search_catalog. На втором вызове после поиска верни только FinalTurnResult."
     );
     expect(instructions).toContain(
-      "Текущая visitor-реплика имеет приоритет над сохранённым фактом при конфликте. knownSlotProvenance помечает сохранённые поля и их источник. Сам реши, какие явно заданные фильтры передать search_catalog; backend не добавит скрытые фильтры."
+      "Текущая visitor-реплика имеет приоритет над сохранённым фактом при конфликте. knownSlotProvenance и knownRequirements передают сохранённые факты с источником. Сам реши, какие явно заданные фильтры передать search_catalog; backend не добавит скрытые фильтры."
     );
   });
 
