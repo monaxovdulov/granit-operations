@@ -57,7 +57,7 @@ describe("staging release metadata", () => {
         operationsSha: OPERATIONS_SHA,
         catalog: {
           sourceRepository: "monaxovdulov/landing-granit-static",
-          sourceBaseSha: "e0e17da2f86b088db70cf71dc232eab6abb6408a",
+          sourceBaseSha: "5c5447b337ff90b2778e32612936ee2c0be8a067",
           version: "landing-catalog.34e6b5f78a6e",
           sha256: "73086e6635f56a841df31552ef402caf2d2ac960d1e0d3f24f6aaae04139b710"
         }
