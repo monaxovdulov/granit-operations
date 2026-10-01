@@ -11,7 +11,7 @@
     "provider_boundary": "apps/api/src/modules/ai/adapters/openai-live-v2-decision-generator.ts",
     "source_count": 148,
     "source_paths_sha256": "e208d996531994ef1ebdb9864c25c49161fe73dcdf4d17a4a8e38bec54bcb6a6",
-    "source_contents_sha256": "22d8cce1886324ed5eecd6b9150611c1b95504a84bca79224b5f2b5e21d19553"
+    "source_contents_sha256": "c30e6d5dd7aec1d77129fb13633e6df141931245dd3babc59e0ace6f7255854a"
   },
   "documents": {
     "active_goal": null,
