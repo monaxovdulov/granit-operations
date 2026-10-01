@@ -8,7 +8,7 @@ import {
 export const PINNED_CATALOG_SOURCE_REPOSITORY =
   "monaxovdulov/landing-granit-static" as const;
 export const PINNED_CATALOG_SOURCE_BASE_SHA =
-  "8bd9a496637afa94ce7c48ba293751e7ee00c58a" as const;
+  "e0e17da2f86b088db70cf71dc232eab6abb6408a" as const;
 export const PINNED_CATALOG_VERSION = "landing-catalog.34e6b5f78a6e" as const;
 export const PINNED_CATALOG_CONTENT_HASH =
   "73086e6635f56a841df31552ef402caf2d2ac960d1e0d3f24f6aaae04139b710" as const;
