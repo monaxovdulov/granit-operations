@@ -11,7 +11,7 @@
     "provider_boundary": "apps/api/src/modules/ai/adapters/openai-live-v2-decision-generator.ts",
     "source_count": 148,
     "source_paths_sha256": "e208d996531994ef1ebdb9864c25c49161fe73dcdf4d17a4a8e38bec54bcb6a6",
-    "source_contents_sha256": "103c65f91b4f7eb4e381d3238f14e542636f3fa2c1627a3b5e585921cfa8ec5e"
+    "source_contents_sha256": "9483d96ce268959bd57fdff3fc419dce7fb4b2fedc4d4c1377aef3189741f33e"
   },
   "documents": {
     "active_goal": null,
@@ -56,26 +56,127 @@
       "apps/api/src/services"
     ],
     "entries": [
-      { "path": "apps/api/src/auth/cookies.ts", "targets": ["../modules/auth/cookies.js"] },
-      { "path": "apps/api/src/auth/manager-auth.ts", "targets": ["../modules/auth/manager-auth.js"] },
-      { "path": "apps/api/src/auth/session.ts", "targets": ["../modules/auth/session.js"] },
-      { "path": "apps/api/src/auth/yandex-oauth.ts", "targets": ["../modules/auth/yandex-oauth.js"] },
-      { "path": "apps/api/src/repositories/intake-repository.ts", "targets": ["../modules/conversations/repositories/intake-repository.js"] },
-      { "path": "apps/api/src/repositories/manager-auth-repository.ts", "targets": ["../modules/auth/repositories/manager-auth-repository.js"] },
-      { "path": "apps/api/src/repositories/postgres-intake-repository.ts", "targets": ["../modules/conversations/repositories/postgres-intake-repository.js"] },
-      { "path": "apps/api/src/repositories/postgres-manager-auth-repository.ts", "targets": ["../modules/auth/repositories/postgres-manager-auth-repository.js"] },
-      { "path": "apps/api/src/repositories/telegram-delivery-repository.ts", "targets": ["../modules/delivery/repositories/telegram-delivery-repository.js"] },
-      { "path": "apps/api/src/routes/manager-auth.ts", "targets": ["../modules/auth/routes/manager-auth-routes.js"] },
-      { "path": "apps/api/src/routes/manager-shell.ts", "targets": ["../modules/manager/routes/manager-shell-routes.js"] },
-      { "path": "apps/api/src/routes/manager.ts", "targets": ["../modules/manager/routes/manager-routes.js"] },
-      { "path": "apps/api/src/routes/public-intake.ts", "targets": ["../modules/intake/routes/public-intake-routes.js"] },
-      { "path": "apps/api/src/routes/telegram.ts", "targets": ["../modules/telegram/inbound/routes/telegram-routes.js"] },
-      { "path": "apps/api/src/services/postgres-advisory-lock.ts", "targets": ["../modules/delivery/services/postgres-advisory-lock.js"] },
-      { "path": "apps/api/src/services/public-intake-service.ts", "targets": ["../modules/intake/use-cases/public-intake-service.js"] },
-      { "path": "apps/api/src/services/public-widget-intake-service.ts", "targets": ["../modules/intake/use-cases/public-widget-intake-service.js"] },
-      { "path": "apps/api/src/services/telegram-bot-service.ts", "targets": ["../modules/telegram/inbound/telegram-bot-service.js"] },
-      { "path": "apps/api/src/services/telegram-delivery-service.ts", "targets": ["../modules/delivery/adapters/telegram-bot-api-delivery-provider.js", "../modules/delivery/services/telegram-delivery-service.js"] },
-      { "path": "apps/api/src/services/telegram-delivery-worker.ts", "targets": ["../modules/delivery/services/telegram-delivery-worker.js"] }
+      {
+        "path": "apps/api/src/auth/cookies.ts",
+        "targets": [
+          "../modules/auth/cookies.js"
+        ]
+      },
+      {
+        "path": "apps/api/src/auth/manager-auth.ts",
+        "targets": [
+          "../modules/auth/manager-auth.js"
+        ]
+      },
+      {
+        "path": "apps/api/src/auth/session.ts",
+        "targets": [
+          "../modules/auth/session.js"
+        ]
+      },
+      {
+        "path": "apps/api/src/auth/yandex-oauth.ts",
+        "targets": [
+          "../modules/auth/yandex-oauth.js"
+        ]
+      },
+      {
+        "path": "apps/api/src/repositories/intake-repository.ts",
+        "targets": [
+          "../modules/conversations/repositories/intake-repository.js"
+        ]
+      },
+      {
+        "path": "apps/api/src/repositories/manager-auth-repository.ts",
+        "targets": [
+          "../modules/auth/repositories/manager-auth-repository.js"
+        ]
+      },
+      {
+        "path": "apps/api/src/repositories/postgres-intake-repository.ts",
+        "targets": [
+          "../modules/conversations/repositories/postgres-intake-repository.js"
+        ]
+      },
+      {
+        "path": "apps/api/src/repositories/postgres-manager-auth-repository.ts",
+        "targets": [
+          "../modules/auth/repositories/postgres-manager-auth-repository.js"
+        ]
+      },
+      {
+        "path": "apps/api/src/repositories/telegram-delivery-repository.ts",
+        "targets": [
+          "../modules/delivery/repositories/telegram-delivery-repository.js"
+        ]
+      },
+      {
+        "path": "apps/api/src/routes/manager-auth.ts",
+        "targets": [
+          "../modules/auth/routes/manager-auth-routes.js"
+        ]
+      },
+      {
+        "path": "apps/api/src/routes/manager-shell.ts",
+        "targets": [
+          "../modules/manager/routes/manager-shell-routes.js"
+        ]
+      },
+      {
+        "path": "apps/api/src/routes/manager.ts",
+        "targets": [
+          "../modules/manager/routes/manager-routes.js"
+        ]
+      },
+      {
+        "path": "apps/api/src/routes/public-intake.ts",
+        "targets": [
+          "../modules/intake/routes/public-intake-routes.js"
+        ]
+      },
+      {
+        "path": "apps/api/src/routes/telegram.ts",
+        "targets": [
+          "../modules/telegram/inbound/routes/telegram-routes.js"
+        ]
+      },
+      {
+        "path": "apps/api/src/services/postgres-advisory-lock.ts",
+        "targets": [
+          "../modules/delivery/services/postgres-advisory-lock.js"
+        ]
+      },
+      {
+        "path": "apps/api/src/services/public-intake-service.ts",
+        "targets": [
+          "../modules/intake/use-cases/public-intake-service.js"
+        ]
+      },
+      {
+        "path": "apps/api/src/services/public-widget-intake-service.ts",
+        "targets": [
+          "../modules/intake/use-cases/public-widget-intake-service.js"
+        ]
+      },
+      {
+        "path": "apps/api/src/services/telegram-bot-service.ts",
+        "targets": [
+          "../modules/telegram/inbound/telegram-bot-service.js"
+        ]
+      },
+      {
+        "path": "apps/api/src/services/telegram-delivery-service.ts",
+        "targets": [
+          "../modules/delivery/adapters/telegram-bot-api-delivery-provider.js",
+          "../modules/delivery/services/telegram-delivery-service.js"
+        ]
+      },
+      {
+        "path": "apps/api/src/services/telegram-delivery-worker.ts",
+        "targets": [
+          "../modules/delivery/services/telegram-delivery-worker.js"
+        ]
+      }
     ]
   }
 }
